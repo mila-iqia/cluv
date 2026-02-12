@@ -11,9 +11,9 @@ Name inspired by "Cluster" + "UV" and from  `clush` (clustershell)
   - [ ] Gather ideas / feedback in a structured way.
 - [ ] Design phase
   - [ ] Triage the ideas and create an initial, minimal set of commands / features.
+  - [ ] Give an estimate of the time required to implement each command.
   - [ ] Write some stubs for tests for the commands, to help refine the design
   - [ ] Design a proof-of-concept solution for each command.
-  - [ ] Give an estimate of the time required to implement each command.
 - [ ] Implementation phase
 
 

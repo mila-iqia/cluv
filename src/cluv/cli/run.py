@@ -2,8 +2,12 @@ import argparse
 
 import rich_argparse
 
+from ..config import get_cluster_choices
+
 
 def add_run_args(subparsers: argparse._SubParsersAction):
+    cluster_choices = get_cluster_choices()
+    run_default_cluster = "all" if "all" in cluster_choices else cluster_choices[0]
     run_parser = subparsers.add_parser(
         "run",
         help="Run a command on a cluster",
@@ -11,8 +15,8 @@ def add_run_args(subparsers: argparse._SubParsersAction):
     )
     run_parser.add_argument(
         "cluster",
-        choices=["mila", "narval", "tamia", "all"],  # todo: get from a config.
-        default="all",
+        choices=cluster_choices,
+        default=run_default_cluster,
         metavar="<cluster>",
         help="The cluster to run the command on",
     )

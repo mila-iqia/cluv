@@ -28,11 +28,17 @@ def find_pyproject(start: Path | None = None) -> Path | None:
 
 
 def _clusters_from_value(value: object) -> list[str] | None:
-    if isinstance(value, list) and value and all(
-        isinstance(item, str) and item.strip() for item in value
-    ):
-        return [item.strip() for item in value]
-    return None
+    if not isinstance(value, list) or not value:
+        return None
+    clusters: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            return None
+        cluster = item.strip()
+        if not cluster:
+            return None
+        clusters.append(cluster)
+    return clusters
 
 
 def load_cluv_config(pyproject_path: Path | None = None) -> dict[str, object]:
@@ -64,7 +70,7 @@ def get_default_cluster(
     cluster_choices: list[str] | None = None,
     pyproject_path: Path | None = None,
 ) -> str:
-    choices = cluster_choices or get_cluster_choices(pyproject_path)
+    choices = get_cluster_choices(pyproject_path) if cluster_choices is None else cluster_choices
     if not choices:
-        choices = list(DEFAULT_CLUSTERS)
+        raise ValueError("Cluster choices must contain at least one cluster name.")
     return "all" if "all" in choices else choices[0]

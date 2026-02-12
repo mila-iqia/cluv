@@ -51,6 +51,7 @@ def load_cluv_config(pyproject_path: Path | None = None) -> dict[str, object]:
 
 
 def get_cluster_choices(pyproject_path: Path | None = None) -> list[str]:
+    """Return configured clusters or the defaults when config is missing/invalid."""
     clusters = _clusters_from_value(load_cluv_config(pyproject_path).get("clusters"))
     if clusters is not None:
         return clusters
@@ -62,6 +63,4 @@ def get_default_cluster(
     pyproject_path: Path | None = None,
 ) -> str:
     choices = cluster_choices or get_cluster_choices(pyproject_path)
-    if not choices:
-        return DEFAULT_CLUSTERS[0]
     return "all" if "all" in choices else choices[0]

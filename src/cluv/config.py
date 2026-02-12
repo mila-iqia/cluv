@@ -62,6 +62,4 @@ def get_default_cluster(
     pyproject_path: Path | None = None,
 ) -> str:
     choices = cluster_choices or get_cluster_choices(pyproject_path)
-    if not choices:
-        choices = list(DEFAULT_CLUSTERS)
     return "all" if "all" in choices else choices[0]

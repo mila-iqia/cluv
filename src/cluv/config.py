@@ -45,9 +45,9 @@ def _clusters_from_value(value: object) -> list[str]:
 
 
 def load_cluv_config(pyproject_path: Path | None = None) -> dict[str, object]:
-    path = pyproject_path or find_pyproject()
-    if path is None:
+    if pyproject_path is None:
         return {}
+    path = pyproject_path
     try:
         with path.open("rb") as handle:
             data = tomllib.load(handle)
@@ -82,6 +82,7 @@ def get_default_cluster(
     cluster_choices: list[str] | None = None,
     pyproject_path: Path | None = None,
 ) -> str:
+    """Return the default cluster, validating provided cluster choices."""
     choices = get_cluster_choices(pyproject_path) if cluster_choices is None else cluster_choices
     if not choices:
         raise ValueError("Cluster choices must contain at least one cluster name.")

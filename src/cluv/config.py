@@ -30,7 +30,7 @@ def find_pyproject(start: Path | None = None) -> Path | None:
 
 def _clusters_from_value(value: object) -> list[str]:
     if not isinstance(value, list):
-        raise ValueError("cluv clusters must be a list of non-empty strings.")
+        raise ValueError("cluv clusters must be a list.")
     if not value:
         raise ValueError("cluv clusters must contain at least one entry.")
     clusters: list[str] = []
@@ -51,7 +51,8 @@ def load_cluv_config(pyproject_path: Path | None = None) -> dict[str, object]:
     try:
         with path.open("rb") as handle:
             data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        warnings.warn(f"Unable to read {path}: {exc}")
         return {}
     tool_config = data.get("tool", {})
     if isinstance(tool_config, dict):
@@ -63,13 +64,15 @@ def load_cluv_config(pyproject_path: Path | None = None) -> dict[str, object]:
 
 def get_cluster_choices(pyproject_path: Path | None = None) -> list[str]:
     """Return configured clusters or the defaults when config is missing/invalid."""
-    raw_clusters = load_cluv_config(pyproject_path).get("clusters")
+    config_path = pyproject_path or find_pyproject()
+    raw_clusters = load_cluv_config(config_path).get("clusters")
     if raw_clusters is None:
         return list(DEFAULT_CLUSTERS)
     try:
         return _clusters_from_value(raw_clusters)
     except ValueError as exc:
-        warnings.warn(str(exc))
+        location = f" in {config_path}" if config_path else ""
+        warnings.warn(f"Invalid [tool.cluv].clusters{location}: {exc}")
     return list(DEFAULT_CLUSTERS)
 
 

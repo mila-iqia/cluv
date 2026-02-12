@@ -2,12 +2,11 @@ import argparse
 
 import rich_argparse
 
-from ..config import get_cluster_choices, get_default_cluster
+from ..config import get_cluster_config
 
 
 def add_run_args(subparsers: argparse._SubParsersAction):
-    cluster_choices = get_cluster_choices()
-    run_default_cluster = get_default_cluster(cluster_choices)
+    cluster_choices, run_default_cluster = get_cluster_config()
     run_parser = subparsers.add_parser(
         "run",
         help="Run a command on a cluster",

@@ -73,7 +73,7 @@ def get_cluster_choices(pyproject_path: Path | None = None) -> list[str]:
     try:
         return _clusters_from_value(raw_clusters)
     except ValueError as exc:
-        location = f" in {config_path}" if config_path else ""
+        location = f" in {config_path}"
         warnings.warn(f"Invalid [tool.cluv].clusters{location}: {exc}")
     return list(DEFAULT_CLUSTERS)
 
@@ -86,3 +86,8 @@ def get_default_cluster(
     if not choices:
         raise ValueError("Cluster choices must contain at least one cluster name.")
     return "all" if "all" in choices else choices[0]
+
+
+def get_cluster_config(pyproject_path: Path | None = None) -> tuple[list[str], str]:
+    cluster_choices = get_cluster_choices(pyproject_path)
+    return cluster_choices, get_default_cluster(cluster_choices)

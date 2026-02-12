@@ -14,7 +14,7 @@ from .cli.init import init
 from .cli.run import run
 from .cli.status import status
 from .cli.sync import sync
-from .config import get_cluster_choices, get_default_cluster
+from .config import get_cluster_config
 
 
 def main(argv: list[str] | None = None):
@@ -32,8 +32,7 @@ def main(argv: list[str] | None = None):
     )
     init_parser.set_defaults(func=init)
 
-    cluster_choices = get_cluster_choices()
-    run_default_cluster = get_default_cluster(cluster_choices)
+    cluster_choices, run_default_cluster = get_cluster_config()
 
     run_parser = subparsers.add_parser(
         "run",

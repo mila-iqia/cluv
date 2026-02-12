@@ -12,6 +12,7 @@ Stretch goal (might be useful):
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 import tomllib
 import warnings
@@ -62,28 +63,30 @@ def load_cluv_config(pyproject_path: Path | None = None) -> dict[str, object]:
     return {}
 
 
-def get_cluster_choices(pyproject_path: Path | None = None) -> list[str]:
-    """Return configured clusters or the defaults when config is missing/invalid."""
+@lru_cache(maxsize=None)
+def _get_cluster_choices_cached(pyproject_path: Path | None = None) -> tuple[str, ...]:
     config_path = pyproject_path or find_pyproject()
     if config_path is None:
-        return list(DEFAULT_CLUSTERS)
+        return DEFAULT_CLUSTERS
     raw_clusters = load_cluv_config(config_path).get("clusters")
     if raw_clusters is None:
-        return list(DEFAULT_CLUSTERS)
+        return DEFAULT_CLUSTERS
     try:
-        return _clusters_from_value(raw_clusters)
+        return tuple(_clusters_from_value(raw_clusters))
     except ValueError as exc:
         location = f" in {config_path}"
         warnings.warn(f"Invalid [tool.cluv].clusters{location}: {exc}")
-    return list(DEFAULT_CLUSTERS)
+    return DEFAULT_CLUSTERS
 
 
-def get_default_cluster(
-    cluster_choices: list[str] | None = None,
-    pyproject_path: Path | None = None,
-) -> str:
+def get_cluster_choices(pyproject_path: Path | None = None) -> list[str]:
+    """Return configured clusters or the defaults when config is missing/invalid."""
+    return list(_get_cluster_choices_cached(pyproject_path))
+
+
+def get_default_cluster(cluster_choices: list[str] | None = None) -> str:
     """Return the default cluster, validating provided cluster choices."""
-    choices = get_cluster_choices(pyproject_path) if cluster_choices is None else cluster_choices
+    choices = get_cluster_choices() if cluster_choices is None else cluster_choices
     if not choices:
         raise ValueError("Cluster choices must contain at least one cluster name.")
     return "all" if "all" in choices else choices[0]

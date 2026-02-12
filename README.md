@@ -2,7 +2,7 @@
 
 Name inspired by "Cluster" + "UV" and from  `clush` (clustershell)
 
-> WIP: This is still a work in progress.
+> WIP: This isn't even fully designed yet. Nothing is implemented, there are only stubs.
 
 ## Project Roadmap
 

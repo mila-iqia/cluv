@@ -29,7 +29,7 @@ def find_pyproject(start: Path | None = None) -> Path | None:
 
 def _clusters_from_value(value: object) -> list[str] | None:
     if isinstance(value, list) and value and all(isinstance(item, str) for item in value):
-        return value
+        return list(value)
     return None
 
 
@@ -62,4 +62,6 @@ def get_default_cluster(
     pyproject_path: Path | None = None,
 ) -> str:
     choices = cluster_choices or get_cluster_choices(pyproject_path)
+    if not choices:
+        return DEFAULT_CLUSTERS[0]
     return "all" if "all" in choices else choices[0]

@@ -55,3 +55,13 @@ def get_cluster_choices(pyproject_path: Path | None = None) -> list[str]:
     if clusters is not None:
         return clusters
     return list(DEFAULT_CLUSTERS)
+
+
+def get_default_cluster(
+    cluster_choices: list[str] | None = None,
+    pyproject_path: Path | None = None,
+) -> str:
+    choices = cluster_choices or get_cluster_choices(pyproject_path)
+    if not choices:
+        choices = list(DEFAULT_CLUSTERS)
+    return "all" if "all" in choices else choices[0]

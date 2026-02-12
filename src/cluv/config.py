@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import tomllib
+import warnings
 
 DEFAULT_CLUSTERS: tuple[str, ...] = ("mila", "narval", "tamia", "all")
 
@@ -27,16 +28,18 @@ def find_pyproject(start: Path | None = None) -> Path | None:
     return None
 
 
-def _clusters_from_value(value: object) -> list[str] | None:
-    if not isinstance(value, list) or not value:
-        return None
+def _clusters_from_value(value: object) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("cluv clusters must be a list of non-empty strings.")
+    if not value:
+        raise ValueError("cluv clusters must contain at least one entry.")
     clusters: list[str] = []
     for item in value:
         if not isinstance(item, str):
-            return None
+            raise ValueError("cluv clusters must contain only strings.")
         cluster = item.strip()
         if not cluster:
-            return None
+            raise ValueError("cluv clusters must not contain blank entries.")
         clusters.append(cluster)
     return clusters
 
@@ -60,9 +63,13 @@ def load_cluv_config(pyproject_path: Path | None = None) -> dict[str, object]:
 
 def get_cluster_choices(pyproject_path: Path | None = None) -> list[str]:
     """Return configured clusters or the defaults when config is missing/invalid."""
-    clusters = _clusters_from_value(load_cluv_config(pyproject_path).get("clusters"))
-    if clusters is not None:
-        return clusters
+    raw_clusters = load_cluv_config(pyproject_path).get("clusters")
+    if raw_clusters is None:
+        return list(DEFAULT_CLUSTERS)
+    try:
+        return _clusters_from_value(raw_clusters)
+    except ValueError as exc:
+        warnings.warn(str(exc))
     return list(DEFAULT_CLUSTERS)
 
 
@@ -70,7 +77,7 @@ def get_default_cluster(
     cluster_choices: list[str] | None = None,
     pyproject_path: Path | None = None,
 ) -> str:
-    choices = get_cluster_choices(pyproject_path) if cluster_choices is None else cluster_choices
-    if not choices:
+    if cluster_choices is not None and not cluster_choices:
         raise ValueError("Cluster choices must contain at least one cluster name.")
+    choices = get_cluster_choices(pyproject_path) if cluster_choices is None else cluster_choices
     return "all" if "all" in choices else choices[0]

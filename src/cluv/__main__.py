@@ -14,6 +14,7 @@ from .cli.init import init
 from .cli.run import run
 from .cli.status import status
 from .cli.sync import sync
+from .config import get_cluster_config
 
 
 def main(argv: list[str] | None = None):
@@ -31,6 +32,8 @@ def main(argv: list[str] | None = None):
     )
     init_parser.set_defaults(func=init)
 
+    cluster_choices, run_default_cluster = get_cluster_config()
+
     run_parser = subparsers.add_parser(
         "run",
         help="Run a command on a cluster.",
@@ -38,8 +41,8 @@ def main(argv: list[str] | None = None):
     )
     run_parser.add_argument(
         "cluster",
-        choices=["mila", "narval", "tamia", "all"],  # todo: get from a config.
-        default="all",
+        choices=cluster_choices,
+        default=run_default_cluster,
         metavar="<cluster>",
         help="The cluster to run the command on.",
     )
@@ -59,7 +62,7 @@ def main(argv: list[str] | None = None):
     )
     sync_parser.add_argument(
         "cluster",
-        choices=["mila", "narval", "tamia", "all"],  # todo: get from a config.
+        choices=cluster_choices,
         default=(),
         nargs="*",
         metavar="<cluster>",

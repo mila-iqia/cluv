@@ -1,13 +1,23 @@
 [project]
 name = "cluv"
-version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["rich-argparse>=1.7.2", "simple-parsing>=0.1.8"]
+dynamic = ["version"]
 
 [tool.uv]
 package = true
+
+[build-system]
+requires = ["hatchling", "uv-dynamic-versioning"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["cluv"]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
 
 [project.scripts]
 cluv = "cluv.__main__:main"

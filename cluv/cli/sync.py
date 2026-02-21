@@ -1,10 +1,20 @@
 import asyncio
+import functools
 import logging
 import subprocess
+import sys
+import textwrap
 from pathlib import Path, PurePosixPath
 
+import milatools.cli
+import rich.console
 from cluv.config import find_pyproject, get_config
 from milatools.utils.local_v2 import LocalV2
+from milatools.utils.parallel_progress import (
+    AsyncTaskFn,
+    ReportProgressFn,
+    run_async_tasks_with_progress_bar,
+)
 from milatools.utils.remote_v2 import (
     RemoteV2,
     control_socket_is_running_async,
@@ -12,6 +22,8 @@ from milatools.utils.remote_v2 import (
 )
 
 logger = logging.getLogger(__name__)
+
+milatools.cli.console = rich.console.Console(record=True, file=sys.stdout)
 
 
 async def sync(clusters: list[str] = []):
@@ -36,10 +48,25 @@ async def sync(clusters: list[str] = []):
 
     # TODO: Do we raise an error if we fail to connect to a given cluster?
     # TODO: Add an --ignore flag to ignore some clusters?
+    logger.info(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
+
+    tasks: list[AsyncTaskFn] = []
+    task_descriptions: list[str] = []
+
+    this_cluster = "mila"  # TODO
+    for cluster in clusters:
+        tasks.append(functools.partial(sync_task_function, cluster=cluster))
+        task_descriptions.append(f"{this_cluster} -> {cluster}")
+
+    bob = await run_async_tasks_with_progress_bar(
+        async_task_fns=tasks,
+        task_descriptions=task_descriptions,
+        overall_progress_task_description="[green]Syncing project",
+    )
+    return bob
+    # Other approach: Do each step for all clusters before moving to the next step.
     remotes = await login(clusters)
 
-    logger.info(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
-    remotes = await asyncio.gather(*(RemoteV2.connect(cluster) for cluster in clusters))
     await install_uv(remotes)
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_config()
@@ -51,6 +78,40 @@ async def sync(clusters: list[str] = []):
         )
     )
     if config.results_path:
+        await fetch_results(remotes, config.results_path)
+
+
+async def sync_task_function(
+    report_progress: ReportProgressFn,
+    cluster: str,
+):
+    """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
+    project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
+    config = get_config()
+
+    def _update_progress(progress: int, status: str, total: int):
+        info = textwrap.shorten(status, 50, placeholder="...")
+        report_progress(progress=progress, total=total, info=info)
+
+    _update_progress(0, "Logging in", 5)
+    clusters = [cluster]
+    remotes = await login(clusters)
+
+    _update_progress(1, "Installing UV", 5)
+    await install_uv(remotes)
+
+    _update_progress(3, "Setting up project", 5)
+    await clone_project(remotes, project_path)
+
+    _update_progress(4, "Running 'uv sync'", 5)
+    await asyncio.gather(
+        *(
+            remote.run_async(f"bash -l -c 'uv --directory={project_path} sync'")
+            for remote in remotes
+        )
+    )
+    if config.results_path:
+        _update_progress(5, "Fetching results", 6)
         await fetch_results(remotes, config.results_path)
 
 
@@ -67,14 +128,9 @@ async def login(clusters: list[str]) -> list[RemoteV2]:
         f"Will attempt to connect to the following clusters: {[cluster for cluster, remote in zip(clusters, connections) if not remote]}"
     )
     # Need to do each thing sequentially to avoid triggering multiple 2FA prompts at the same time.
-    new_connections = [
-        await RemoteV2.connect(cluster)
-        for cluster, remote in zip(clusters, connections)
-        if not remote
-    ]
     return [
-        existing_connection if existing_connection else new_connection
-        for existing_connection, new_connection in zip(connections, new_connections)
+        remote if remote is not None else (await RemoteV2.connect(cluster))
+        for cluster, remote in zip(clusters, connections)
     ]
 
 

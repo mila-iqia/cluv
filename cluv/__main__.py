@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None):
+    setup_logging(verbose=0, force=False)
     parser = simple_parsing.ArgumentParser(
         description=__doc__,
         formatter_class=rich_argparse.RichHelpFormatter,
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None):
     args_dict = vars(args)
 
     verbose: int = args_dict.pop("verbose")
-    setup_logging(verbose=verbose)
+    setup_logging(verbose=verbose, force=True)
     args_dict.pop("<command>")
     function: Callable = args_dict.pop("func")
 
@@ -86,13 +87,13 @@ def main(argv: list[str] | None = None):
             return asyncio.run(function(**args_dict))
         return function(**args_dict)
     except subprocess.CalledProcessError as err:
-        logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}")
+        logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}:")
         logger.error(f"Standard output:\n{err.output}")
         logger.error(f"Standard error:\n{err.stderr}")
         sys.exit(err.returncode)
 
 
-def setup_logging(verbose: int | None):
+def setup_logging(verbose: int | None, force: bool = False):
     verbose = verbose or 0
     if not sys.stdout.isatty():
         # Widen the log width when running in an sbatch script.
@@ -101,7 +102,6 @@ def setup_logging(verbose: int | None):
         console = None
     logging.basicConfig(
         level=logging.WARNING,
-        # Add the [{local_rank}/{num_processes}] prefix to log messages
         format="%(message)s",
         handlers=[
             rich.logging.RichHandler(
@@ -111,7 +111,7 @@ def setup_logging(verbose: int | None):
                 markup=True,
             )
         ],
-        force=True,
+        force=force,
     )
     if verbose == 0:
         # logger.setLevel(logging.ERROR)

@@ -3,14 +3,13 @@ import logging
 import subprocess
 from pathlib import Path, PurePosixPath
 
+from cluv.config import find_pyproject, get_config
 from milatools.utils.local_v2 import LocalV2
 from milatools.utils.remote_v2 import (
     RemoteV2,
     control_socket_is_running_async,
     get_controlpath_for,
 )
-
-from cluv.config import find_pyproject, get_config
 
 logger = logging.getLogger(__name__)
 
@@ -114,15 +113,16 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     - Setup a post-receive hook that checks out the code to {project_path}, or
     - Just do a `git clone {project_path}.git {project_path}` over SSH, and then remember to do a push here and a git fetch there.
     """
-    git_remotes = subprocess.getoutput("git remote").splitlines()
+    _git_remotes = subprocess.getoutput("git remote").splitlines()
     clusters_missing_a_remote = [
-        remote for remote in remotes if remote.hostname not in git_remotes
+        remote for remote in remotes if remote.hostname not in _git_remotes
     ]
     logger.info(
         f"Will setup a git remote for the following clusters: {clusters_missing_a_remote}"
     )
 
-    # TODO: Also add a remote for GitHub.
+    # TODO: Also add a remote for GitHub in the cloned repos at {project_path} on the remote clusters!
+    # Also, maybe use a name like mila-cluv instead of origin for the name of the {project_path}.git remote?
 
     for login_node in clusters_missing_a_remote:
         LocalV2.run(
@@ -134,14 +134,46 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
                 f"{login_node.hostname}:{project_path}.git",
             ),
         )
+        # TODO: main/master default branch name seems to cause an issue on trillium and vulcan.
+        # We might need to figure out which is used in the current project and use that.
+        initial_branch = (
+            "master" if "master" in subprocess.getoutput("git branch") else "main"
+        )
         await login_node.run_async(
             # BUG: on Nibi, we get command not found: 'git' unless we do bash -l -c!
-            f"bash -l -c 'mkdir -p {project_path}.git && git init --bare {project_path}.git'",
+            f"bash -l -c 'mkdir -p {project_path}.git && git init --bare {project_path}.git --initial-branch={initial_branch}'",
             display=True,
-            hide="stderr",
         )
-        LocalV2.run(("git", "push", login_node.hostname))
-
+        # NOTE: Seems okay to push to that remote (the bare {project}.git), this doesn't delete other branches there.
+        LocalV2.run(("git", "push", login_node.hostname, "--prune"))
+    # For each cluster where the project isn't cloned yet, clone it.
+    _clusters_without_clones_result = await asyncio.gather(
+        *(
+            remote.run_async(
+                f"test -d {project_path}",
+                warn=True,
+                hide=True,
+                display=False,
+            )
+            for remote in remotes
+        )
+    )
+    clusters_without_clones = [
+        remote
+        for remote, result in zip(remotes, _clusters_without_clones_result)
+        if result.returncode != 0
+    ]
+    if clusters_without_clones:
+        logger.debug(
+            f"Clusters where the project isn't cloned yet: {[remote.hostname for remote in clusters_without_clones]}   "
+        )
+        await asyncio.gather(
+            *(
+                remote.run_async(f"git clone {project_path}.git {project_path}")
+                for remote in clusters_without_clones
+            )
+        )
+    else:
         await asyncio.gather(
             *(
                 # TODO: The project might already be cloned on some clusters.

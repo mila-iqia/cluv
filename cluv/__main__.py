@@ -20,7 +20,7 @@ import simple_parsing
 from cluv.config import get_config
 
 from .cli.init import init
-from .cli.login import login
+from .cli.login import login_cli
 from .cli.run import add_run_args
 from .cli.status import status
 from .cli.sync import sync
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None):
         nargs="*",
         help="The cluster(s) to login to. Leave empty to login to all clusters.",
     )
-    login_parser.set_defaults(func=login)
+    login_parser.set_defaults(func=login_cli)
 
     sync_parser = subparsers.add_parser(
         "sync",

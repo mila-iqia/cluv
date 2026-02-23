@@ -14,6 +14,12 @@ from cluv.config import get_config
 logger = logging.getLogger(__name__)
 
 
+async def login_cli(clusters: list[str]) -> None:
+    """Create an SSH connection with the given clusters, reusing existing connections when possible to avoid triggering 2FA prompts."""
+    # Need a function that returns None for the CLI. Other functions (ex. sync) use `login` below as well.
+    await login(clusters)
+
+
 async def login(clusters: list[str]) -> list[RemoteV2]:
     """Create an SSH connection with the given clusters, reusing existing connections when possible to avoid triggering 2FA prompts."""
     clusters = clusters or get_config().clusters

@@ -24,6 +24,7 @@ from cluv.config import find_pyproject, get_config
 logger = logging.getLogger(__name__)
 
 milatools.cli.console = rich.console.Console(record=True, file=sys.stdout)
+console = rich.console.Console()
 
 
 async def sync(clusters: list[str] = []):
@@ -43,21 +44,23 @@ async def sync(clusters: list[str] = []):
     """
     clusters = clusters or get_config().clusters
     # TODO: Figure out which Slurm cluster we're currently on. Assuming mila for now.
-    if "mila" in clusters:
-        clusters.remove("mila")
+    this_cluster = "mila"
+    if this_cluster in clusters:
+        clusters.remove(this_cluster)
+
+    # Git push first?
+    await LocalV2.run_async("git push", hide=False)
 
     # TODO: Do we raise an error if we fail to connect to a given cluster?
     # TODO: Add an --ignore flag to ignore some clusters?
-    logger.info(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
+    console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
-
-    this_cluster = "mila"  # TODO
-    for cluster in clusters:
-        remote = await RemoteV2.connect(cluster)
+    remotes = await login(clusters)
+    for remote in remotes:
         tasks.append(functools.partial(sync_task_function, remote=remote))
-        task_descriptions.append(f"{this_cluster} -> {cluster}")
+        task_descriptions.append(f"{this_cluster} -> {remote.hostname}")
 
     await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
@@ -141,52 +144,17 @@ async def install_uv(remotes: list[RemoteV2]):
 async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     """Setup the project repo on all the remote clusters.
 
-    IDEA:
-    - Setup a bare git repo on each cluster at {project_path}.git
-    - Setup a git remote on this machine for each cluster pointing to that new bare repo.
-    - When running jobs, push to the cluster's bare repo
-    Then, since we also want the code to be materialized on the remote clusters at {project_path},
-    not just in a bare repo, we can do one of the following:
-    - Setup a post-receive hook that checks out the code to {project_path}, or
-    - Just do a `git clone {project_path}.git {project_path}` over SSH, and then remember to do a push here and a git fetch there.
+    New idea:
+    - Assume GitHub. Push to GitHub if needed. Clone from github on the remotes.
+    - Worry about authentication later, just raise an error if need be for now.
+
     """
-    _git_remotes = subprocess.getoutput("git remote").splitlines()
-
     current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
+    github_repo_url = subprocess.getoutput("git config --get remote.origin.url").strip()
 
-    clusters_missing_a_remote = [
-        remote for remote in remotes if remote.hostname not in _git_remotes
-    ]
-    logger.info(
-        f"Will setup a git remote for the following clusters: {clusters_missing_a_remote}"
-    )
+    # TODO: Scp the ~/.git-credentials file if needed?
+    # Or configure the config credential-helper to store first?
 
-    # TODO: Also add a remote for GitHub in the cloned repos at {project_path} on the remote clusters!
-    # Also, maybe use a name like mila-cluv instead of origin for the name of the {project_path}.git remote?
-
-    for login_node in clusters_missing_a_remote:
-        LocalV2.run(
-            (
-                "git",
-                "remote",
-                "add",
-                login_node.hostname,
-                f"{login_node.hostname}:{project_path}.git",
-            ),
-        )
-        # TODO: main/master default branch name seems to cause an issue on trillium and vulcan.
-        # We might need to figure out which is used in the current project and use that.
-        initial_branch = (
-            "master" if "master" in subprocess.getoutput("git branch") else "main"
-        )
-        await login_node.run_async(
-            # BUG: on Nibi, we get command not found: 'git' unless we do bash -l -c!
-            f"bash -l -c 'mkdir -p {project_path}.git && "
-            f"git init --bare {project_path}.git --initial-branch={initial_branch}'",
-            display=True,
-        )
-        # NOTE: Seems okay to push to that remote (the bare {project}.git), this doesn't delete other branches there.
-        LocalV2.run(("git", "push", login_node.hostname, current_git_branch))
     # For each cluster where the project isn't cloned yet, clone it.
     _clusters_without_clones_result = await asyncio.gather(
         *(
@@ -204,56 +172,19 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
         for remote, result in zip(remotes, _clusters_without_clones_result)
         if result.returncode != 0
     ]
-    if clusters_without_clones:
-        logger.debug(
-            f"Clusters where the project isn't cloned yet: {[remote.hostname for remote in clusters_without_clones]}   "
+    logger.debug(
+        f"Clusters where the project isn't cloned yet: {[remote.hostname for remote in clusters_without_clones]}   "
+    )
+    await asyncio.gather(
+        *(
+            remote.run_async(f"git clone {github_repo_url} {project_path}")
+            for remote in clusters_without_clones
         )
-        await asyncio.gather(
-            *(
-                remote.run_async(f"git clone {project_path}.git {project_path}")
-                for remote in clusters_without_clones
-            )
-        )
-    else:
-        await asyncio.gather(
-            *(
-                # TODO: The project might already be cloned on some clusters.
-                remote.run_async(
-                    f"git clone {project_path}.git {project_path} --branch={current_git_branch}",
-                    warn=True,
-                    hide=True,
-                )
-                for remote in remotes
-            )
-        )
-
-    # Setup post-receive hook maybe?
-    # TODO: Look into setting up a git hook on the remote, it could be useful
-    # to run things or checkout the repo automatically when we push.
-
-    # await asyncio.gather(
-    #     *(
-    #         # Add a pre-receive hook in that bare remote repo, so that it always checks out stuff.
-    #         remote.run_async(
-    #             f"""mkdir -p {project_path}.git/hooks && ""echo '#!/bin/bash\n"
-    #             f"git --work-tree={project_path} --git-dir={project_path}.git checkout -f\n' > {project_path}.git/hooks/post-receive && "
-    #             f"chmod +x {project_path}.git/hooks/post-receive""",
-    #             display=True,
-    #         )
-    #         for remote in remotes
-    #     )
-    # )
-
-    for remote in remotes:
-        LocalV2.run(("git", "push", remote.hostname, current_git_branch))
+    )
 
     await asyncio.gather(
         *(
-            remote.run_async(
-                f"git -C {project_path} fetch --all --prune",
-                # warn=True,
-                hide=False,
-            )
+            remote.run_async(f"git -C {project_path} fetch --all --prune")
             for remote in remotes
         )
     )
@@ -268,6 +199,9 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
             )
             for remote in remotes
         )
+    )
+    await asyncio.gather(
+        *(remote.run_async(f"git -C {project_path} pull") for remote in remotes)
     )
 
 

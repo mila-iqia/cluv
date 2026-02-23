@@ -58,7 +58,7 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
             f"[orange]No [tool.cluv] section found in {pyproject_path}, using defaults.[/orange]"
         )
     )
-    return CluvConfig(clusters=["mila", "tamia"])
+    return CluvConfig(clusters=[])
 
 
 def get_cluster_choices() -> list[str]:

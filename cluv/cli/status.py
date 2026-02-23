@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
-from datetime import timedelta
+from dataclasses import dataclass
 
 from rich import box
-from rich.columns import Columns
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -15,12 +13,21 @@ from rich.text import Text
 # Data layer – replace these with real implementations later
 # ---------------------------------------------------------------------------
 
-CLUSTERS = ("mila", "narval", "tamia", "rorqual", "fir", "nibi", "killarney", "vulcan", "trillium")
+CLUSTERS = (
+    "mila",
+    "narval",
+    "tamia",
+    "rorqual",
+    "fir",
+    "nibi",
+    "killarney",
+    "vulcan",
+    "trillium",
+)
 
-MOCK_DATA_SEED = 42          # deterministic seed so the display is reproducible
-OFFLINE_PROBABILITY = 0.08   # ~8 % chance of a cluster being down/maintenance
+MOCK_DATA_SEED = 42  # deterministic seed so the display is reproducible
+OFFLINE_PROBABILITY = 0.08  # ~8 % chance of a cluster being down/maintenance
 
-_CLUSTER_SEEDS: dict[str, int] = {name: i for i, name in enumerate(CLUSTERS)}
 
 # Rough GPU pool sizes per cluster (total GPUs available on the cluster).
 _GPU_TOTALS: dict[str, int] = {
@@ -37,15 +44,15 @@ _GPU_TOTALS: dict[str, int] = {
 
 # Storage quota in GiB (home, scratch)
 _STORAGE_QUOTAS: dict[str, tuple[int, int]] = {
-    "mila":      (50,   5000),
-    "narval":    (50,  10000),
-    "tamia":     (100,  8000),
-    "rorqual":   (100, 12000),
-    "fir":       (50,   6000),
-    "nibi":      (50,   4000),
-    "killarney": (100,  7500),
-    "vulcan":    (100,  9000),
-    "trillium":  (50,  15000),
+    "mila": (50, 5000),
+    "narval": (50, 10000),
+    "tamia": (100, 8000),
+    "rorqual": (100, 12000),
+    "fir": (50, 6000),
+    "nibi": (50, 4000),
+    "killarney": (100, 7500),
+    "vulcan": (100, 9000),
+    "trillium": (50, 15000),
 }
 
 
@@ -63,6 +70,7 @@ class JobStats:
 @dataclass
 class StorageStats:
     """Disk usage as (used_gib, quota_gib) for $HOME and $SCRATCH."""
+
     home_used: float
     home_quota: int
     scratch_used: float
@@ -78,8 +86,8 @@ class ClusterStatus:
     gpu_model: str
     jobs: JobStats
     storage: StorageStats
-    avg_wait_min: int          # estimated queue wait time in minutes
-    avg_gpu_util_pct: float    # average GPU utilisation across running jobs
+    avg_wait_min: int  # estimated queue wait time in minutes
+    avg_gpu_util_pct: float  # average GPU utilisation across running jobs
 
 
 def get_mock_cluster_status(username: str = "you") -> list[ClusterStatus]:
@@ -147,6 +155,7 @@ def get_mock_cluster_status(username: str = "you") -> list[ClusterStatus]:
 # UI helpers
 # ---------------------------------------------------------------------------
 
+
 def _bar(used: float, total: float, width: int = 10) -> Text:
     """Return a coloured block-character progress bar."""
     ratio = used / total if total else 0
@@ -201,6 +210,7 @@ def _util_text(pct: float) -> Text:
 # ---------------------------------------------------------------------------
 # Main display
 # ---------------------------------------------------------------------------
+
 
 def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     table = Table(
@@ -272,8 +282,12 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
         if not c.online:
             continue
         # Approximate user's cancelled count proportionally to their share of running jobs.
-        my_can = max(0, int(c.jobs.cancelled * c.jobs.my_running / max(c.jobs.running, 1)))
-        table.add_row(c.name, str(c.jobs.my_running), str(c.jobs.my_pending), str(my_can))
+        my_can = max(
+            0, int(c.jobs.cancelled * c.jobs.my_running / max(c.jobs.running, 1))
+        )
+        table.add_row(
+            c.name, str(c.jobs.my_running), str(c.jobs.my_pending), str(my_can)
+        )
         total_run += c.jobs.my_running
         total_pend += c.jobs.my_pending
         total_can += my_can

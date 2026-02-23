@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import logging
 import tomllib
-import warnings
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -51,12 +53,12 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
 
     if isinstance(tool_config, dict) and (cluv_config := tool_config.get("cluv", {})):
         return CluvConfig(**cluv_config)
-    warnings.warn(
+    logger.warning(
         UserWarning(
-            f"No [tool.cluv] section found in {pyproject_path}, using defaults."
+            f"[orange]No [tool.cluv] section found in {pyproject_path}, using defaults.[/orange]"
         )
     )
-    return CluvConfig(clusters=["mila", "tamia", "rorqual"])
+    return CluvConfig(clusters=["mila", "tamia"])
 
 
 def get_cluster_choices() -> list[str]:

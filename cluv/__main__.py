@@ -20,6 +20,7 @@ import simple_parsing
 from cluv.config import get_config
 
 from .cli.init import init
+from .cli.login import login
 from .cli.run import add_run_args
 from .cli.status import status
 from .cli.sync import sync
@@ -47,6 +48,20 @@ def main(argv: list[str] | None = None):
 
     config = get_config()
     add_run_args(subparsers)
+
+    login_parser = subparsers.add_parser(
+        "login",
+        help="Login to the specified clusters.",
+        formatter_class=parser.formatter_class,
+    )
+    _add_v_arg(login_parser)
+    login_parser.add_argument(
+        "clusters",
+        choices=(config.clusters) if config.clusters else None,
+        nargs="*",
+        help="The cluster(s) to login to. Leave empty to login to all clusters.",
+    )
+    login_parser.set_defaults(func=login)
 
     sync_parser = subparsers.add_parser(
         "sync",
@@ -113,13 +128,17 @@ def setup_logging(verbose: int | None, force: bool = False):
         ],
         force=force,
     )
+    cluv_logger = logging.getLogger("cluv")
     if verbose == 0:
         # logger.setLevel(logging.ERROR)
         logger.setLevel(logging.WARNING)
+        cluv_logger.setLevel(logging.WARNING)
     elif verbose == 1:
         logger.setLevel(logging.INFO)
+        cluv_logger.setLevel(logging.INFO)
     elif verbose >= 2:
         logger.setLevel(logging.DEBUG)
+        cluv_logger.setLevel(logging.DEBUG)
 
     logging.getLogger("milatools").setLevel(
         logging.DEBUG

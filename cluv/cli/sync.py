@@ -8,7 +8,6 @@ from pathlib import Path, PurePosixPath
 
 import milatools.cli
 import rich.console
-from cluv.config import find_pyproject, get_config
 from milatools.utils.local_v2 import LocalV2
 from milatools.utils.parallel_progress import (
     AsyncTaskFn,
@@ -17,9 +16,10 @@ from milatools.utils.parallel_progress import (
 )
 from milatools.utils.remote_v2 import (
     RemoteV2,
-    control_socket_is_running_async,
-    get_controlpath_for,
 )
+
+from cluv.cli.login import login
+from cluv.config import find_pyproject, get_config
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,8 @@ async def sync(clusters: list[str] = []):
 
     this_cluster = "mila"  # TODO
     for cluster in clusters:
-        tasks.append(functools.partial(sync_task_function, cluster=cluster))
+        remote = await RemoteV2.connect(cluster)
+        tasks.append(functools.partial(sync_task_function, remote=remote))
         task_descriptions.append(f"{this_cluster} -> {cluster}")
 
     await run_async_tasks_with_progress_bar(
@@ -83,7 +84,7 @@ async def sync(clusters: list[str] = []):
 
 async def sync_task_function(
     report_progress: ReportProgressFn,
-    cluster: str,
+    remote: RemoteV2,
 ):
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
@@ -94,8 +95,7 @@ async def sync_task_function(
         report_progress(progress=progress, total=total, info=info)
 
     _update_progress(0, "Logging in", 5)
-    clusters = [cluster]
-    remotes = await login(clusters)
+    remotes = [remote]
 
     _update_progress(1, "Installing UV", 5)
     await install_uv(remotes)
@@ -113,25 +113,6 @@ async def sync_task_function(
     if config.results_path:
         _update_progress(5, "Fetching results", 6)
         await fetch_results(remotes, config.results_path)
-
-
-async def login(clusters: list[str]) -> list[RemoteV2]:
-    """Create an SSH connection with the given clusters, reusing existing connections when possible to avoid triggering 2FA prompts."""
-    connections = await asyncio.gather(
-        *(_get_remote_without_2fa_prompt(cluster) for cluster in clusters)
-    )
-    # For any cluster we don't have an active connection to, connect
-    logger.info(
-        f"Already connected to the following clusters: {[remote.hostname for remote in connections if remote]}"
-    )
-    logger.info(
-        f"Will attempt to connect to the following clusters: {[cluster for cluster, remote in zip(clusters, connections) if not remote]}"
-    )
-    # Need to do each thing sequentially to avoid triggering multiple 2FA prompts at the same time.
-    return [
-        remote if remote is not None else (await RemoteV2.connect(cluster))
-        for cluster, remote in zip(clusters, connections)
-    ]
 
 
 async def install_uv(remotes: list[RemoteV2]):
@@ -303,24 +284,3 @@ async def fetch_results(remotes: list[RemoteV2], results_path: str):
             for remote in remotes
         )
     )
-
-
-async def _get_remote_without_2fa_prompt(cluster_hostname: str) -> RemoteV2 | None:
-    """Returns the Remote object for a given cluster if we already have a connection to it.
-
-    If we don't already have a connection, this will not block for 2FA, and will return None.
-    """
-    remote = RemoteV2(cluster_hostname, _start_control_socket=False)
-    active = await control_socket_is_running_async(
-        cluster_hostname,
-        control_path=get_controlpath_for(
-            cluster_hostname, ssh_config_path=Path.home() / ".ssh" / "config"
-        ),
-    )
-    if active:
-        # It's active, so we can "connect" (this just sets _started=True since it's
-        # already running)
-        # NOTE: This is a bit weird.
-        remote._started = True
-        return remote
-    return None

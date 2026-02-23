@@ -58,12 +58,12 @@ async def sync(clusters: list[str] = []):
         tasks.append(functools.partial(sync_task_function, cluster=cluster))
         task_descriptions.append(f"{this_cluster} -> {cluster}")
 
-    bob = await run_async_tasks_with_progress_bar(
+    await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
         task_descriptions=task_descriptions,
         overall_progress_task_description="[green]Syncing project",
     )
-    return bob
+    return
     # Other approach: Do each step for all clusters before moving to the next step.
     remotes = await login(clusters)
 
@@ -106,7 +106,7 @@ async def sync_task_function(
     _update_progress(4, "Running 'uv sync'", 5)
     await asyncio.gather(
         *(
-            remote.run_async(f"bash -l -c 'uv --directory={project_path} sync'")
+            remote.run_async(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
             for remote in remotes
         )
     )
@@ -170,6 +170,9 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     - Just do a `git clone {project_path}.git {project_path}` over SSH, and then remember to do a push here and a git fetch there.
     """
     _git_remotes = subprocess.getoutput("git remote").splitlines()
+
+    current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
+
     clusters_missing_a_remote = [
         remote for remote in remotes if remote.hostname not in _git_remotes
     ]
@@ -197,11 +200,12 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
         )
         await login_node.run_async(
             # BUG: on Nibi, we get command not found: 'git' unless we do bash -l -c!
-            f"bash -l -c 'mkdir -p {project_path}.git && git init --bare {project_path}.git --initial-branch={initial_branch}'",
+            f"bash -l -c 'mkdir -p {project_path}.git && "
+            f"git init --bare {project_path}.git --initial-branch={initial_branch}'",
             display=True,
         )
         # NOTE: Seems okay to push to that remote (the bare {project}.git), this doesn't delete other branches there.
-        LocalV2.run(("git", "push", login_node.hostname, "--prune"))
+        LocalV2.run(("git", "push", login_node.hostname, current_git_branch))
     # For each cluster where the project isn't cloned yet, clone it.
     _clusters_without_clones_result = await asyncio.gather(
         *(
@@ -234,7 +238,7 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
             *(
                 # TODO: The project might already be cloned on some clusters.
                 remote.run_async(
-                    f"git clone {project_path}.git {project_path}",
+                    f"git clone {project_path}.git {project_path} --branch={current_git_branch}",
                     warn=True,
                     hide=True,
                 )
@@ -246,13 +250,38 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     # TODO: Look into setting up a git hook on the remote, it could be useful
     # to run things or checkout the repo automatically when we push.
 
+    # await asyncio.gather(
+    #     *(
+    #         # Add a pre-receive hook in that bare remote repo, so that it always checks out stuff.
+    #         remote.run_async(
+    #             f"""mkdir -p {project_path}.git/hooks && ""echo '#!/bin/bash\n"
+    #             f"git --work-tree={project_path} --git-dir={project_path}.git checkout -f\n' > {project_path}.git/hooks/post-receive && "
+    #             f"chmod +x {project_path}.git/hooks/post-receive""",
+    #             display=True,
+    #         )
+    #         for remote in remotes
+    #     )
+    # )
+
     for remote in remotes:
-        LocalV2.run(("git", "push", remote.hostname))
+        LocalV2.run(("git", "push", remote.hostname, current_git_branch))
 
     await asyncio.gather(
         *(
             remote.run_async(
                 f"git -C {project_path} fetch --all --prune",
+                # warn=True,
+                hide=False,
+            )
+            for remote in remotes
+        )
+    )
+
+    # TODO: Look into why the command still has the Controlpath explicitly there, even if the ssh config already has it.
+    await asyncio.gather(
+        *(
+            remote.run_async(
+                f"git -C {project_path} checkout {current_git_branch}",
                 # warn=True,
                 hide=False,
             )
@@ -267,7 +296,7 @@ async def fetch_results(remotes: list[RemoteV2], results_path: str):
         *(
             remote.run_async(
                 # Use --full-form flags (not -avz) for better readability.
-                f"rsync --archive --verbose --compress {results_path} {remote.hostname}:{results_path}",
+                f"rsync --archive --verbose --compress {remote.hostname}:{results_path} {results_path}",
                 warn=True,
                 hide=False,
             )

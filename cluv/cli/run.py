@@ -41,6 +41,7 @@ def add_run_args(subparsers: argparse._SubParsersAction):
         nargs=argparse.REMAINDER,
     )
     run_parser.set_defaults(func=run)
+    return run_parser
 
 
 async def run(command: str | list[str], cluster: str):

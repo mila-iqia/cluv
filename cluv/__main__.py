@@ -23,7 +23,7 @@ from .cli.init import init
 from .cli.login import login
 from .cli.run import add_run_args
 from .cli.status import status
-from .cli.sync import sync
+from .cli.sync import add_sync_args
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +35,8 @@ def main(argv: list[str] | None = None):
         formatter_class=rich_argparse.RichHelpFormatter,
         epilog="For more information, see the documentation. You rock.",
     )
+    _add_v_arg(parser)  # add -v/--verbose on the top-level parser.
 
-    _add_v_arg(parser)
     subparsers = parser.add_subparsers(dest="<command>", required=True)
 
     init_parser = subparsers.add_parser(
@@ -45,9 +45,11 @@ def main(argv: list[str] | None = None):
         formatter_class=parser.formatter_class,
     )
     init_parser.set_defaults(func=init)
+    _add_v_arg(init_parser)
 
     config = get_config()
-    add_run_args(subparsers)
+    run_parser = add_run_args(subparsers)
+    _add_v_arg(run_parser)
 
     login_parser = subparsers.add_parser(
         "login",
@@ -63,22 +65,8 @@ def main(argv: list[str] | None = None):
     )
     login_parser.set_defaults(func=login)
 
-    sync_parser = subparsers.add_parser(
-        "sync",
-        help="Synchronize the current project across clusters.",
-        formatter_class=parser.formatter_class,
-    )
+    sync_parser = add_sync_args(subparsers)
     _add_v_arg(sync_parser)
-    sync_parser.add_argument(
-        "clusters",
-        choices=(config.clusters) if config.clusters else None,
-        # default="all",
-        # dest="clusters",
-        nargs="*",
-        # metavar="<cluster(s)>",
-        help="The cluster(s) to synchronize with. Leave empty to synchronize with all clusters.",
-    )
-    sync_parser.set_defaults(func=sync)
 
     status_parser = subparsers.add_parser(
         "status",

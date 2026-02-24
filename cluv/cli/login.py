@@ -25,7 +25,7 @@ async def login(clusters: list[str]) -> list[RemoteV2]:
 
     console = rich.console.Console()
     connections = await asyncio.gather(
-        *(_get_remote_without_2fa_prompt(cluster) for cluster in clusters)
+        *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
     )
     # For any cluster we don't have an active connection to, connect
     if connections:
@@ -48,7 +48,7 @@ async def login(clusters: list[str]) -> list[RemoteV2]:
     ]
 
 
-async def _get_remote_without_2fa_prompt(cluster_hostname: str) -> RemoteV2 | None:
+async def get_remote_without_2fa_prompt(cluster_hostname: str) -> RemoteV2 | None:
     """Returns the Remote object for a given cluster if we already have a connection to it.
 
     If we don't already have a connection, this will not block for 2FA, and will return None.

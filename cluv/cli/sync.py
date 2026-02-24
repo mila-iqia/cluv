@@ -18,7 +18,7 @@ from milatools.utils.remote_v2 import (
     RemoteV2,
 )
 
-from cluv.cli.login import login
+from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import find_pyproject, get_config
 
 logger = logging.getLogger(__name__)
@@ -42,11 +42,26 @@ async def sync(clusters: list[str] = []):
     - Over SSH, does a git fetch on all remote clusters
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
-    clusters = clusters or get_config().clusters
     # TODO: Figure out which Slurm cluster we're currently on. Assuming mila for now.
     this_cluster = "mila"
-    if this_cluster in clusters:
-        clusters.remove(this_cluster)
+    # When no cluster is passed, sync with clusters for which we have an active SSH connection.
+    if not clusters:
+        clusters = get_config().clusters
+        if this_cluster in clusters:
+            clusters.remove(this_cluster)
+        connections = await asyncio.gather(
+            *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
+        )
+        remotes = [conn for conn in connections if conn]
+        if not remotes:
+            console.log(
+                "[red]Not currently connected to any Slurm cluster.[/red] "
+                "Use `cluv login` to login and create reusable connections."
+            )
+            return
+        clusters = [remote.hostname for remote in remotes]
+    else:
+        remotes = await login(clusters)
 
     # Git push first?
     await LocalV2.run_async("git push", hide=False)
@@ -57,7 +72,6 @@ async def sync(clusters: list[str] = []):
 
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
-    remotes = await login(clusters)
     for remote in remotes:
         tasks.append(functools.partial(sync_task_function, remote=remote))
         task_descriptions.append(f"{this_cluster} -> {remote.hostname}")
@@ -98,6 +112,7 @@ async def sync_task_function(
         report_progress(progress=progress, total=total, info=info)
 
     num_tasks = 5 if config.results_path else 4
+
     _update_progress(0, "Logging in", num_tasks)
     remotes = [remote]
 
@@ -115,7 +130,7 @@ async def sync_task_function(
         )
     )
     if config.results_path:
-        _update_progress(5, "Fetching results", 6)
+        _update_progress(5, "Fetching results", num_tasks)
         await fetch_results(remotes, config.results_path)
 
 

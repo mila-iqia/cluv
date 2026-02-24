@@ -3,6 +3,7 @@
 # todo: typer doesn't quite work for commands that need the argparse.REMAINDER feature like `run` and `launch`.
 # It requires you to pass the command in quotes, but I'd like to be able
 # to do `cluv run ls -l` for example. Here it errors out saying "no -l option".
+from __future__ import annotations
 
 import argparse
 import asyncio
@@ -10,6 +11,7 @@ import inspect
 import logging
 import subprocess
 import sys
+import typing
 from typing import Callable
 
 import rich
@@ -17,7 +19,7 @@ import rich.logging
 import rich_argparse
 import simple_parsing
 
-from cluv.config import get_config
+from cluv.config import CluvConfig, get_config
 
 from .cli.init import init
 from .cli.login import login
@@ -26,6 +28,8 @@ from .cli.status import status
 from .cli.sync import add_sync_args
 
 logger = logging.getLogger(__name__)
+if typing.TYPE_CHECKING:
+    Subparsers = argparse._SubParsersAction[simple_parsing.ArgumentParser]
 
 
 def main(argv: list[str] | None = None):
@@ -37,45 +41,25 @@ def main(argv: list[str] | None = None):
     )
     _add_v_arg(parser)  # add -v/--verbose on the top-level parser.
 
+    config = get_config()
+
     subparsers = parser.add_subparsers(dest="<command>", required=True)
 
-    init_parser = subparsers.add_parser(
-        "init",
-        help="Initialize the current project across clusters.",
-        formatter_class=parser.formatter_class,
-    )
-    init_parser.set_defaults(func=init)
+    # add -v/--verbose to each subparser as well.
+    init_parser = add_init_args(subparsers)
     _add_v_arg(init_parser)
 
-    config = get_config()
     run_parser = add_run_args(subparsers)
     _add_v_arg(run_parser)
 
-    login_parser = subparsers.add_parser(
-        "login",
-        help="Login to the specified clusters.",
-        formatter_class=parser.formatter_class,
-    )
+    login_parser = add_login_args(subparsers, config=config)
     _add_v_arg(login_parser)
-    login_parser.add_argument(
-        "clusters",
-        choices=(config.clusters) if config.clusters else None,
-        nargs="*",
-        help="The cluster(s) to login to. Leave empty to login to all clusters.",
-    )
-    login_parser.set_defaults(func=login)
 
     sync_parser = add_sync_args(subparsers)
     _add_v_arg(sync_parser)
 
-    status_parser = subparsers.add_parser(
-        "status",
-        help="Get the status of available clusters.",
-        formatter_class=parser.formatter_class,
-    )
-    # IDEA: Add sub-commands to query the status with respect to different things, GPUs, storage, jobs, etc?
-    # Or just display everything?
-    status_parser.set_defaults(func=status)
+    status_parser = add_status_args(subparsers)
+    _add_v_arg(status_parser)
 
     args = parser.parse_args(argv)
     args_dict = vars(args)
@@ -88,14 +72,60 @@ def main(argv: list[str] | None = None):
     try:
         if inspect.iscoroutinefunction(function):
             asyncio.run(function(**args_dict))
-            return
-        function(**args_dict)
-        return
+        else:
+            function(**args_dict)
     except subprocess.CalledProcessError as err:
         logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}:")
-        logger.error(f"Standard output:\n{err.output}")
-        logger.error(f"Standard error:\n{err.stderr}")
+        if err.output:
+            logger.error(f"Standard output:\n{err.output}")
+        else:
+            logger.error("No standard output.")
+        if err.stderr:
+            logger.error(f"Standard error:\n{err.stderr}")
+        else:
+            logger.error("No standard error.")
         sys.exit(err.returncode)
+
+
+def add_status_args(subparsers: Subparsers):
+    status_parser = subparsers.add_parser(
+        "status",
+        help="Get the status of available clusters.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    # TODO: Add sub-commands to query the status with respect to different things, GPUs, storage, jobs, etc?
+    # Or just display everything?
+    status_parser.set_defaults(func=status)
+    return status_parser
+
+
+def add_login_args(
+    subparsers: Subparsers,
+    config: CluvConfig,
+):
+    login_parser = subparsers.add_parser(
+        "login",
+        help="Login to the specified clusters.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    login_parser.add_argument(
+        "clusters",
+        choices=(config.clusters) if config.clusters else None,
+        nargs="*",
+        help="The cluster(s) to login to. Leave empty to login to all clusters.",
+    )
+    login_parser.set_defaults(func=login)
+    return login_parser
+
+
+def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+    init_parser = subparsers.add_parser(
+        "init",
+        help="Initialize the current project across clusters.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    init_parser.set_defaults(func=init)
+    return init_parser
 
 
 def setup_logging(verbose: int | None, force: bool = False):

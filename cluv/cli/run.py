@@ -1,7 +1,8 @@
 import argparse
 import asyncio
 import logging
-import subprocess
+import shlex
+from pathlib import Path
 
 import rich_argparse
 from milatools.cli import console
@@ -12,7 +13,8 @@ from milatools.utils.remote_v2 import (
 from rich.console import Group
 from rich.panel import Panel
 
-from cluv.config import get_config
+from cluv.cli.sync import sync
+from cluv.config import find_pyproject, get_config
 
 logger = logging.getLogger(__name__)
 
@@ -41,46 +43,23 @@ def add_run_args(subparsers: argparse._SubParsersAction):
     run_parser.set_defaults(func=run)
 
 
-async def run(command: str, cluster: str) -> list[subprocess.CompletedProcess]:
+async def run(command: str | list[str], cluster: str):
     """Runs a command in the synced project on a potentially remote cluster.
 
     Similar in spirit to `uv run`, but runs a command in the synced project on a potentially remote cluster.
     - Idea is that this could maybe be a building block for other commands.
     """
+    if not isinstance(command, str):
+        command = shlex.join(command)
     logger.debug(f"About to run {command=} on {cluster=}")
-
-    login_node = await RemoteV2.connect(cluster)
-
-    # Connect to all clusters (going through 2FA only if connection doesn't exist already.)
-    login_nodes = await asyncio.gather(
-        *(RemoteV2.connect(cluster) for cluster in clusters)
-    )
-
-    login_nodes = await asyncio.gather(
-        *(RemoteV2.connect(cluster) for cluster in clusters)
-    )
-
-    results = await asyncio.gather(
+    remotes = await sync(clusters=[cluster])
+    project_path = find_pyproject().parent.relative_to(Path.home())
+    await asyncio.gather(
         *[
-            cluster.run_async(command, display=False, warn=True, hide=True)
-            for cluster in clusters
-        ],
-        return_exceptions=True,
+            remote.run_async(f"uv run --directory={project_path} {command}")
+            for remote in remotes
+        ]
     )
-
-    # Handle exceptions (e.g. connection errors) by converting them to CompletedProcess with error info
-    return [
-        result
-        if not isinstance(result, BaseException)
-        # Create a fake CompletedProcess for the error
-        else subprocess.CompletedProcess(
-            args=command,
-            returncode=1,
-            stdout="",
-            stderr=f"Error connecting to {cluster.hostname}: {result}",
-        )
-        for cluster, result in zip(clusters, results)
-    ]
 
 
 async def get_cluster_remotes(clusters: list[str] | None) -> list[RemoteV2]:

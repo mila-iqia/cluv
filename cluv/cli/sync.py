@@ -67,7 +67,7 @@ async def sync(clusters: list[str] = []):
         task_descriptions=task_descriptions,
         overall_progress_task_description="[green]Syncing project",
     )
-    return
+    return remotes
     # Other approach: Do each step for all clusters before moving to the next step.
     remotes = await login(clusters)
 
@@ -97,16 +97,17 @@ async def sync_task_function(
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    _update_progress(0, "Logging in", 5)
+    num_tasks = 5 if config.results_path else 4
+    _update_progress(0, "Logging in", num_tasks)
     remotes = [remote]
 
-    _update_progress(1, "Installing UV", 5)
+    _update_progress(1, "Installing UV", num_tasks)
     await install_uv(remotes)
 
-    _update_progress(3, "Setting up project", 5)
+    _update_progress(2, "Setting up project", num_tasks)
     await clone_project(remotes, project_path)
 
-    _update_progress(4, "Running 'uv sync'", 5)
+    _update_progress(4, "Running 'uv sync'", num_tasks)
     await asyncio.gather(
         *(
             remote.run_async(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
@@ -150,7 +151,12 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
 
     """
     current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
-    github_repo_url = subprocess.getoutput("git config --get remote.origin.url").strip()
+    git_remote_name = subprocess.getoutput(
+        f"git config --get branch.{current_git_branch}.remote"
+    ).strip()
+    github_repo_url = subprocess.getoutput(
+        f"git config --get remote.{git_remote_name}.url"
+    ).strip()
 
     # TODO: Scp the ~/.git-credentials file if needed?
     # Or configure the config credential-helper to store first?
@@ -177,7 +183,7 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     )
     await asyncio.gather(
         *(
-            remote.run_async(f"git clone {github_repo_url} {project_path}")
+            remote.run_async(f"git clone {github_repo_url}.git {project_path}")
             for remote in clusters_without_clones
         )
     )
@@ -205,13 +211,17 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     )
 
 
-async def fetch_results(remotes: list[RemoteV2], results_path: str):
+async def fetch_results(remotes: list[RemoteV2], results_path: Path | str):
     """Fetches results from all remote clusters to the current (mila for now) cluster using rsync."""
+    results_path = Path(results_path)
+    assert not results_path.is_absolute()
+    results_path = (find_pyproject().parent / results_path).relative_to(Path.home())
     await asyncio.gather(
         *(
-            remote.run_async(
+            LocalV2.run_async(
                 # Use --full-form flags (not -avz) for better readability.
-                f"rsync --archive --verbose --compress {remote.hostname}:{results_path} {results_path}",
+                f"rsync --archive --verbose --compress "
+                f"{remote.hostname}:{results_path} .",
                 warn=True,
                 hide=False,
             )

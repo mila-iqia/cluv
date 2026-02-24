@@ -20,7 +20,7 @@ import simple_parsing
 from cluv.config import get_config
 
 from .cli.init import init
-from .cli.login import login_cli
+from .cli.login import login
 from .cli.run import add_run_args
 from .cli.status import status
 from .cli.sync import sync
@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None):
         nargs="*",
         help="The cluster(s) to login to. Leave empty to login to all clusters.",
     )
-    login_parser.set_defaults(func=login_cli)
+    login_parser.set_defaults(func=login)
 
     sync_parser = subparsers.add_parser(
         "sync",
@@ -99,8 +99,8 @@ def main(argv: list[str] | None = None):
 
     try:
         if inspect.iscoroutinefunction(function):
-            return asyncio.run(function(**args_dict))
-        return function(**args_dict)
+            asyncio.run(function(**args_dict))
+        function(**args_dict)
     except subprocess.CalledProcessError as err:
         logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}:")
         logger.error(f"Standard output:\n{err.output}")

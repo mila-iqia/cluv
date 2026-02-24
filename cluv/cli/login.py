@@ -14,12 +14,6 @@ from cluv.config import get_config
 logger = logging.getLogger(__name__)
 
 
-async def login_cli(clusters: list[str]) -> None:
-    """Create an SSH connection with the given clusters, reusing existing connections when possible to avoid triggering 2FA prompts."""
-    # Need a function that returns None for the CLI. Other functions (ex. sync) use `login` below as well.
-    await login(clusters)
-
-
 async def login(clusters: list[str]) -> list[RemoteV2]:
     """Create an SSH connection with the given clusters, reusing existing connections when possible to avoid triggering 2FA prompts."""
     clusters = clusters or get_config().clusters
@@ -40,10 +34,13 @@ async def login(clusters: list[str]) -> list[RemoteV2]:
         )
     else:
         console.log("No active connections to any clusters found.")
-    console.log(
-        f"Will attempt to connect to the following clusters: "
-        f"{[cluster for cluster, remote in zip(clusters, connections) if not remote]}"
-    )
+    missing_connections = [
+        cluster for cluster, remote in zip(clusters, connections) if not remote
+    ]
+    if missing_connections:
+        console.log(
+            f"Will attempt to connect to the following clusters: {missing_connections}"
+        )
     # Need to do each thing sequentially to avoid triggering multiple 2FA prompts at the same time.
     return [
         remote if remote is not None else (await RemoteV2.connect(cluster))

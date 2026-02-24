@@ -5,24 +5,38 @@
 # to do `cluv run ls -l` for example. Here it errors out saying "no -l option".
 
 import argparse
+import asyncio
+import inspect
+import logging
+import subprocess
+import sys
 from typing import Callable
 
+import rich
+import rich.logging
 import rich_argparse
 import simple_parsing
 
+from cluv.config import get_config
+
 from .cli.init import init
-from .cli.run import run
+from .cli.login import login
+from .cli.run import add_run_args
 from .cli.status import status
-from .cli.sync import sync
-from .config import get_cluster_config
+from .cli.sync import add_sync_args
+
+logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None):
+    setup_logging(verbose=0, force=False)
     parser = simple_parsing.ArgumentParser(
         description=__doc__,
         formatter_class=rich_argparse.RichHelpFormatter,
         epilog="For more information, see the documentation. You rock.",
     )
+    _add_v_arg(parser)  # add -v/--verbose on the top-level parser.
+
     subparsers = parser.add_subparsers(dest="<command>", required=True)
 
     init_parser = subparsers.add_parser(
@@ -31,44 +45,28 @@ def main(argv: list[str] | None = None):
         formatter_class=parser.formatter_class,
     )
     init_parser.set_defaults(func=init)
+    _add_v_arg(init_parser)
 
-    cluster_choices, run_default_cluster = get_cluster_config()
+    config = get_config()
+    run_parser = add_run_args(subparsers)
+    _add_v_arg(run_parser)
 
-    run_parser = subparsers.add_parser(
-        "run",
-        help="Run a command on a cluster.",
+    login_parser = subparsers.add_parser(
+        "login",
+        help="Login to the specified clusters.",
         formatter_class=parser.formatter_class,
     )
-    run_parser.add_argument(
-        "cluster",
-        choices=cluster_choices,
-        default=run_default_cluster,
-        metavar="<cluster>",
-        help="The cluster to run the command on.",
-    )
-    run_parser.add_argument(
-        "command",
-        type=str,
-        metavar="<command>",
-        help="The command to run",
-        nargs=argparse.REMAINDER,
-    )
-    run_parser.set_defaults(func=run)
-
-    sync_parser = subparsers.add_parser(
-        "sync",
-        help="Synchronize the current project across clusters.",
-        formatter_class=parser.formatter_class,
-    )
-    sync_parser.add_argument(
-        "cluster",
-        choices=cluster_choices,
-        default=(),
+    _add_v_arg(login_parser)
+    login_parser.add_argument(
+        "clusters",
+        choices=(config.clusters) if config.clusters else None,
         nargs="*",
-        metavar="<cluster>",
-        help="The cluster(s) to synchronize with. Leave empty to synchronize with all clusters.",
+        help="The cluster(s) to login to. Leave empty to login to all clusters.",
     )
-    sync_parser.set_defaults(func=sync)
+    login_parser.set_defaults(func=login)
+
+    sync_parser = add_sync_args(subparsers)
+    _add_v_arg(sync_parser)
 
     status_parser = subparsers.add_parser(
         "status",
@@ -81,9 +79,74 @@ def main(argv: list[str] | None = None):
 
     args = parser.parse_args(argv)
     args_dict = vars(args)
+
+    verbose: int = args_dict.pop("verbose")
+    setup_logging(verbose=verbose, force=True)
     args_dict.pop("<command>")
     function: Callable = args_dict.pop("func")
-    return function(**args_dict)
+
+    try:
+        if inspect.iscoroutinefunction(function):
+            asyncio.run(function(**args_dict))
+            return
+        function(**args_dict)
+        return
+    except subprocess.CalledProcessError as err:
+        logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}:")
+        logger.error(f"Standard output:\n{err.output}")
+        logger.error(f"Standard error:\n{err.stderr}")
+        sys.exit(err.returncode)
+
+
+def setup_logging(verbose: int | None, force: bool = False):
+    verbose = verbose or 0
+    if not sys.stdout.isatty():
+        # Widen the log width when running in an sbatch script.
+        console = rich.console.Console(width=140)
+    else:
+        console = None
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(message)s",
+        handlers=[
+            rich.logging.RichHandler(
+                console=console,
+                show_time=console is not None,
+                rich_tracebacks=True,
+                markup=True,
+            )
+        ],
+        force=force,
+    )
+    cluv_logger = logging.getLogger("cluv")
+    if verbose == 0:
+        # logger.setLevel(logging.ERROR)
+        logger.setLevel(logging.WARNING)
+        cluv_logger.setLevel(logging.WARNING)
+    elif verbose == 1:
+        logger.setLevel(logging.INFO)
+        cluv_logger.setLevel(logging.INFO)
+    elif verbose >= 2:
+        logger.setLevel(logging.DEBUG)
+        cluv_logger.setLevel(logging.DEBUG)
+
+    logging.getLogger("milatools").setLevel(
+        logging.DEBUG
+        if verbose == 3
+        else logging.INFO
+        if verbose == 2
+        else logging.WARNING
+    )
+
+
+def _add_v_arg(parser: argparse.ArgumentParser):
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        dest="verbose",
+        action="count",
+        help="Increase logging verbosity",
+    )
 
 
 if __name__ == "__main__":

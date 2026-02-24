@@ -100,7 +100,9 @@ def main(argv: list[str] | None = None):
     try:
         if inspect.iscoroutinefunction(function):
             asyncio.run(function(**args_dict))
+            return
         function(**args_dict)
+        return
     except subprocess.CalledProcessError as err:
         logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}:")
         logger.error(f"Standard output:\n{err.output}")

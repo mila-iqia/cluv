@@ -185,8 +185,8 @@ async def sync_task_function(
 
 async def install_uv(remotes: list[RemoteV2]):
     if not shutil.which("uv"):
-        logger.warning(
-            "[orange]`uv` is not installed on this machine. Please install `uv` to ensure it's installed on the remote clusters as well.[/orange]"
+        logger.error(
+            "`uv` is not installed on this machine. Please install `uv` to ensure it's installed on the remote clusters as well."
         )
         # TODO: Do we want to just install it for them instead? (we already do it on the clusters, why not?)
         raise RuntimeError("`uv` is not installed on this machine.")
@@ -409,9 +409,9 @@ async def create_results_dir_with_symlink_to_scratch(
     # It does exist. Is it a symlink? If not, warn the user, they might be filling up their HOME without realizing it!
     if not await test("-L", project_dir_relative_to_home / results_path, remote):
         logger.warning(
-            f"[orange]{project_dir_relative_to_home / results_path} on {remote.hostname} (the output directory) "
+            f"[red]{project_dir_relative_to_home / results_path} on {remote.hostname} (the output directory) "
             f"is not a symlink to $SCRATCH!\n"
-            f"Please beware that you might quickly end up filling up your $HOME! Consider instead creating a symlink to scratch![/orange]"
+            f"Please beware that you might quickly end up filling up your $HOME! Consider instead creating a symlink to scratch![/red]"
         )
         return
 

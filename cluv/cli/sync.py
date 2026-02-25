@@ -1,15 +1,15 @@
+from __future__ import annotations
+
 import argparse
 import asyncio
 import functools
 import logging
 import shutil
 import subprocess
-import sys
 import textwrap
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
-import milatools.cli
-import rich.console
 import rich_argparse
 from milatools.utils.local_v2 import LocalV2
 from milatools.utils.parallel_progress import (
@@ -23,19 +23,19 @@ from milatools.utils.remote_v2 import (
 
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import find_pyproject, get_config
+from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
 
-# FIXME: overwrite the console used by milatools (to try to fix line issues in the output).
-console = rich.console.Console(record=True, file=sys.stdout)
-milatools.cli.console = console
 
 # TODO: Control the 'hide' and 'display' / etc using the --verbose flag value, in addition to the loglevel.
 # TODO: Pipe the commands and their outputs / stderr to separate files for each cluster, so people can easily inspect
 # what might have gone wrong. Also include a message at the end like "Check <logs_dir>/{cluster}.log for details."
 
 
-def add_sync_args(subparsers: argparse._SubParsersAction):
+def add_sync_args(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> argparse.ArgumentParser:
     cluster_choices = get_config().clusters
     sync_parser = subparsers.add_parser(
         "sync",
@@ -74,7 +74,9 @@ def add_sync_args(subparsers: argparse._SubParsersAction):
     return sync_parser
 
 
-async def sync(clusters: list[str], uv_sync_args: list[str] | None = None):
+async def sync(
+    clusters: list[str], uv_sync_args: list[str] | None = None
+) -> list[RemoteV2]:
     """Synchronizes the current project across clusters.
 
     - Synchronizes code across all clusters.
@@ -90,11 +92,11 @@ async def sync(clusters: list[str], uv_sync_args: list[str] | None = None):
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
     # TODO: Figure out which Slurm cluster we're currently on. Assuming mila for now.
-    this_cluster = "mila"
+    this_cluster = current_cluster()
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     if not clusters:
         clusters = get_config().clusters
-        if this_cluster in clusters:
+        if this_cluster and this_cluster in clusters:
             clusters.remove(this_cluster)
         connections = await asyncio.gather(
             *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
@@ -105,7 +107,7 @@ async def sync(clusters: list[str], uv_sync_args: list[str] | None = None):
                 "[red]Not currently connected to any Slurm cluster.[/red] "
                 "Use `cluv login` to login and create reusable connections."
             )
-            return
+            return []
         clusters = [remote.hostname for remote in remotes]
     else:
         remotes = await login(clusters)
@@ -121,7 +123,7 @@ async def sync(clusters: list[str], uv_sync_args: list[str] | None = None):
     task_descriptions: list[str] = []
     for remote in remotes:
         tasks.append(functools.partial(sync_task_function, remote=remote))
-        task_descriptions.append(f"{this_cluster} -> {remote.hostname}")
+        task_descriptions.append(f"{this_cluster or 'local'} -> {remote.hostname}")
 
     await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
@@ -379,15 +381,10 @@ async def create_results_dir_with_symlink_to_scratch(
             f"[orange]Remote {remote.hostname} does not have $SCRATCH defined?![/orange]"
         )
         return
-    if (
-        await remote.run_async(
-            f"test -d {scratch}/{results_path}/{project_dirname}",
-            warn=True,
-            hide=True,
-        )
-    ).returncode != 0:
+
+    if await test("-d", f"{scratch}/{results_path}/{project_dirname}", remote):
         result = await remote.run_async(
-            f"mkdir -p {scratch}/{results_path}/{project_dirname}", warn=True
+            f"mkdir -p {scratch}/{results_path}/{project_dirname}", warn=True, hide=True
         )
         if result.returncode != 0:
             logger.warning(
@@ -398,16 +395,48 @@ async def create_results_dir_with_symlink_to_scratch(
                 f"mkdir -p {project_dir_relative_to_home}/{results_path}", warn=True
             )
             return
-    # Check if {project_dir}/{results_path} exists and is already a symlink.
+    # Check if {project_dir}/{results_path} exists.
     # If it doesn't exist, create a symlink.
-    if (
-        await remote.run_async(
-            f"test -L {project_dir_relative_to_home}/{results_path}",
-            warn=True,
-            hide=True,
-        )
-    ).returncode != 0:
+
+    if not await test("-e", project_dir_relative_to_home / results_path, remote):
+        # Doesn't exist, create a symlink.
         await remote.run_async(
             f"ln -s -T {scratch}/{results_path}/{project_dirname} "
             f"{project_dir_relative_to_home}/{results_path}"
         )
+        return
+
+    # It does exist. Is it a symlink? If not, warn the user, they might be filling up their HOME without realizing it!
+    if not await test("-L", project_dir_relative_to_home / results_path, remote):
+        logger.warning(
+            f"[orange]{project_dir_relative_to_home / results_path} on {remote.hostname} (the output directory) "
+            f"is not a symlink to $SCRATCH!\n"
+            f"Please beware that you might quickly end up filling up your $HOME! Consider instead creating a symlink to scratch![/orange]"
+        )
+        return
+
+
+async def file_exists(remote: RemoteV2, path: str | Path) -> bool:
+    return await test("-e", path, remote)
+
+
+async def test(type: Literal["-d", "-e", "-L"], path: str | Path, remote: RemoteV2):
+    """Returns whether `ssh test {type} {path}` success on the remote."""
+    result = await remote.run_async(f"test {type} {path}", warn=True, hide=True)
+    return result.returncode == 0
+
+
+def get_loglevel():
+    return logging.getLogger("cluv").getEffectiveLevel()
+
+
+async def host_uses_controlmaster(hostname: str) -> bool:
+    from milatools.utils.local_v2 import run_async
+
+    applied_options_for_host = (
+        await run_async(("ssh", "-G", hostname, "|", "grep", "control"))
+    ).stdout
+    applied_options_for_host = dict(
+        line.strip().split(maxsplit=1) for line in applied_options_for_host.splitlines()
+    )
+    return applied_options_for_host.get("controlmaster", "no").lower() != "no"

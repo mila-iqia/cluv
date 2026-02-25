@@ -2,7 +2,6 @@ import asyncio
 import logging
 from pathlib import Path
 
-import rich
 from milatools.utils.remote_v2 import (
     RemoteV2,
     control_socket_is_running_async,
@@ -10,6 +9,7 @@ from milatools.utils.remote_v2 import (
 )
 
 from cluv.config import get_config
+from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +17,10 @@ logger = logging.getLogger(__name__)
 async def login(clusters: list[str]) -> list[RemoteV2]:
     """Create an SSH connection with the given clusters, reusing existing connections when possible to avoid triggering 2FA prompts."""
     clusters = clusters or get_config().clusters
-    this_cluster = "mila"  # todo: infer from environment or config perhaps.
-    if this_cluster in clusters:
-        clusters.remove(
-            this_cluster
-        )  # don't try to connect to the cluster we're already on.
+    if (this_cluster := current_cluster()) and this_cluster in clusters:
+        # don't try to connect to the cluster we're already on.
+        clusters.remove(this_cluster)
 
-    console = rich.console.Console()
     connections = await asyncio.gather(
         *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
     )

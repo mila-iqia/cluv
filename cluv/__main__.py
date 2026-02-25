@@ -26,6 +26,7 @@ from .cli.login import login
 from .cli.run import add_run_args
 from .cli.status import status
 from .cli.sync import add_sync_args
+from .utils import console
 
 logger = logging.getLogger(__name__)
 if typing.TYPE_CHECKING:
@@ -33,7 +34,6 @@ if typing.TYPE_CHECKING:
 
 
 def main(argv: list[str] | None = None):
-    setup_logging(verbose=0, force=False)
     parser = simple_parsing.ArgumentParser(
         description=__doc__,
         formatter_class=rich_argparse.RichHelpFormatter,
@@ -130,43 +130,43 @@ def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
 
 def setup_logging(verbose: int | None, force: bool = False):
     verbose = verbose or 0
-    if not sys.stdout.isatty():
-        # Widen the log width when running in an sbatch script.
-        console = rich.console.Console(width=140)
-    else:
-        console = None
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(message)s",
-        handlers=[
-            rich.logging.RichHandler(
-                console=console,
-                show_time=console is not None,
-                rich_tracebacks=True,
-                markup=True,
-            )
-        ],
-        force=force,
+    handler = rich.logging.RichHandler(
+        console=console,
+        show_time=console is not None,
+        rich_tracebacks=True,
+        markup=True,
     )
+    # logging.basicConfig(
+    #     level=logging.WARNING,
+    #     format="%(message)s",
+    #     handlers=[handler],
+    #     force=force,
+    # )
     cluv_logger = logging.getLogger("cluv")
-    if verbose == 0:
-        # logger.setLevel(logging.ERROR)
-        logger.setLevel(logging.WARNING)
-        cluv_logger.setLevel(logging.WARNING)
-    elif verbose == 1:
-        logger.setLevel(logging.INFO)
-        cluv_logger.setLevel(logging.INFO)
-    elif verbose >= 2:
-        logger.setLevel(logging.DEBUG)
-        cluv_logger.setLevel(logging.DEBUG)
+    cluv_logger.addHandler(handler)
 
-    logging.getLogger("milatools").setLevel(
+    # if verbose == 0:
+    #     # logger.setLevel(logging.ERROR)
+    #     logger.setLevel(logging.WARNING)
+    #     cluv_logger.setLevel(logging.WARNING)
+    # elif verbose == 1:
+    #     logger.setLevel(logging.INFO)
+    #     cluv_logger.setLevel(logging.INFO)
+    # elif verbose >= 2:
+    #     logger.setLevel(logging.DEBUG)
+    #     cluv_logger.setLevel(logging.DEBUG)
+
+    milatools_logger = logging.getLogger("milatools")
+    milatools_logger.setLevel(
         logging.DEBUG
         if verbose == 3
         else logging.INFO
         if verbose == 2
         else logging.WARNING
     )
+    # for handler in milatools_logger.handlers:
+    #     milatools_logger.removeHandler(handler)
+    milatools_logger.addHandler(handler)
 
 
 def _add_v_arg(parser: argparse.ArgumentParser):

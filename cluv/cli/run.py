@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import asyncio
 import logging
@@ -19,7 +21,9 @@ from cluv.config import find_pyproject, get_config
 logger = logging.getLogger(__name__)
 
 
-def add_run_args(subparsers: argparse._SubParsersAction):
+def add_run_args(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> argparse.ArgumentParser:
     cluster_choices = get_config().clusters
     run_parser = subparsers.add_parser(
         "run",
@@ -57,13 +61,15 @@ async def run(command: str | list[str], cluster: str):
     project_path = find_pyproject().parent.relative_to(Path.home())
     await asyncio.gather(
         *[
-            remote.run_async(f"uv run --directory={project_path} {command}")
+            remote.run_async(
+                f"bash -l -c 'uv run --directory={project_path} {command}'"
+            )
             for remote in remotes
         ]
     )
 
 
-async def get_cluster_remotes(clusters: list[str] | None) -> list[RemoteV2]:
+async def _get_cluster_remotes(clusters: list[str] | None) -> list[RemoteV2]:
     """Returns the list remote objects for each cluster with a current active connection."""
     if clusters:
         # User specified clusters
@@ -103,7 +109,9 @@ async def get_cluster_remotes(clusters: list[str] | None) -> list[RemoteV2]:
     return target_clusters
 
 
-async def run_cli(command: str | list[str], clusters: str | list[str] | None = None):
+async def _run_multiple_clusters(
+    command: str | list[str], clusters: str | list[str] | None = None
+):
     """CLI wrapper for the run command."""
     if not command:
         console.print("No command specified.", style="red")

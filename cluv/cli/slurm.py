@@ -22,19 +22,25 @@ _CELL_RE = re.compile(r"\|\s*([\d]+):([\d-]+)\s*")
 
 
 def _parse_section_gpu_row(section_lines: list[str]) -> tuple[int, int]:
-    """Return (sum_node, max_node) for the GPU row in one section block.
+    """Return (sum_jobs, max_nodes) for the GPU row in one section block.
 
-    sum_node  → total across all walltime columns (correct for job counts).
-    max_node  → maximum across all walltime columns (correct for node counts,
-                since the same physical node appears in multiple columns).
+    Each cell is ``node_jobs:core_jobs``.  Jobs are in exactly one walltime
+    column, so summing (node + core) across all columns gives the true job
+    count.  Nodes appear in multiple columns (same node listed under every
+    walltime it supports), so taking the max gives the true node count.
+
+    sum_jobs  → sum of (node_jobs + core_jobs) across all walltime columns.
+    max_nodes → maximum of node_jobs across all walltime columns.
     """
     for line in section_lines:
         if line.strip().startswith("GPU"):
             cells = _CELL_RE.findall(line)
-            node_counts = [int(n) for n, _ in cells]
-            if not node_counts:
+            if not cells:
                 return 0, 0
-            return sum(node_counts), max(node_counts)
+            node_counts = [int(n) for n, _ in cells]
+            core_counts = [int(c) if c != "-" else 0 for _, c in cells]
+            sum_jobs = sum(n + c for n, c in zip(node_counts, core_counts))
+            return sum_jobs, max(node_counts)
     return 0, 0
 
 

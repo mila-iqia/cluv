@@ -125,13 +125,13 @@ class TestParsePartitionStats:
 
     def test_wiki_running_jobs(self):
         result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU running node+core per column: (5+0)+(2+13)+(47+20)+(19+18)+(0+3) = 127
-        assert result["jobs_running"] == 127
+        # GPU running: 5+2+47+19+0 = 73
+        assert result["jobs_running"] == 73
 
     def test_wiki_pending_jobs(self):
         result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU queued node+core per column: (5+14)+(3+8)+(21+1)+(177+110)+(1+5) = 345
-        assert result["jobs_pending"] == 345
+        # GPU queued: 5+3+21+177+1 = 207
+        assert result["jobs_pending"] == 207
 
     def test_wiki_idle_nodes(self):
         result = parse_partition_stats(WIKI_PARTITION_STATS)

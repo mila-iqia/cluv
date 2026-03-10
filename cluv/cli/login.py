@@ -25,7 +25,7 @@ async def login(clusters: list[str]) -> list[RemoteV2]:
         *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
     )
     # For any cluster we don't have an active connection to, connect
-    if connections:
+    if any(connections):
         console.log(
             f"Already connected to the following clusters: {[remote.hostname for remote in connections if remote]}"
         )

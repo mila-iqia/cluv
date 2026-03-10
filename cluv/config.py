@@ -55,7 +55,7 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
         return CluvConfig(**cluv_config)
     logger.warning(
         UserWarning(
-            f"[orange]No [tool.cluv] section found in {pyproject_path}, using defaults.[/orange]"
+            f"[red]No [tool.cluv] section found in {pyproject_path}, using defaults.[/red]"
         )
     )
     return CluvConfig(clusters=[])

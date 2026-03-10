@@ -26,3 +26,16 @@ source = "uv-dynamic-versioning"
 
 [project.scripts]
 cluv = "cluv.__main__:main"
+
+[tool.cluv]
+clusters = [
+    "mila",
+    "tamia",
+    "rorqual",
+    "fir",
+    "nibi",
+    "killarney",
+    "vulcan",
+    "trillium",
+    "trillium-gpu",
+]

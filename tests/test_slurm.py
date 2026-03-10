@@ -171,7 +171,7 @@ class TestParsePartitionStats:
 
 class TestParseSinfoNodes:
     def test_all_alloc(self):
-        output = "alloc gpu:h100:4(S:0-1)\nalloc gpu:h100:4(S:0-1)\n"
+        output = "node01 alloc gpu:h100:4(S:0-1)\nnode02 alloc gpu:h100:4(S:0-1)\n"
         idle, total, models = parse_sinfo_nodes(output)
         assert idle == 0
         assert total == 8
@@ -179,9 +179,9 @@ class TestParseSinfoNodes:
 
     def test_mixed_states(self):
         output = (
-            "idle  gpu:h100:4(S:0-1)\n"
-            "alloc gpu:h200:8(S:0-1)\n"
-            "mix   gpu:h100:4(S:0-1)\n"
+            "node01 idle  gpu:h100:4(S:0-1)\n"
+            "node02 alloc gpu:h200:8(S:0-1)\n"
+            "node03 mix   gpu:h100:4(S:0-1)\n"
         )
         idle, total, models = parse_sinfo_nodes(output)
         assert idle == 4          # only the idle node
@@ -190,23 +190,23 @@ class TestParseSinfoNodes:
 
     def test_idle_tilde_state(self):
         # sinfo sometimes reports "idle~" for draining idle nodes
-        output = "idle~ gpu:a100:8\n"
+        output = "node01 idle~ gpu:a100:8\n"
         idle, total, models = parse_sinfo_nodes(output)
         assert idle == 8
         assert total == 8
 
     def test_multiple_models_sorted(self):
         output = (
-            "idle gpu:v100:2\n"
-            "idle gpu:a100:4\n"
-            "idle gpu:h100:8\n"
+            "node01 idle gpu:v100:2\n"
+            "node02 idle gpu:a100:4\n"
+            "node03 idle gpu:h100:8\n"
         )
         _, _, models = parse_sinfo_nodes(output)
         assert models == ["A100", "H100", "V100"]
 
     def test_gres_without_socket_spec(self):
         # Some nodes report GRES without the (S:...) suffix
-        output = "idle gpu:h100:4\n"
+        output = "node01 idle gpu:h100:4\n"
         idle, total, models = parse_sinfo_nodes(output)
         assert idle == 4
         assert total == 4
@@ -220,11 +220,74 @@ class TestParseSinfoNodes:
 
     def test_no_gpu_gres(self):
         # Lines without gpu: in GRES should be skipped
-        output = "idle cpu:32\nidle (null)\n"
+        output = "node01 idle cpu:32\nnode02 idle (null)\n"
         idle, total, models = parse_sinfo_nodes(output)
         assert idle == 0
         assert total == 0
         assert models == []
+
+    def test_nvidia_prefix_normalized(self):
+        # Full GRES name with nvidia_ prefix → model name is just the base
+        output = "node01 idle gpu:nvidia_a100:8\n"
+        idle, total, models = parse_sinfo_nodes(output)
+        assert models == ["A100"]
+        assert total == 8
+
+    def test_mig_node_physical_gpu_count(self):
+        # Rorqual-style MIG node: 3 MIG profiles from 4 physical H100s
+        # sum(g_val * count) = 3*4 + 2*4 + 1*8 = 28; 28 // 7 = 4 physical GPUs
+        output = (
+            "rg12501 idle "
+            "gpu:nvidia_h100_80gb_hbm3_3g.40gb:4(S:0-3),"
+            "gpu:nvidia_h100_80gb_hbm3_2g.20gb:4(S:0-3),"
+            "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
+        )
+        idle, total, models = parse_sinfo_nodes(output)
+        assert total == 4, f"Expected 4 physical GPUs, got {total}"
+        assert idle == 4
+        assert models == ["H100"]
+
+    def test_mig_model_normalization(self):
+        # MIG GRES name should normalize to the base model (H100)
+        output = (
+            "rg01 alloc "
+            "gpu:nvidia_h100_80gb_hbm3_3g.40gb:4(S:0-3),"
+            "gpu:nvidia_h100_80gb_hbm3_2g.20gb:4(S:0-3),"
+            "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
+        )
+        _, _, models = parse_sinfo_nodes(output)
+        assert models == ["H100"]
+
+    def test_mixed_regular_and_mig_nodes(self):
+        # Mix of regular H100 nodes and MIG nodes (rorqual-like)
+        # Regular node: 4 GPUs; MIG node: 4 physical GPUs
+        output = (
+            "rg00 idle gpu:h100:4(S:0-3)\n"
+            "rg01 idle "
+            "gpu:nvidia_h100_80gb_hbm3_3g.40gb:4(S:0-3),"
+            "gpu:nvidia_h100_80gb_hbm3_2g.20gb:4(S:0-3),"
+            "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
+        )
+        idle, total, models = parse_sinfo_nodes(output)
+        assert total == 8   # 4 + 4
+        assert idle == 8
+        assert models == ["H100"]
+
+    def test_deduplication_via_sort_u(self):
+        # Same node appearing multiple times (once per Slurm partition) should
+        # not inflate counts after upstream sort -u deduplication. The parser
+        # itself trusts the input is already deduplicated.
+        output = (
+            "node01 idle gpu:h100:4\n"
+            "node01 idle gpu:h100:4\n"  # duplicate that sort -u would remove
+        )
+        # Parser sees duplicates → double-counts; this test documents the
+        # contract that sort -u must be done upstream (in _REMOTE_SCRIPT).
+        # Here we just verify the format is parsed correctly for one entry.
+        output_deduped = "node01 idle gpu:h100:4\n"
+        idle, total, models = parse_sinfo_nodes(output_deduped)
+        assert total == 4
+        assert idle == 4
 
 
 # ---------------------------------------------------------------------------

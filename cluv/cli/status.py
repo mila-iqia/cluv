@@ -107,7 +107,7 @@ _SEP = "---CLUV-SEP---"
 
 _REMOTE_SCRIPT = f"""
 partition-stats 2>/dev/null; echo {_SEP}
-sinfo --noheader -N -o "%t %G" 2>/dev/null | grep gpu; echo {_SEP}
+sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu; echo {_SEP}
 squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 diskusage_report 2>/dev/null; echo {_SEP}

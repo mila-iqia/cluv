@@ -46,7 +46,7 @@ def add_sync_args(
         "clusters",
         choices=cluster_choices if cluster_choices else None,
         nargs="*",
-        default=(),
+        default=None,
         metavar="<cluster>",
         help=(
             "The cluster(s) to synchronize with. "
@@ -75,7 +75,7 @@ def add_sync_args(
 
 
 async def sync(
-    clusters: list[str], uv_sync_args: list[str] | None = None
+    clusters: list[str] | None = None, uv_sync_args: list[str] | None = None
 ) -> list[RemoteV2]:
     """Synchronizes the current project across clusters.
 

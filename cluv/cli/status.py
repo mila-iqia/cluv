@@ -159,7 +159,15 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
     parts = raw.split(_SEP)
     # Pad in case some sections are missing
     parts += [""] * 8
-    partition_stats_out, sinfo_out, running_out, pending_out, diskusage_out, savail_out, disk_quota_out = parts[:7]
+    (
+        partition_stats_out,
+        sinfo_out,
+        running_out,
+        pending_out,
+        diskusage_out,
+        savail_out,
+        disk_quota_out,
+    ) = parts[:7]
 
     # --- GPU info: prefer savail (Mila) over sinfo (DRAC) ---
     savail_idle, savail_total, savail_models = parse_savail(savail_out)
@@ -184,7 +192,9 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
         # Mila / clusters without partition-stats: job counts unavailable for now.
         jobs_running = 0
         jobs_pending = 0
-        logger.debug(f"{cluster}: partition-stats not available, job counts unavailable")
+        logger.debug(
+            f"{cluster}: partition-stats not available, job counts unavailable"
+        )
 
     try:
         my_running = int(running_out.strip())
@@ -479,17 +489,25 @@ def _build_legend() -> Panel:
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 
 
-async def status(clusters: list[str] = ()):
+async def status(clusters: list[str] | None = None):
     """Gets the status of available clusters.
     - Gives you an overview of the state of each cluster, and displays an overview of the state of your jobs across the clusters.
     - Displays the number of idle nodes, or the number of idle GPUs, or something similar, for each cluster
     """
-    from cluv.cli.login import login
-
     console = Console()
+    clusters = list(clusters or [])
 
     if clusters:
-        remotes = await login(list(clusters))
+        # Use get_remote_without_2fa_prompt directly so we never filter out the
+        # "current" cluster the way login() does. A working socket for mila is
+        # perfectly usable even when /home/mila is mounted locally.
+        remotes = [
+            r
+            for r in await asyncio.gather(
+                *(get_remote_without_2fa_prompt(c) for c in clusters)
+            )
+            if r is not None
+        ]
         data, is_live = await get_all_cluster_statuses(remotes=remotes)
     else:
         data, is_live = await get_all_cluster_statuses()
@@ -499,7 +517,9 @@ async def status(clusters: list[str] = ()):
             "[yellow]No active cluster connections found. "
             "Run [bold]cluv login[/bold] first, or showing mock data.[/yellow]\n"
         )
-        data = get_mock_cluster_status()
+        mock = get_mock_cluster_status()
+        # When specific clusters were requested, only show mock rows for those.
+        data = [c for c in mock if not clusters or c.name in clusters]
         label = "[dim](mock data)[/dim]"
     else:
         label = "[dim](live data)[/dim]"

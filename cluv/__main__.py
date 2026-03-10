@@ -98,7 +98,7 @@ def add_status_args(subparsers: Subparsers):
         "clusters",
         choices=cluster_choices if cluster_choices else None,
         nargs="*",
-        default=(),
+        default=None,
         metavar="<cluster>",
         help=(
             "Cluster(s) to query. "

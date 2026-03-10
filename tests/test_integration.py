@@ -87,15 +87,21 @@ async def test_status_no_args_returns_live_data():
     assert all(isinstance(s.name, str) for s in statuses)
 
 
-async def test_status_no_args_via_cli():
+@pytest.mark.timeout(60)
+def test_status_no_args_via_cli():
     """Regression: cluv status with no clusters argument must not raise.
 
     Previously default=() was validated against choices and raised
     'invalid choice: ()'.
     """
-    from cluv.cli.status import status as status_fn
-    # Should not raise regardless of connection state
-    await status_fn(clusters=None)
+    import subprocess, sys
+    result = subprocess.run(
+        [sys.executable, "-m", "cluv", "status"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, f"cluv status exited {result.returncode}:\n{result.stderr}"
 
 
 async def test_status_explicit_cluster_list():

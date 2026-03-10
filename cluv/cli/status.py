@@ -105,18 +105,27 @@ class ClusterStatus:
 # All commands are separated by a sentinel so we can split a single SSH output.
 _SEP = "---CLUV-SEP---"
 
-_REMOTE_SCRIPT = f"""
+# Script for DRAC clusters (partition-stats + diskusage_report, no savail/disk-quota)
+_REMOTE_SCRIPT_DRAC = f"""
 partition-stats 2>/dev/null; echo {_SEP}
 sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu; echo {_SEP}
 squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
-diskusage_report 2>/dev/null; echo {_SEP}
+timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
+"""
+
+# Script for the Mila cluster (savail + disk-quota, no partition-stats/diskusage_report)
+_REMOTE_SCRIPT_MILA = f"""
+echo {_SEP}
+sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu; echo {_SEP}
+squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+echo {_SEP}
 savail 2>/dev/null; echo {_SEP}
 disk-quota 2>/dev/null; echo {_SEP}
 """
 
-# Fallback sinfo-based job counts for clusters without partition-stats (e.g. Mila).
-_SINFO_RUNNING_SCRIPT = "sinfo --noheader -o '%t' | grep -c '^alloc' || true"
+_MILA_CLUSTERS = {"mila"}
 
 
 async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
@@ -134,10 +143,11 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
     )
 
     cluster = remote.hostname
+    script = _REMOTE_SCRIPT_MILA if cluster in _MILA_CLUSTERS else _REMOTE_SCRIPT_DRAC
 
     try:
         raw = await remote.get_output_async(
-            f"bash -l -c '{_REMOTE_SCRIPT}'",
+            f"bash -l -c '{script}'",
             hide=True,
             warn=True,
             display=False,

@@ -23,6 +23,7 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
     "pytest-cov>=7.0.0",
+    "pytest-timeout>=2.3.1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -37,6 +38,7 @@ cluv = "cluv.__main__:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+timeout = 10
 markers = [
     "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",
 ]

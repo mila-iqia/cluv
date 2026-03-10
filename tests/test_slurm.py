@@ -7,6 +7,7 @@ cluster output captured during development.
 import pytest
 
 from cluv.cli.slurm import (
+    parse_disk_quota,
     parse_diskusage_report,
     parse_partition_stats,
     parse_savail,
@@ -264,6 +265,57 @@ class TestParseSavail:
         assert idle == 0
         assert total == 0
         assert models == []
+
+
+class TestParseDiskQuota:
+    # Real output captured from `disk-quota` on Mila
+    MILA_DISK_QUOTA = """\
+==== HOME ====
+Disk quotas for usr normandf (uid 1471600598):
+     Filesystem    used   quota   limit   grace   files   quota   limit   grace
+     /home/mila  99.99G      0k    100G       -  921718       0 1048576       -
+uid 1471600598 is using default block quota setting
+uid 1471600598 is using default file quota setting
+
+==== SCRATCH ====
+
+Quota information for storage pool Default (ID: 1):
+
+      user/group     ||           size          ||    chunk files
+     name     |  id  ||    used    |    hard    ||  used   |  hard
+--------------|------||------------|------------||---------|---------
+      normandf|1471600598||   76.61 GiB|    5.00 TiB||   687792|unlimited
+"""
+
+    def test_home_used(self):
+        storage = parse_disk_quota(self.MILA_DISK_QUOTA)
+        assert storage.home_used == pytest.approx(99.99, rel=1e-3)
+
+    def test_home_quota(self):
+        storage = parse_disk_quota(self.MILA_DISK_QUOTA)
+        assert storage.home_quota == pytest.approx(100.0, rel=1e-3)
+
+    def test_scratch_used(self):
+        storage = parse_disk_quota(self.MILA_DISK_QUOTA)
+        assert storage.scratch_used == pytest.approx(76.61, rel=1e-3)
+
+    def test_scratch_quota_tib_to_gib(self):
+        # 5.00 TiB must be converted to GiB (5 * 1024 = 5120)
+        storage = parse_disk_quota(self.MILA_DISK_QUOTA)
+        assert storage.scratch_quota == pytest.approx(5120.0, rel=1e-3)
+
+    def test_empty_output(self):
+        storage = parse_disk_quota("")
+        assert storage.home_used == 0.0
+        assert storage.home_quota == 0.0
+        assert storage.scratch_used == 0.0
+        assert storage.scratch_quota == 0.0
+
+    def test_tib_unit_conversion(self):
+        output = "     /home/mila  1.00G      0k    2.00T       -\n"
+        storage = parse_disk_quota(output)
+        assert storage.home_used == pytest.approx(1.0)
+        assert storage.home_quota == pytest.approx(2048.0)  # 2 TiB → GiB
 
 
 class TestParseDiskusageReport:

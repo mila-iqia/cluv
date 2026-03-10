@@ -202,7 +202,7 @@ _UNIT_TO_GIB: dict[str, float] = {
 
 
 def _to_gib(value: str, unit: str) -> float:
-    return float(value) * _UNIT_TO_GIB.get(unit.rstrip("Bb"), 1.0)
+    return float(value) * _UNIT_TO_GIB.get(unit, 1.0)
 
 
 def parse_disk_quota(output: str) -> StorageStats:

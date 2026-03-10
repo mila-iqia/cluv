@@ -13,8 +13,7 @@ active SSH ControlMaster sockets (run `cluv login` first).
 import pytest
 
 from cluv.cli.login import get_remote_without_2fa_prompt
-from cluv.cli.status import get_real_cluster_status, get_all_cluster_statuses
-
+from cluv.cli.status import get_all_cluster_statuses, get_real_cluster_status
 
 pytestmark = pytest.mark.integration
 
@@ -28,7 +27,9 @@ async def _require_remote(cluster: str):
     """Return an active RemoteV2 for *cluster*, skip the test if not connected."""
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None:
-        pytest.skip(f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first.")
+        pytest.skip(
+            f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first."
+        )
     return remote
 
 
@@ -94,14 +95,18 @@ def test_status_no_args_via_cli():
     Previously default=() was validated against choices and raised
     'invalid choice: ()'.
     """
-    import subprocess, sys
+    import subprocess
+    import sys
+
     result = subprocess.run(
         [sys.executable, "-m", "cluv", "status"],
         capture_output=True,
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, f"cluv status exited {result.returncode}:\n{result.stderr}"
+    assert result.returncode == 0, (
+        f"cluv status exited {result.returncode}:\n{result.stderr}"
+    )
 
 
 async def test_status_explicit_cluster_list():
@@ -129,7 +134,9 @@ async def test_status_mila_gpus_from_savail():
     remote = await _require_remote("mila")
     status = await get_real_cluster_status(remote)
     assert status.gpu_total > 0, "Expected savail to report GPU totals on Mila"
-    assert status.gpu_model != "?", f"GPU model not detected on Mila: {status.gpu_model!r}"
+    assert status.gpu_model != "?", (
+        f"GPU model not detected on Mila: {status.gpu_model!r}"
+    )
 
 
 async def test_status_mila_storage():
@@ -146,7 +153,8 @@ async def test_status_mila_storage():
 
 async def test_sync_tamia_connects():
     """Smoke-test that sync reaches tamia without errors (no actual git push)."""
-    from unittest.mock import patch, AsyncMock
+    from unittest.mock import AsyncMock, patch
+
     from cluv.cli import sync as sync_module
 
     remote = await _require_remote("tamia")

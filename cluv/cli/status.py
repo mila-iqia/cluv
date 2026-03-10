@@ -123,6 +123,8 @@ squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 echo {_SEP}
 savail 2>/dev/null; echo {_SEP}
 disk-quota 2>/dev/null; echo {_SEP}
+squeue -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+squeue -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 """
 
 _MILA_CLUSTERS = {"mila"}
@@ -168,7 +170,7 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
 
     parts = raw.split(_SEP)
     # Pad in case some sections are missing
-    parts += [""] * 8
+    parts += [""] * 10
     (
         partition_stats_out,
         sinfo_out,
@@ -177,7 +179,9 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
         diskusage_out,
         savail_out,
         disk_quota_out,
-    ) = parts[:7]
+        all_running_out,
+        all_pending_out,
+    ) = parts[:9]
 
     # --- GPU info: prefer savail (Mila) over sinfo (DRAC) ---
     savail_idle, savail_total, savail_models = parse_savail(savail_out)
@@ -199,12 +203,11 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
             gpu_idle = ps["gpu_idle_nodes"]
             gpu_total = ps["gpu_total_nodes"]
     else:
-        # Mila / clusters without partition-stats: job counts unavailable for now.
-        jobs_running = 0
-        jobs_pending = 0
-        logger.debug(
-            f"{cluster}: partition-stats not available, job counts unavailable"
-        )
+        try:
+            jobs_running = int(all_running_out.strip())
+            jobs_pending = int(all_pending_out.strip())
+        except ValueError:
+            jobs_running = jobs_pending = 0
 
     try:
         my_running = int(running_out.strip())

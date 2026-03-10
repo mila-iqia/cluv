@@ -18,6 +18,13 @@ package = true
 requires = ["hatchling", "uv-dynamic-versioning"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["cluv"]
 
@@ -27,15 +34,29 @@ source = "uv-dynamic-versioning"
 [project.scripts]
 cluv = "cluv.__main__:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",
+]
+
+[tool.coverage.run]
+source = ["cluv"]
+
+[tool.coverage.report]
+show_missing = true
+
 [tool.cluv]
+# Trimmed to two clusters for development/testing. Uncomment the rest when stable.
 clusters = [
     "mila",
     "tamia",
-    "rorqual",
-    "fir",
-    "nibi",
-    "killarney",
-    "vulcan",
-    "trillium",
-    "trillium-gpu",
+    # "rorqual",
+    # "fir",
+    # "nibi",
+    # "killarney",
+    # "vulcan",
+    # "trillium",
+    # "trillium-gpu",
 ]

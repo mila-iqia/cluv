@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import random
 from dataclasses import dataclass
 
+from milatools.utils.remote_v2 import RemoteV2
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+
+from cluv.cli.login import get_remote_without_2fa_prompt
+from cluv.config import get_config
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Data layer – replace these with real implementations later
@@ -60,11 +68,11 @@ _STORAGE_QUOTAS: dict[str, tuple[int, int]] = {
 class JobStats:
     running: int
     pending: int
-    cancelled: int
-    completed: int
     # subset of the above that belong to the current user
     my_running: int
     my_pending: int
+    cancelled: int | None = None
+    completed: int | None = None
 
 
 @dataclass
@@ -72,9 +80,9 @@ class StorageStats:
     """Disk usage as (used_gib, quota_gib) for $HOME and $SCRATCH."""
 
     home_used: float
-    home_quota: int
+    home_quota: float
     scratch_used: float
-    scratch_quota: int
+    scratch_quota: float
 
 
 @dataclass
@@ -86,8 +94,178 @@ class ClusterStatus:
     gpu_model: str
     jobs: JobStats
     storage: StorageStats
-    avg_wait_min: int  # estimated queue wait time in minutes
-    avg_gpu_util_pct: float  # average GPU utilisation across running jobs
+    avg_wait_min: int | None = None  # estimated queue wait time in minutes
+    avg_gpu_util_pct: float | None = None  # average GPU utilisation across running jobs
+
+
+# ---------------------------------------------------------------------------
+# Real data layer
+# ---------------------------------------------------------------------------
+
+# All commands are separated by a sentinel so we can split a single SSH output.
+_SEP = "---CLUV-SEP---"
+
+# Script for DRAC clusters (partition-stats + diskusage_report, no savail/disk-quota)
+_REMOTE_SCRIPT_DRAC = f"""
+partition-stats 2>/dev/null; echo {_SEP}
+sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu; echo {_SEP}
+squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
+"""
+
+# Script for the Mila cluster (savail + disk-quota, no partition-stats/diskusage_report)
+_REMOTE_SCRIPT_MILA = f"""
+echo {_SEP}
+sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu; echo {_SEP}
+squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+echo {_SEP}
+savail 2>/dev/null; echo {_SEP}
+disk-quota 2>/dev/null; echo {_SEP}
+squeue -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+squeue -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+"""
+
+_MILA_CLUSTERS = {"mila"}
+
+
+async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
+    """Fetch live Slurm data from a remote cluster and return a ClusterStatus.
+
+    Uses a single SSH round-trip. Falls back gracefully when commands are
+    unavailable (e.g. partition-stats is DRAC-only).
+    """
+    from cluv.cli.slurm import (
+        parse_disk_quota,
+        parse_diskusage_report,
+        parse_partition_stats,
+        parse_savail,
+        parse_sinfo_nodes,
+    )
+
+    cluster = remote.hostname
+    script = _REMOTE_SCRIPT_MILA if cluster in _MILA_CLUSTERS else _REMOTE_SCRIPT_DRAC
+
+    try:
+        raw = await remote.get_output_async(
+            f"bash -l -c '{script}'",
+            hide=True,
+            warn=True,
+            display=False,
+        )
+    except Exception as exc:
+        logger.warning(f"[red]Could not reach {cluster}: {exc}[/red]")
+        return ClusterStatus(
+            name=cluster,
+            online=False,
+            gpu_idle=0,
+            gpu_total=0,
+            gpu_model="?",
+            jobs=JobStats(running=0, pending=0, my_running=0, my_pending=0),
+            storage=StorageStats(
+                home_used=0, home_quota=0, scratch_used=0, scratch_quota=0
+            ),
+        )
+
+    parts = raw.split(_SEP)
+    # Pad in case some sections are missing
+    parts += [""] * 10
+    (
+        partition_stats_out,
+        sinfo_out,
+        running_out,
+        pending_out,
+        diskusage_out,
+        savail_out,
+        disk_quota_out,
+        all_running_out,
+        all_pending_out,
+    ) = parts[:9]
+
+    # --- GPU info: prefer savail (Mila) over sinfo (DRAC) ---
+    savail_idle, savail_total, savail_models = parse_savail(savail_out)
+    if savail_total > 0:
+        gpu_idle, gpu_total, models = savail_idle, savail_total, savail_models
+    else:
+        gpu_idle, gpu_total, models = parse_sinfo_nodes(sinfo_out)
+    gpu_model = ", ".join(models) if models else "?"
+
+    # --- Job counts ---
+    has_partition_stats = bool(partition_stats_out.strip())
+    if has_partition_stats:
+        ps = parse_partition_stats(partition_stats_out)
+        jobs_running = ps["jobs_running"]
+        jobs_pending = ps["jobs_pending"]
+        # If neither savail nor sinfo gave us GPU counts, fall back to
+        # partition-stats node counts (less precise but better than nothing).
+        if gpu_total == 0:
+            gpu_idle = ps["gpu_idle_nodes"]
+            gpu_total = ps["gpu_total_nodes"]
+    else:
+        try:
+            jobs_running = int(all_running_out.strip())
+            jobs_pending = int(all_pending_out.strip())
+        except ValueError:
+            jobs_running = jobs_pending = 0
+
+    try:
+        my_running = int(running_out.strip())
+        my_pending = int(pending_out.strip())
+    except ValueError:
+        my_running = my_pending = 0
+
+    # --- Storage: prefer diskusage_report (DRAC, per-user quotas);
+    #     fall back to disk-quota (Mila: lfs for $HOME, beegfs for $SCRATCH) ---
+    storage = parse_diskusage_report(diskusage_out)
+    if storage.home_quota == 0:
+        storage = parse_disk_quota(disk_quota_out)
+
+    return ClusterStatus(
+        name=cluster,
+        online=True,
+        gpu_idle=gpu_idle,
+        gpu_total=gpu_total,
+        gpu_model=gpu_model,
+        jobs=JobStats(
+            running=jobs_running,
+            pending=jobs_pending,
+            my_running=my_running,
+            my_pending=my_pending,
+        ),
+        storage=storage,
+    )
+
+
+async def get_all_cluster_statuses(
+    remotes: list[RemoteV2] | None = None,
+) -> tuple[list[ClusterStatus], bool]:
+    """Query clusters in parallel.
+
+    If *remotes* is provided, query exactly those connections.
+    Otherwise, query all clusters that already have an active SSH connection
+    (never blocks on 2FA).
+
+    Returns (statuses, any_live) where any_live is False when no cluster
+    was reachable.
+    """
+    if remotes is None:
+        clusters = get_config().clusters
+        remotes = [
+            r
+            for r in await asyncio.gather(
+                *(get_remote_without_2fa_prompt(c) for c in clusters)
+            )
+            if r is not None
+        ]
+
+    if not remotes:
+        return [], False
+
+    statuses = list(
+        await asyncio.gather(*(get_real_cluster_status(r) for r in remotes))
+    )
+    return statuses, True
 
 
 def get_mock_cluster_status(username: str = "you") -> list[ClusterStatus]:
@@ -101,7 +279,7 @@ def get_mock_cluster_status(username: str = "you") -> list[ClusterStatus]:
     gpu_models = ["A100", "H100", "V100", "A40", "RTX 8000"]
 
     results: list[ClusterStatus] = []
-    for cluster in CLUSTERS:
+    for cluster in get_config().clusters:
         gpu_total = _GPU_TOTALS[cluster]
         # Simulate varying load – some clusters busier than others
         load_factor = rng.uniform(0.55, 0.98)
@@ -133,10 +311,10 @@ def get_mock_cluster_status(username: str = "you") -> list[ClusterStatus]:
                 jobs=JobStats(
                     running=running,
                     pending=pending,
-                    cancelled=cancelled,
-                    completed=completed,
                     my_running=my_running,
                     my_pending=my_pending,
+                    cancelled=cancelled,
+                    completed=completed,
                 ),
                 storage=StorageStats(
                     home_used=home_used,
@@ -255,8 +433,12 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
             _gpu_bar(c.gpu_idle, c.gpu_total),
             my_jobs,
             all_jobs,
-            _wait_text(c.avg_wait_min),
-            _util_text(c.avg_gpu_util_pct),
+            Text("—", style="dim")
+            if c.avg_wait_min is None
+            else _wait_text(c.avg_wait_min),
+            Text("—", style="dim")
+            if c.avg_gpu_util_pct is None
+            else _util_text(c.avg_gpu_util_pct),
             home_bar,
             scratch_bar,
             style=row_style,
@@ -282,11 +464,16 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
         if not c.online:
             continue
         # Approximate user's cancelled count proportionally to their share of running jobs.
-        my_can = max(
-            0, int(c.jobs.cancelled * c.jobs.my_running / max(c.jobs.running, 1))
-        )
+        if c.jobs.cancelled is not None:
+            my_can = max(
+                0, int(c.jobs.cancelled * c.jobs.my_running / max(c.jobs.running, 1))
+            )
+            my_can_str = str(my_can)
+        else:
+            my_can = 0
+            my_can_str = "—"
         table.add_row(
-            c.name, str(c.jobs.my_running), str(c.jobs.my_pending), str(my_can)
+            c.name, str(c.jobs.my_running), str(c.jobs.my_pending), my_can_str
         )
         total_run += c.jobs.my_running
         total_pend += c.jobs.my_pending
@@ -297,7 +484,9 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
         "[bold]TOTAL[/bold]",
         f"[bold green]{total_run}[/bold green]",
         f"[bold yellow]{total_pend}[/bold yellow]",
-        f"[bold red]{total_can}[/bold red]",
+        f"[bold red]{total_can}[/bold red]"
+        if any(c.jobs.cancelled is not None for c in data if c.online)
+        else "—",
     )
     return table
 
@@ -313,16 +502,43 @@ def _build_legend() -> Panel:
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 
 
-def status():
+async def status(clusters: list[str] | None = None):
     """Gets the status of available clusters.
     - Gives you an overview of the state of each cluster, and displays an overview of the state of your jobs across the clusters.
     - Displays the number of idle nodes, or the number of idle GPUs, or something similar, for each cluster
     """
     console = Console()
-    data = get_mock_cluster_status()
+    clusters = list(clusters or [])
+
+    if clusters:
+        # Use get_remote_without_2fa_prompt directly so we never filter out the
+        # "current" cluster the way login() does. A working socket for mila is
+        # perfectly usable even when /home/mila is mounted locally.
+        remotes = [
+            r
+            for r in await asyncio.gather(
+                *(get_remote_without_2fa_prompt(c) for c in clusters)
+            )
+            if r is not None
+        ]
+        data, is_live = await get_all_cluster_statuses(remotes=remotes)
+    else:
+        data, is_live = await get_all_cluster_statuses()
+
+    if not is_live:
+        console.print(
+            "[yellow]No active cluster connections found. "
+            "Run [bold]cluv login[/bold] first, or showing mock data.[/yellow]\n"
+        )
+        mock = get_mock_cluster_status()
+        # When specific clusters were requested, only show mock rows for those.
+        data = [c for c in mock if not clusters or c.name in clusters]
+        label = "[dim](mock data)[/dim]"
+    else:
+        label = "[dim](live data)[/dim]"
 
     console.print()
-    console.rule("[bold cyan]cluv status[/bold cyan]  [dim](mock data)[/dim]")
+    console.rule(f"[bold cyan]cluv status[/bold cyan]  {label}")
     console.print()
 
     console.print(_build_cluster_table(data))

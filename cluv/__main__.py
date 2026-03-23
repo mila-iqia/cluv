@@ -88,10 +88,22 @@ def main(argv: list[str] | None = None):
 
 
 def add_status_args(subparsers: Subparsers):
+    cluster_choices = get_config().clusters
     status_parser = subparsers.add_parser(
         "status",
         help="Get the status of available clusters.",
         formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    status_parser.add_argument(
+        "clusters",
+        choices=cluster_choices if cluster_choices else None,
+        nargs="*",
+        default=None,
+        metavar="<cluster>",
+        help=(
+            "Cluster(s) to query. "
+            "Leave empty to query all clusters with an active connection."
+        ),
     )
     # TODO: Add sub-commands to query the status with respect to different things, GPUs, storage, jobs, etc?
     # Or just display everything?

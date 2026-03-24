@@ -17,13 +17,15 @@ Early development. Core commands (`login`, `sync`, `run`) are functional. `statu
 Install as a UV tool:
 
 ```bash
-uv tool install git+https://github.com/mila-iqai/cluv
+uv tool install git+https://github.com/mila-iqia/cluv
 ```
 
-Or run directly from the repo without installing:
+Then you can run `cluv` directly as a command:
 
 ```bash
-uv run cluv <command>
+cluv login mila
+cluv sync mila
+cluv run mila sbatch job.sh
 ```
 
 ## Quick Start
@@ -44,7 +46,7 @@ Add a `[tool.cluv]` section to the `pyproject.toml` of your project:
 
 ```toml
 [tool.cluv]
-clusters = ["mila", "narval", "tamia"]   # SSH hostnames from ~/.ssh/config
+clusters = ["mila", "tamia", "rorqual", "fir", "nibi", "killarney", "vulcan", "trillium-gpu"]   # SSH hostnames from ~/.ssh/config
 results_path = "results"                  # optional: rsync remote results back here
 ```
 

@@ -4,7 +4,7 @@ cluv — sync UV-based Python projects across HPC clusters.
 
 ## Status
 
-Early development. Core commands (`login`, `sync`) are functional. `status` shows live cluster data. `init` and `run` are not yet implemented.
+Early development. Core commands (`login`, `sync`, `run`) are functional. `status` shows live cluster data. `init` is not yet implemented.
 
 ## Requirements
 

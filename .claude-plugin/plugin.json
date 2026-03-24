@@ -1,0 +1,8 @@
+{
+  "name": "cluv",
+  "description": "Assist with cluv — a UV-based multi-cluster HPC project manager",
+  "version": "0.1.0",
+  "keywords": ["hpc", "slurm", "uv", "ssh", "mila", "drac"],
+  "author": { "name": "fabrice" },
+  "license": "MIT"
+}

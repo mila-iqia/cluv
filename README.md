@@ -62,6 +62,4 @@ results_path = "results"                  # optional: rsync remote results back 
 
 ## DRAC Clusters
 
-DRAC clusters (Narval, Tamia, Rorqual, etc.) require a `uv.toml` that points to the DRAC wheelhouse for offline installs. Place a `uv.toml` in the project root on each DRAC cluster with the appropriate `find-links` or `index-url` pointing to the local wheelhouse path.
-
 DRAC clusters are detected automatically via the `$CC_CLUSTER` environment variable.

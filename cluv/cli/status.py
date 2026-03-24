@@ -73,6 +73,7 @@ class JobStats:
     my_pending: int
     cancelled: int | None = None
     completed: int | None = None
+    my_completed: int | None = None  # recently completed jobs for the current user
 
 
 @dataclass
@@ -105,6 +106,13 @@ class ClusterStatus:
 # All commands are separated by a sentinel so we can split a single SSH output.
 _SEP = "---CLUV-SEP---"
 
+# sacct command to count the current user's recently completed jobs (last 24 h).
+# --allocations skips job-step rows (.batch, .0, …) so we count whole jobs only.
+_SACCT_MY_COMPLETED = (
+    f"sacct -u $(whoami) --noheader --allocations -S yesterday"
+    f" --state=CD --format=JobID 2>/dev/null | wc -l; echo {_SEP}"
+)
+
 # Script for DRAC clusters (partition-stats + diskusage_report, no savail/disk-quota)
 _REMOTE_SCRIPT_DRAC = f"""
 partition-stats 2>/dev/null; echo {_SEP}
@@ -112,6 +120,7 @@ sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu; echo {_SEP}
 squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
+{_SACCT_MY_COMPLETED}
 """
 
 # Script for the Mila cluster (savail + disk-quota, no partition-stats/diskusage_report)
@@ -125,6 +134,7 @@ savail 2>/dev/null; echo {_SEP}
 disk-quota 2>/dev/null; echo {_SEP}
 squeue -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 squeue -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+{_SACCT_MY_COMPLETED}
 """
 
 _MILA_CLUSTERS = {"mila"}
@@ -182,6 +192,9 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
         all_running_out,
         all_pending_out,
     ) = parts[:9]
+    # sacct completed count is appended at the end of both scripts:
+    # index 5 for DRAC (after diskusage), index 9 for Mila (after all_pending).
+    my_completed_out = parts[9] if cluster in _MILA_CLUSTERS else parts[5]
 
     # --- GPU info: prefer savail (Mila) over sinfo (DRAC) ---
     savail_idle, savail_total, savail_models = parse_savail(savail_out)
@@ -215,6 +228,11 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
     except ValueError:
         my_running = my_pending = 0
 
+    try:
+        my_completed: int | None = int(my_completed_out.strip())
+    except ValueError:
+        my_completed = None
+
     # --- Storage: prefer diskusage_report (DRAC, per-user quotas);
     #     fall back to disk-quota (Mila: lfs for $HOME, beegfs for $SCRATCH) ---
     storage = parse_diskusage_report(diskusage_out)
@@ -232,6 +250,7 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
             pending=jobs_pending,
             my_running=my_running,
             my_pending=my_pending,
+            my_completed=my_completed,
         ),
         storage=storage,
     )
@@ -294,6 +313,7 @@ def get_mock_cluster_status(username: str = "you") -> list[ClusterStatus]:
 
         my_running = rng.randint(0, min(8, running))
         my_pending = rng.randint(0, min(4, pending))
+        my_completed = completed * my_running // max(running, 1)
 
         home_quota, scratch_quota = _STORAGE_QUOTAS[cluster]
         home_used = round(rng.uniform(5, home_quota * 0.90), 1)
@@ -315,6 +335,7 @@ def get_mock_cluster_status(username: str = "you") -> list[ClusterStatus]:
                     my_pending=my_pending,
                     cancelled=cancelled,
                     completed=completed,
+                    my_completed=my_completed,
                 ),
                 storage=StorageStats(
                     home_used=home_used,
@@ -458,8 +479,9 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
     table.add_column("Running", justify="right", style="green")
     table.add_column("Pending", justify="right", style="yellow")
     table.add_column("Cancelled", justify="right", style="red")
+    table.add_column("Completed", justify="right", style="blue")
 
-    total_run = total_pend = total_can = 0
+    total_run = total_pend = total_can = total_comp = 0
     for c in data:
         if not c.online:
             continue
@@ -472,12 +494,15 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
         else:
             my_can = 0
             my_can_str = "—"
+        my_comp_str = str(c.jobs.my_completed) if c.jobs.my_completed is not None else "—"
+        my_comp = c.jobs.my_completed or 0
         table.add_row(
-            c.name, str(c.jobs.my_running), str(c.jobs.my_pending), my_can_str
+            c.name, str(c.jobs.my_running), str(c.jobs.my_pending), my_can_str, my_comp_str
         )
         total_run += c.jobs.my_running
         total_pend += c.jobs.my_pending
         total_can += my_can
+        total_comp += my_comp
 
     table.add_section()
     table.add_row(
@@ -486,6 +511,9 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
         f"[bold yellow]{total_pend}[/bold yellow]",
         f"[bold red]{total_can}[/bold red]"
         if any(c.jobs.cancelled is not None for c in data if c.online)
+        else "—",
+        f"[bold blue]{total_comp}[/bold blue]"
+        if any(c.jobs.my_completed is not None for c in data if c.online)
         else "—",
     )
     return table

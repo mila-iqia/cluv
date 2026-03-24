@@ -193,8 +193,8 @@ async def install_uv(remotes: list[RemoteV2]):
 
     # Get the version of `uv` used here, and install the same version everywhere.
     uv_version_here = (
-        # uv --version outputs 'uv 0.10.4'.
-        subprocess.getoutput("uv --version").strip().removeprefix("uv").strip()
+        # uv --version outputs e.g. 'uv 0.11.0 (aarch64-unknown-linux-gnu)'.
+        subprocess.getoutput("uv --version").strip().split()[1]
     )
     logger.info(
         f"[green]Using uv version {uv_version_here} everywhere, since this is the version on this machine.[/green]"
@@ -228,9 +228,7 @@ async def install_uv(remotes: list[RemoteV2]):
             for remote in remotes
         )
     )
-    uv_versions = [
-        uv_version.strip().removeprefix("uv").strip() for uv_version in uv_versions
-    ]
+    uv_versions = [uv_version.strip().split()[1] for uv_version in uv_versions]
     remotes_with_different_uv_versions = [
         remote
         for remote, version in zip(remotes, uv_versions)

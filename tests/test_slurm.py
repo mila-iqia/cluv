@@ -184,7 +184,7 @@ class TestParseSinfoNodes:
             "node03 mix   gpu:h100:4(S:0-1)\n"
         )
         idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 4          # only the idle node
+        assert idle == 4  # only the idle node
         assert total == 4 + 8 + 4  # all three nodes
         assert models == ["H100", "H200"]
 
@@ -196,11 +196,7 @@ class TestParseSinfoNodes:
         assert total == 8
 
     def test_multiple_models_sorted(self):
-        output = (
-            "node01 idle gpu:v100:2\n"
-            "node02 idle gpu:a100:4\n"
-            "node03 idle gpu:h100:8\n"
-        )
+        output = "node01 idle gpu:v100:2\nnode02 idle gpu:a100:4\nnode03 idle gpu:h100:8\n"
         _, _, models = parse_sinfo_nodes(output)
         assert models == ["A100", "H100", "V100"]
 
@@ -269,7 +265,7 @@ class TestParseSinfoNodes:
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
         idle, total, models = parse_sinfo_nodes(output)
-        assert total == 8   # 4 + 4
+        assert total == 8  # 4 + 4
         assert idle == 8
         assert models == ["H100"]
 
@@ -277,7 +273,7 @@ class TestParseSinfoNodes:
         # Same node appearing multiple times (once per Slurm partition) should
         # not inflate counts after upstream sort -u deduplication. The parser
         # itself trusts the input is already deduplicated.
-        output = (
+        _output = (
             "node01 idle gpu:h100:4\n"
             "node01 idle gpu:h100:4\n"  # duplicate that sort -u would remove
         )

@@ -38,49 +38,6 @@ repos:
         args: ["--fix"]
         require_serial: true
 
-  # python docstring formatting
-  - repo: https://github.com/myint/docformatter
-    rev: v1.7.5
-    hooks:
-      - id: docformatter
-        language: python
-        args: [--in-place]
-        require_serial: true
-
-  # NOTE: Disabling this, since I'm having the glib-c2.29 weird bug.
-  # # yaml formatting
-  # - repo: https://github.com/pre-commit/mirrors-prettier
-  #   rev: v2.7.1
-  #   hooks:
-  #     - id: prettier
-  #       types: [yaml]
-
-  # jupyter notebook cell output clearing
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.7.1
-    hooks:
-      - id: nbstripout
-        require_serial: true
-
-  # md formatting
-  - repo: https://github.com/executablebooks/mdformat
-    rev: 0.7.17
-    hooks:
-      - id: mdformat
-        exclude: "docs/" # terrible, I know, but it's messing up everything with mkdocs fences!
-        args: ["--number"]
-        additional_dependencies:
-          - mdformat-gfm
-          - mdformat-tables
-          - mdformat_frontmatter
-          - mdformat-toc
-          - mdformat-config
-          - mdformat-black
-          # see https://github.com/KyleKing/mdformat-mkdocs
-          # Doesn't seem to work!
-          - mdformat-mkdocs[recommended]>=2.1.0
-        require_serial: true
-
   # word spelling linter
   - repo: https://github.com/codespell-project/codespell
     rev: v2.3.0

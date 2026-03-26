@@ -12,13 +12,12 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.magiclink
 
-
 plugins:
   - search
   - mkdocstrings:
       handlers:
         python:
-          import:
+          inventories:
             - https://docs.pytest.org/en/stable/objects.inv
             - https://docs.python.org/3/objects.inv
           options:

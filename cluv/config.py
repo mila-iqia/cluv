@@ -22,9 +22,17 @@ logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
+class SubmitConfig:
+    job_script: str | None = None
+
+
+@dataclasses.dataclass
 class CluvConfig:
     clusters: list[str]
     results_path: str | None = None
+    submit: SubmitConfig = dataclasses.field(default_factory=SubmitConfig)
+    slurm: dict[str, str] = dataclasses.field(default_factory=dict)
+    cluster_configs: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
 
 
 @functools.cache
@@ -49,16 +57,36 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     with pyproject_path.open("rb") as handle:
         data = tomllib.load(handle)
 
-    tool_config = data.get("tool", {})
-
-    if isinstance(tool_config, dict) and (cluv_config := tool_config.get("cluv", {})):
-        return CluvConfig(**cluv_config)
-    logger.warning(
-        UserWarning(
-            f"[red]No [tool.cluv] section found in {pyproject_path}, using defaults.[/red]"
+    cluv = data.get("tool", {}).get("cluv", {})
+    if not cluv:
+        logger.warning(
+            UserWarning(
+                f"[red]No [tool.cluv] section found in {pyproject_path}, using defaults.[/red]"
+            )
         )
+        return CluvConfig(clusters=[])
+
+    # clusters: list (backward compat) or table (new format with per-cluster settings)
+    clusters_section = cluv.get("clusters", {})
+    if isinstance(clusters_section, list):
+        clusters = clusters_section
+        cluster_configs: dict[str, dict[str, str]] = {}
+    else:
+        clusters = list(clusters_section.keys())
+        cluster_configs = {k: dict(v) for k, v in clusters_section.items() if v}
+
+    submit_section = cluv.get("submit", {})
+    submit = SubmitConfig(job_script=submit_section.get("job_script"))
+
+    slurm: dict[str, str] = cluv.get("slurm", {})
+
+    return CluvConfig(
+        clusters=clusters,
+        results_path=cluv.get("results_path"),
+        submit=submit,
+        slurm=slurm,
+        cluster_configs=cluster_configs,
     )
-    return CluvConfig(clusters=[])
 
 
 def get_cluster_choices() -> list[str]:

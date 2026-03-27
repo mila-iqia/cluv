@@ -25,6 +25,7 @@ from .cli.init import init
 from .cli.login import login
 from .cli.run import add_run_args
 from .cli.status import status
+from .cli.submit import add_submit_args
 from .cli.sync import add_sync_args
 from .utils import console
 
@@ -57,6 +58,9 @@ def main(argv: list[str] | None = None):
 
     sync_parser = add_sync_args(subparsers)
     _add_v_arg(sync_parser)
+
+    submit_parser = add_submit_args(subparsers)
+    _add_v_arg(submit_parser)
 
     status_parser = add_status_args(subparsers)
     _add_v_arg(status_parser)

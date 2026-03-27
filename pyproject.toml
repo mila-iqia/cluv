@@ -32,6 +32,11 @@ dev = [
 testpaths = ["cluv", "tests"]
 norecursedirs = [".venv"]
 addopts = ["--doctest-modules"]
+asyncio_mode = "auto"
+timeout = 10
+markers = [
+    "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",
+]
 
 [tool.uv]
 managed = true
@@ -57,3 +62,24 @@ packages = ["cluv"]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
+
+[tool.coverage.run]
+source = ["cluv"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.cluv.submit]
+job_script = "scripts/job.sh"
+
+[tool.cluv.slurm]
+# Global SBATCH_* defaults applied to all clusters.
+
+[tool.cluv.clusters.mila]
+[tool.cluv.clusters.tamia]
+[tool.cluv.clusters.rorqual]
+# [tool.cluv.clusters.fir]
+# [tool.cluv.clusters.nibi]
+# [tool.cluv.clusters.killarney]
+# [tool.cluv.clusters.vulcan]
+# [tool.cluv.clusters.trillium-gpu]

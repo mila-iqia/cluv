@@ -176,3 +176,71 @@ async def test_sync_tamia_connects():
 
     assert len(remotes) == 1
     assert remotes[0].hostname == "tamia"
+
+
+# ---------------------------------------------------------------------------
+# cluv submit — rorqual integration
+# ---------------------------------------------------------------------------
+
+
+async def test_submit_rorqual_dry_run():
+    """Smoke-test: submit reaches rorqual and calls sbatch (dry-run via --test).
+
+    Uses `sbatch --test-only` to validate the job script without actually
+    queuing a job. Verifies that GIT_COMMIT and SBATCH_* env vars are passed
+    through correctly.
+    """
+    from pathlib import Path
+    from unittest.mock import AsyncMock, patch
+
+    from cluv.cli import submit as submit_module
+    from cluv.config import CluvConfig, SubmitConfig
+
+    remote = await _require_remote("rorqual")
+
+    captured_commands = []
+
+    async def capture_run_async(cmd, **kwargs):
+        captured_commands.append(cmd)
+        # Run the real command on the remote so we exercise the SSH path.
+        return await original_run_async(cmd, **kwargs)
+
+    original_run_async = remote.run_async
+    remote.run_async = capture_run_async
+
+    cfg = CluvConfig(
+        clusters=["rorqual"],
+        submit=SubmitConfig(job_script="scripts/job.sh"),
+        slurm={"SBATCH_TIME": "0:01:00"},
+        cluster_configs={"rorqual": {"SBATCH_PARTITION": "main"}},
+    )
+
+    with (
+        patch.object(submit_module, "sync", AsyncMock(return_value=[remote])),
+        patch.object(submit_module, "get_config", return_value=cfg),
+        patch.object(submit_module.subprocess, "run", return_value=_make_clean_run()),
+        patch.object(
+            submit_module.subprocess, "check_output", return_value="cafebabe"
+        ),
+    ):
+        await submit_module.submit(
+            cluster="rorqual",
+            command=["echo", "hello"],
+            job_script=None,
+            no_sync=True,
+        )
+
+    assert len(captured_commands) == 1
+    cmd = captured_commands[0]
+    assert "GIT_COMMIT=cafebabe" in cmd
+    assert "SBATCH_TIME=0:01:00" in cmd
+    assert "SBATCH_PARTITION=main" in cmd
+    assert "sbatch" in cmd
+    assert "scripts/job.sh" in cmd
+
+
+def _make_clean_run():
+    from unittest.mock import MagicMock
+    result = MagicMock()
+    result.stdout = ""
+    return result

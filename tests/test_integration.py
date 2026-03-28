@@ -183,30 +183,24 @@ async def test_sync_tamia_connects():
 # ---------------------------------------------------------------------------
 
 
-async def test_submit_rorqual_dry_run():
-    """Smoke-test: submit reaches rorqual and calls sbatch (dry-run via --test).
+async def test_submit_rorqual_builds_correct_command():
+    """Integration smoke-test: verify submit builds the right sbatch command for rorqual.
 
-    Uses `sbatch --test-only` to validate the job script without actually
-    queuing a job. Verifies that GIT_COMMIT and SBATCH_* env vars are passed
-    through correctly.
+    Connects to rorqual for real (exercises the live SSH path), but replaces
+    run_async on the returned remote so sbatch is never actually invoked —
+    the project may not be synced on rorqual at test time.
     """
-    from pathlib import Path
     from unittest.mock import AsyncMock, patch
 
     from cluv.cli import submit as submit_module
     from cluv.config import CluvConfig, SubmitConfig
 
     remote = await _require_remote("rorqual")
-
-    captured_commands = []
-
-    async def capture_run_async(cmd, **kwargs):
-        captured_commands.append(cmd)
-        # Run the real command on the remote so we exercise the SSH path.
-        return await original_run_async(cmd, **kwargs)
-
-    original_run_async = remote.run_async
-    remote.run_async = capture_run_async
+    # Direct assignment avoids descriptor/slot issues with patch.object on instances.
+    # sync is mocked to return this remote, so submit() uses it instead of calling
+    # RemoteV2.connect() (which would return a different object).
+    mock_run_async = AsyncMock()
+    remote.run_async = mock_run_async
 
     cfg = CluvConfig(
         clusters=["rorqual"],
@@ -219,19 +213,17 @@ async def test_submit_rorqual_dry_run():
         patch.object(submit_module, "sync", AsyncMock(return_value=[remote])),
         patch.object(submit_module, "get_config", return_value=cfg),
         patch.object(submit_module.subprocess, "run", return_value=_make_clean_run()),
-        patch.object(
-            submit_module.subprocess, "check_output", return_value="cafebabe"
-        ),
+        patch.object(submit_module.subprocess, "check_output", return_value="cafebabe"),
     ):
         await submit_module.submit(
             cluster="rorqual",
             command=["echo", "hello"],
             job_script=None,
-            no_sync=True,
+            no_sync=False,  # uses the mocked sync, which returns our patched remote
         )
 
-    assert len(captured_commands) == 1
-    cmd = captured_commands[0]
+    mock_run_async.assert_called_once()
+    cmd = mock_run_async.call_args[0][0]
     assert "GIT_COMMIT=cafebabe" in cmd
     assert "SBATCH_TIME=0:01:00" in cmd
     assert "SBATCH_PARTITION=main" in cmd

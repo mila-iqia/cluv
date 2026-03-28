@@ -161,7 +161,7 @@ async def sync_task_function(
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    num_tasks = 4 if config.results_path else 3
+    num_tasks = 5 if config.results_path else 4
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
     await install_uv(remotes)
@@ -169,7 +169,10 @@ async def sync_task_function(
     _update_progress(1, "Setting up project", num_tasks)
     await clone_project(remotes, project_path)
 
-    _update_progress(2, "Running 'uv sync'", num_tasks)
+    _update_progress(2, "Installing scripts", num_tasks)
+    await install_scripts(remotes, project_path)
+
+    _update_progress(3, "Running 'uv sync'", num_tasks)
     await asyncio.gather(
         *(
             remote.run_async(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
@@ -177,7 +180,7 @@ async def sync_task_function(
         )
     )
     if config.results_path:
-        _update_progress(3, "Fetching results", num_tasks)
+        _update_progress(4, "Fetching results", num_tasks)
         await fetch_results(remotes, config.results_path)
 
     _update_progress(num_tasks, "Done", num_tasks)
@@ -240,6 +243,24 @@ async def install_uv(remotes: list[RemoteV2]):
                 for remote in remotes_with_different_uv_versions
             )
         )
+
+
+async def install_scripts(remotes: list[RemoteV2], project_path: PurePosixPath):
+    """Symlink all executable files from scripts/ into ~/.local/bin/ on each remote.
+
+    Strips the .sh extension so commands are clean (e.g. code_checkpointing.sh → code_checkpointing).
+    Uses ln -sf so the operation is idempotent — safe to re-run on every sync.
+    """
+    cmd = (
+        f"bash -l -c '"
+        f"mkdir -p ~/.local/bin && "
+        f"for f in ~/{project_path}/scripts/*; do "
+        f'[ -x "$f" ] || continue; '
+        f'name=$(basename "$f" .sh); '
+        f'ln -sf "$f" ~/.local/bin/"$name"; '
+        f"done'"
+    )
+    await asyncio.gather(*(remote.run_async(cmd, hide=True) for remote in remotes))
 
 
 async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):

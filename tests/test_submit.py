@@ -300,3 +300,42 @@ async def test_git_commit_always_injected(tmp_path):
 
     cmd = fake_remote.run_async.call_args[0][0]
     assert "GIT_COMMIT=deadbeef" in cmd
+
+
+# ---------------------------------------------------------------------------
+# install_scripts
+# ---------------------------------------------------------------------------
+
+
+async def test_install_scripts_runs_on_all_remotes():
+    from pathlib import PurePosixPath
+    from unittest.mock import AsyncMock, call
+
+    from cluv.cli.sync import install_scripts
+
+    remotes = [AsyncMock(), AsyncMock()]
+    project_path = PurePosixPath("repos/myproject")
+
+    await install_scripts(remotes, project_path)
+
+    for remote in remotes:
+        remote.run_async.assert_called_once()
+        cmd = remote.run_async.call_args[0][0]
+        assert "~/.local/bin" in cmd
+        assert f"~/{project_path}/scripts" in cmd
+        assert "ln -sf" in cmd
+        assert 'basename "$f" .sh' in cmd
+
+
+async def test_install_scripts_command_is_idempotent():
+    """ln -sf must be used (force-overwrite) so re-runs don't fail."""
+    from pathlib import PurePosixPath
+    from unittest.mock import AsyncMock
+
+    from cluv.cli.sync import install_scripts
+
+    remote = AsyncMock()
+    await install_scripts([remote], PurePosixPath("repos/proj"))
+
+    cmd = remote.run_async.call_args[0][0]
+    assert "ln -sf" in cmd  # -f = force overwrite existing symlink

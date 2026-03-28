@@ -63,11 +63,12 @@ async def submit(
     SBATCH_* env vars configured in [tool.cluv.slurm] / [tool.cluv.clusters.<name>],
     then calls sbatch on the remote.
     """
-    # 1. Check git is clean locally.
+    # 1. Check git is clean locally (untracked files are fine — only tracked changes matter).
     git_status = subprocess.run(
         ["git", "status", "--porcelain"], capture_output=True, text=True
     )
-    if git_status.stdout.strip():
+    dirty_lines = [l for l in git_status.stdout.splitlines() if not l.startswith("??")]
+    if dirty_lines:
         console.print(
             "[red]Working directory is dirty. Please commit your changes before submitting.[/red]"
         )

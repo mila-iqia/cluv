@@ -101,6 +101,7 @@ async def test_status_storage(cluster_status: ClusterStatus):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize(cluster.__name__, ["mila", "tamia", "rorqual"], indirect=True)
 async def test_submit(remote: Remote):
     """End-to-end: actually submit scripts/job.sh to rorqual via sbatch.

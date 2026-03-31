@@ -5,6 +5,7 @@ from pathlib import Path
 import rich.console
 
 console = rich.console.Console(record=True, file=sys.stdout)
+_console = rich.console.Console(record=True, file=sys.stderr)
 
 
 def current_cluster() -> str | None:

@@ -121,10 +121,7 @@ def add_status_args(subparsers: Subparsers):
         nargs="*",
         default=None,
         metavar="<cluster>",
-        help=(
-            "Cluster(s) to query. "
-            "Leave empty to query all clusters with an active connection."
-        ),
+        help=("Cluster(s) to query. Leave empty to query all clusters with an active connection."),
     )
     # TODO: Add sub-commands to query the status with respect to different things, GPUs, storage, jobs, etc?
     # Or just display everything?
@@ -188,18 +185,6 @@ def setup_logging(verbose: int | None, force: bool = False):
     # elif verbose >= 2:
     #     logger.setLevel(logging.DEBUG)
     #     cluv_logger.setLevel(logging.DEBUG)
-
-    milatools_logger = logging.getLogger("milatools")
-    milatools_logger.setLevel(
-        logging.DEBUG
-        if verbose == 3
-        else logging.INFO
-        if verbose == 2
-        else logging.WARNING
-    )
-    # for handler in milatools_logger.handlers:
-    #     milatools_logger.removeHandler(handler)
-    milatools_logger.addHandler(handler)
 
 
 def _add_v_arg(parser: argparse.ArgumentParser):

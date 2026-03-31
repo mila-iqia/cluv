@@ -8,7 +8,6 @@ import pytest
 from cluv.cli import submit as submit_module
 from cluv.config import CluvConfig
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -90,8 +89,8 @@ async def test_submit_builds_correct_remote_command(tmp_path):
             program_args=["python", "train.py"],
         )
 
-    fake_remote.run_async.assert_called_once()
-    cmd = fake_remote.run_async.call_args[0][0]
+    fake_remote.run.assert_called_once()
+    cmd = fake_remote.run.call_args[0][0]
     assert f"GIT_COMMIT={FAKE_COMMIT}" in cmd
     assert "sbatch" in cmd
     assert "scripts/job.sh" in cmd
@@ -123,7 +122,7 @@ async def test_sbatch_flags_forwarded(tmp_path):
             program_args=["python", "train.py"],
         )
 
-    cmd = fake_remote.run_async.call_args[0][0]
+    cmd = fake_remote.run.call_args[0][0]
     assert "--partition=gpu" in cmd
     assert "--mem=40G" in cmd
     assert "python train.py" in cmd
@@ -155,7 +154,7 @@ async def test_sbatch_flags_only(tmp_path):
             program_args=[],
         )
 
-    cmd = fake_remote.run_async.call_args[0][0]
+    cmd = fake_remote.run.call_args[0][0]
     assert "--gres=gpu:1" in cmd
     assert cmd.index("--gres=gpu:1") < cmd.index("scripts/job.sh")
 
@@ -186,7 +185,7 @@ async def test_submit_includes_global_slurm_vars(tmp_path):
             program_args=["python", "train.py"],
         )
 
-    cmd = fake_remote.run_async.call_args[0][0]
+    cmd = fake_remote.run.call_args[0][0]
     assert "SBATCH_TIME=3:00:00" in cmd
     assert "SBATCH_GPUS=1" in cmd
 
@@ -215,7 +214,7 @@ async def test_submit_per_cluster_vars_override_globals(tmp_path):
             program_args=["python", "train.py"],
         )
 
-    cmd = fake_remote.run_async.call_args[0][0]
+    cmd = fake_remote.run.call_args[0][0]
     assert "SBATCH_PARTITION=main" in cmd
     assert "SBATCH_PARTITION=default" not in cmd
     assert "SBATCH_ACCOUNT=def-bengioy" in cmd
@@ -272,44 +271,5 @@ async def test_git_commit_always_injected(tmp_path):
             program_args=[],
         )
 
-    cmd = fake_remote.run_async.call_args[0][0]
+    cmd = fake_remote.run.call_args[0][0]
     assert "GIT_COMMIT=deadbeef" in cmd
-
-
-# ---------------------------------------------------------------------------
-# install_scripts
-# ---------------------------------------------------------------------------
-
-
-async def test_install_scripts_runs_on_all_remotes():
-    from pathlib import PurePosixPath
-    from unittest.mock import AsyncMock
-
-    from cluv.cli.sync import install_scripts
-
-    remotes = [AsyncMock(), AsyncMock()]
-    project_path = PurePosixPath("repos/myproject")
-
-    await install_scripts(remotes, project_path)
-
-    for remote in remotes:
-        remote.run_async.assert_called_once()
-        cmd = remote.run_async.call_args[0][0]
-        assert "~/.local/bin" in cmd
-        assert f"~/{project_path}/scripts" in cmd
-        assert "ln -sf" in cmd
-        assert 'basename "$f" .sh' in cmd
-
-
-async def test_install_scripts_command_is_idempotent():
-    """ln -sf must be used (force-overwrite) so re-runs don't fail."""
-    from pathlib import PurePosixPath
-    from unittest.mock import AsyncMock
-
-    from cluv.cli.sync import install_scripts
-
-    remote = AsyncMock()
-    await install_scripts([remote], PurePosixPath("repos/proj"))
-
-    cmd = remote.run_async.call_args[0][0]
-    assert "ln -sf" in cmd  # -f = force overwrite existing symlink

@@ -11,18 +11,17 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 
 import rich_argparse
-from milatools.utils.local_v2 import LocalV2
+
+# Reuse some code milatools. Could also extract it here to remove the dependency.
 from milatools.utils.parallel_progress import (
     AsyncTaskFn,
     ReportProgressFn,
     run_async_tasks_with_progress_bar,
 )
-from milatools.utils.remote_v2 import (
-    RemoteV2,
-)
 
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import find_pyproject, get_config
+from cluv.remote import Remote, get_ssh_options_for_host, run
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
@@ -76,7 +75,7 @@ def add_sync_args(
 
 async def sync(
     clusters: list[str] | None = None, uv_sync_args: list[str] | None = None
-) -> list[RemoteV2]:
+) -> list[Remote]:
     """Synchronizes the current project across clusters.
 
     - Synchronizes code across all clusters.
@@ -113,7 +112,7 @@ async def sync(
         remotes = await login(clusters)
 
     # Git push first?
-    await LocalV2.run_async("git push", hide=False)
+    await run(("git", "push"), hide=False)
 
     # TODO: Do we raise an error if we fail to connect to a given cluster?
     # TODO: Add an --ignore flag to ignore some clusters?
@@ -139,10 +138,7 @@ async def sync(
     config = get_config()
     await clone_project(remotes, project_path)
     await asyncio.gather(
-        *(
-            remote.run_async(f"bash -l -c 'uv --directory={project_path} sync'")
-            for remote in remotes
-        )
+        *(remote.run(f"bash -l -c 'uv --directory={project_path} sync'") for remote in remotes)
     )
     if config.results_path:
         await fetch_results(remotes, config.results_path)
@@ -150,7 +146,7 @@ async def sync(
 
 async def sync_task_function(
     report_progress: ReportProgressFn,
-    remote: RemoteV2,
+    remote: Remote,
 ):
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
@@ -161,7 +157,7 @@ async def sync_task_function(
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    num_tasks = 5 if config.results_path else 4
+    num_tasks = 4 if config.results_path else 3
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
     await install_uv(remotes)
@@ -169,24 +165,21 @@ async def sync_task_function(
     _update_progress(1, "Setting up project", num_tasks)
     await clone_project(remotes, project_path)
 
-    _update_progress(2, "Installing scripts", num_tasks)
-    await install_scripts(remotes, project_path)
-
-    _update_progress(3, "Running 'uv sync'", num_tasks)
+    _update_progress(2, "Running 'uv sync'", num_tasks)
     await asyncio.gather(
         *(
-            remote.run_async(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
+            remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
             for remote in remotes
         )
     )
     if config.results_path:
-        _update_progress(4, "Fetching results", num_tasks)
+        _update_progress(3, "Fetching results", num_tasks)
         await fetch_results(remotes, config.results_path)
 
     _update_progress(num_tasks, "Done", num_tasks)
 
 
-async def install_uv(remotes: list[RemoteV2]):
+async def install_uv(remotes: list[Remote]):
     if not shutil.which("uv"):
         logger.error(
             "`uv` is not installed on this machine. Please install `uv` to ensure it's installed on the remote clusters as well."
@@ -205,7 +198,7 @@ async def install_uv(remotes: list[RemoteV2]):
 
     uv_paths = await asyncio.gather(
         *(
-            remote.get_output_async("bash -l -c 'which uv'", warn=True, hide=True, display=False)
+            remote.get_output("bash -l -c 'which uv'", warn=True, hide=True, display=False)
             for remote in remotes
         )
     )
@@ -216,14 +209,14 @@ async def install_uv(remotes: list[RemoteV2]):
     logger.info(f"Installing uv on the following clusters: {clusters_without_uv}")
     await asyncio.gather(
         *(
-            remote.run_async("curl -LsSf https://astral.sh/uv/install.sh | sh")
+            remote.run("curl -LsSf https://astral.sh/uv/install.sh | sh")
             for remote in remotes
             if remote.hostname in clusters_without_uv
         )
     )
     uv_versions = await asyncio.gather(
         *(
-            remote.get_output_async("bash -l -c 'uv --version'", hide=True, display=False)
+            remote.get_output("bash -l -c 'uv --version'", hide=True, display=False)
             for remote in remotes
         )
     )
@@ -239,31 +232,13 @@ async def install_uv(remotes: list[RemoteV2]):
         )
         await asyncio.gather(
             *(
-                remote.run_async(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
+                remote.run(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
                 for remote in remotes_with_different_uv_versions
             )
         )
 
 
-async def install_scripts(remotes: list[RemoteV2], project_path: PurePosixPath):
-    """Symlink all executable files from scripts/ into ~/.local/bin/ on each remote.
-
-    Strips the .sh extension so commands are clean (e.g. code_checkpointing.sh → code_checkpointing).
-    Uses ln -sf so the operation is idempotent — safe to re-run on every sync.
-    """
-    cmd = (
-        f"bash -l -c '"
-        f"mkdir -p ~/.local/bin && "
-        f"for f in ~/{project_path}/scripts/*; do "
-        f'[ -x "$f" ] || continue; '
-        f'name=$(basename "$f" .sh); '
-        f'ln -sf "$f" ~/.local/bin/"$name"; '
-        f"done'"
-    )
-    await asyncio.gather(*(remote.run_async(cmd, hide=True) for remote in remotes))
-
-
-async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
+async def clone_project(remotes: list[Remote], project_path: PurePosixPath):
     """Setup the project repo on all the remote clusters.
 
     New idea:
@@ -285,7 +260,7 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     # For each cluster where the project isn't cloned yet, clone it.
     _clusters_without_clones_result = await asyncio.gather(
         *(
-            remote.run_async(
+            remote.run(
                 f"test -d {project_path}",
                 warn=True,
                 hide=True,
@@ -304,14 +279,14 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     )
     await asyncio.gather(
         *(
-            remote.run_async(f"git clone {github_repo_url}.git {project_path}", hide=True)
+            remote.run(f"git clone {github_repo_url}.git {project_path}", hide=True)
             for remote in clusters_without_clones
         )
     )
 
     await asyncio.gather(
         *(
-            remote.run_async(f"git -C {project_path} fetch --all --prune", hide=True)
+            remote.run(f"git -C {project_path} fetch --all --prune", hide=True)
             for remote in remotes
         )
     )
@@ -319,7 +294,7 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     # TODO: Look into why the command still has the Controlpath explicitly there, even if the ssh config already has it.
     await asyncio.gather(
         *(
-            remote.run_async(
+            remote.run(
                 f"git -C {project_path} checkout {current_git_branch}",
                 # warn=True,
                 hide=False,
@@ -327,10 +302,10 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
             for remote in remotes
         )
     )
-    await asyncio.gather(*(remote.run_async(f"git -C {project_path} pull") for remote in remotes))
+    await asyncio.gather(*(remote.run(f"git -C {project_path} pull") for remote in remotes))
 
 
-async def fetch_results(remotes: list[RemoteV2], results_path: Path | str):
+async def fetch_results(remotes: list[Remote], results_path: Path | str):
     """Fetches results from all remote clusters to the current (mila for now) cluster using rsync."""
     results_path = Path(results_path)
     assert not results_path.is_absolute()
@@ -354,10 +329,21 @@ async def fetch_results(remotes: list[RemoteV2], results_path: Path | str):
 
     await asyncio.gather(
         *(
-            LocalV2.run_async(
-                # Use --full-form flags (not -avz) for better readability.
-                f"rsync --archive --verbose --compress --copy-links "
-                f"{remote.hostname}:{results_path_relative_to_home} {(Path.home() / results_path_relative_to_home).parent}",
+            run(
+                # Using --full-form flags (not -avz) for better readability.
+                (
+                    "rsync",
+                    "--archive",
+                    "--verbose",
+                    "--compress",
+                    "--copy-links",
+                    f"{remote.hostname}:{results_path_relative_to_home}",
+                    str((Path.home() / results_path_relative_to_home).parent),
+                    # shlex.split(
+                    #     f"rsync --archive --verbose --compress --copy-links "
+                    #     f"{remote.hostname}:{results_path_relative_to_home} {(Path.home() / results_path_relative_to_home).parent}"
+                    # )
+                ),
                 warn=True,
                 hide=False,
             )
@@ -366,7 +352,7 @@ async def fetch_results(remotes: list[RemoteV2], results_path: Path | str):
     )
 
 
-async def create_results_dir_with_symlink_to_scratch(remote: RemoteV2, results_path: Path):
+async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_path: Path):
     project_dir = find_pyproject().parent
     project_dirname = project_dir.name
     project_dir_relative_to_home = project_dir.relative_to(Path.home())
@@ -374,9 +360,7 @@ async def create_results_dir_with_symlink_to_scratch(remote: RemoteV2, results_p
     # On some clusters (for example Vulcan), $SCRATCH is only defined after the .bashrc and such are loaded (login shells).
     # This is why we have the `bash -c -l` surrounding the command.
     scratch = (
-        await remote.get_output_async(
-            "bash -c -l 'echo $SCRATCH'", hide=True, warn=True, display=False
-        )
+        await remote.get_output("bash -c -l 'echo $SCRATCH'", hide=True, warn=True, display=False)
     ).strip()
     if not scratch:
         logger.warning(
@@ -385,7 +369,7 @@ async def create_results_dir_with_symlink_to_scratch(remote: RemoteV2, results_p
         return
 
     if await test("-d", f"{scratch}/{results_path}/{project_dirname}", remote):
-        result = await remote.run_async(
+        result = await remote.run(
             f"mkdir -p {scratch}/{results_path}/{project_dirname}", warn=True, hide=True
         )
         if result.returncode != 0:
@@ -393,16 +377,14 @@ async def create_results_dir_with_symlink_to_scratch(remote: RemoteV2, results_p
                 f"[orange]Failed to create directory {scratch}/{results_path}/{project_dirname} on {remote.hostname}.\n"
                 f"Results will be saved in the project directory ({project_dir}/{results_path}) which might not be ideal![/orange]"
             )
-            await remote.run_async(
-                f"mkdir -p {project_dir_relative_to_home}/{results_path}", warn=True
-            )
+            await remote.run(f"mkdir -p {project_dir_relative_to_home}/{results_path}", warn=True)
             return
     # Check if {project_dir}/{results_path} exists.
     # If it doesn't exist, create a symlink.
 
     if not await test("-e", project_dir_relative_to_home / results_path, remote):
         # Doesn't exist, create a symlink.
-        await remote.run_async(
+        await remote.run(
             f"ln -s -T {scratch}/{results_path}/{project_dirname} "
             f"{project_dir_relative_to_home}/{results_path}"
         )
@@ -418,13 +400,13 @@ async def create_results_dir_with_symlink_to_scratch(remote: RemoteV2, results_p
         return
 
 
-async def file_exists(remote: RemoteV2, path: str | Path) -> bool:
+async def file_exists(remote: Remote, path: str | Path) -> bool:
     return await test("-e", path, remote)
 
 
-async def test(type: Literal["-d", "-e", "-L"], path: str | Path, remote: RemoteV2):
+async def test(type: Literal["-d", "-e", "-L"], path: str | Path, remote: Remote):
     """Returns whether `ssh test {type} {path}` success on the remote."""
-    result = await remote.run_async(f"test {type} {path}", warn=True, hide=True)
+    result = await remote.run(f"test {type} {path}", warn=True, hide=True)
     return result.returncode == 0
 
 
@@ -433,12 +415,5 @@ def get_loglevel():
 
 
 async def host_uses_controlmaster(hostname: str) -> bool:
-    from milatools.utils.local_v2 import run_async
-
-    applied_options_for_host = (
-        await run_async(("ssh", "-G", hostname, "|", "grep", "control"))
-    ).stdout
-    applied_options_for_host = dict(
-        line.strip().split(maxsplit=1) for line in applied_options_for_host.splitlines()
-    )
+    applied_options_for_host = get_ssh_options_for_host(hostname)
     return applied_options_for_host.get("controlmaster", "no").lower() != "no"

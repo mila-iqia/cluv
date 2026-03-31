@@ -24,7 +24,7 @@ pytestmark = pytest.mark.integration
 
 
 async def _require_remote(cluster: str):
-    """Return an active RemoteV2 for *cluster*, skip the test if not connected."""
+    """Return an active Remote for *cluster*, skip the test if not connected."""
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None:
         pytest.skip(f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first.")
@@ -164,11 +164,10 @@ async def test_sync_tamia_connects():
 
     remote = await _require_remote("tamia")
 
-    # Patch LocalV2.run_async so we don't actually git push, and patch
+    # Patch LocalV2.run so we don't actually git push, and patch
     # login so we get our pre-connected remote back without any 2FA.
     with (
         patch.object(sync_module, "login", AsyncMock(return_value=[remote])),
-        patch("milatools.utils.local_v2.LocalV2.run_async", AsyncMock()),
         patch.object(sync_module, "install_uv", AsyncMock()),
         patch.object(sync_module, "clone_project", AsyncMock()),
     ):
@@ -196,22 +195,20 @@ async def test_submit_rorqual_real():
 
     remote = await _require_remote("rorqual")
 
-    git_result = _subprocess.run(
-        ["git", "status", "--porcelain"], capture_output=True, text=True
-    )
+    git_result = _subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
     if any(not line.startswith("??") for line in git_result.stdout.splitlines()):
         pytest.skip("Working tree is dirty — cluv submit requires a clean git state")
 
     # Wrap run_async to capture the sbatch response without breaking the call.
     completed: list[_subprocess.CompletedProcess] = []
-    _original = remote.run_async
+    _original = remote.run
 
     async def _capture(*args, **kwargs):
         cp = await _original(*args, **kwargs)
         completed.append(cp)
         return cp
 
-    remote.run_async = _capture
+    remote.run = _capture
 
     with patch.object(submit_module, "sync", AsyncMock(return_value=[remote])):
         await submit_module.submit(
@@ -240,9 +237,9 @@ async def test_submit_rorqual_builds_correct_command():
     remote = await _require_remote("rorqual")
     # Direct assignment avoids descriptor/slot issues with patch.object on instances.
     # sync is mocked to return this remote, so submit() uses it instead of calling
-    # RemoteV2.connect() (which would return a different object).
+    # Remote.connect() (which would return a different object).
     mock_run_async = AsyncMock()
-    remote.run_async = mock_run_async
+    remote.run = mock_run_async
 
     cfg = CluvConfig(
         clusters=["rorqual"],
@@ -274,6 +271,7 @@ async def test_submit_rorqual_builds_correct_command():
 
 def _make_clean_run():
     from unittest.mock import MagicMock
+
     result = MagicMock()
     result.stdout = ""
     return result

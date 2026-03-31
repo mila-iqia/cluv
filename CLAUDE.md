@@ -25,9 +25,9 @@ Run tests with `uv run pytest`.
 
 **Config**: `cluv/config.py` — reads the `[tool.cluv]` section from the nearest `pyproject.toml`. Key fields: `clusters` (list of hostnames or table with per-cluster settings), `slurm` (global `SBATCH_*` env var defaults), `cluster_configs` (per-cluster `SBATCH_*` overrides). Config is cached with `@functools.cache`.
 
-**SSH connections**: All remote operations go through `milatools.utils.remote_v2.RemoteV2`. Connections reuse existing SSH ControlMaster sockets (checked via `control_socket_is_running_async`) to avoid triggering 2FA prompts. `cluv login` establishes fresh connections sequentially (to avoid concurrent 2FA prompts). The `login.get_remote_without_2fa_prompt()` helper is used by `sync` to only operate on already-connected clusters.
+**SSH connections**: All remote operations go through `milatools.utils.remote_v2.Remote`. Connections reuse existing SSH ControlMaster sockets (checked via `control_socket_is_running_async`) to avoid triggering 2FA prompts. `cluv login` establishes fresh connections sequentially (to avoid concurrent 2FA prompts). The `login.get_remote_without_2fa_prompt()` helper is used by `sync` to only operate on already-connected clusters.
 
-**Async pattern**: Multi-cluster operations use `asyncio.gather` for parallelism. The `sync` command uses `milatools.utils.parallel_progress.run_async_tasks_with_progress_bar` to display per-cluster progress. The top-level `main()` uses `asyncio.run()` when the subcommand function is a coroutine.
+**Async pattern**: Multi-cluster operations use `asyncio.gather` for parallelism. The `sync` command uses `milatools.utils.parallel_progress.run_tasks_with_progress_bar` to display per-cluster progress. The top-level `main()` uses `asyncio.run()` when the subcommand function is a coroutine.
 
 **Rich console**: A single `rich.Console` instance is created in `cluv/utils.py` and patched into `milatools` internals (`milatools.cli.console`, etc.) so all output goes through one stream.
 

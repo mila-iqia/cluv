@@ -69,15 +69,19 @@ source = ["cluv"]
 [tool.coverage.report]
 show_missing = true
 
-[tool.cluv.submit]
-job_script = "scripts/job.sh"
-
 [tool.cluv.slurm]
 # Global SBATCH_* defaults applied to all clusters.
+SBATCH_TIME = "3:00:00"
+SBATCH_REQUE = true
 
 [tool.cluv.clusters.mila]
-[tool.cluv.clusters.tamia]
+SBATCH_PARTITION = "long"
+
 [tool.cluv.clusters.rorqual]
+SBATCH_ACCOUNT = "def-bengioy"
+SBATCH_PARTITION = "main"
+
+[tool.cluv.clusters.tamia]
 # [tool.cluv.clusters.fir]
 # [tool.cluv.clusters.nibi]
 # [tool.cluv.clusters.killarney]

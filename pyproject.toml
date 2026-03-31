@@ -83,8 +83,6 @@ SBATCH_REQUE = true
 SBATCH_PARTITION = "long"
 
 [tool.cluv.clusters.rorqual]
-SBATCH_ACCOUNT = "def-bengioy"
-SBATCH_PARTITION = "main"
 UV_OFFLINE = 1
 
 [tool.cluv.clusters.tamia]

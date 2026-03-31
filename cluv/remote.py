@@ -204,7 +204,7 @@ def get_ssh_options_for_host(hostname: str) -> dict[str, str]:
 # that the ssh config file doesn't change.
 @functools.cache
 def _get_ssh_options_for_host(hostname: str) -> tuple[tuple[str, str], ...]:
-    output = subprocess.getoutput(("ssh", "-G", hostname))
+    output = subprocess.getoutput(f"ssh -G {hostname}")
     results = []
     for line in output.splitlines():
         key, val = line.split(maxsplit=1)

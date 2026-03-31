@@ -10,6 +10,9 @@ import textwrap
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
+# TODO: Figure out what the issues are with the console output
+import milatools.cli
+import milatools.utils.parallel_progress
 import rich_argparse
 
 # Reuse some code milatools. Could also extract it here to remove the dependency.
@@ -24,6 +27,8 @@ from cluv.config import find_pyproject, get_config
 from cluv.remote import Remote, get_ssh_options_for_host, run
 from cluv.utils import console, current_cluster
 
+milatools.cli.console = console
+milatools.utils.parallel_progress.console = console
 logger = logging.getLogger(__name__)
 
 
@@ -354,6 +359,10 @@ async def fetch_results(remotes: list[Remote], results_path: Path | str):
 
 
 async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_path: Path):
+    """Create a symlink on the remote, from ~/<project>/results_path to $SCRATCH/logs/<project_name>.
+
+    TODO: Doesn't work, there are bugs with how the dir / symlink is created.
+    """
     project_dir = find_pyproject().parent
     project_dirname = project_dir.name
     project_dir_relative_to_home = project_dir.relative_to(Path.home())
@@ -371,7 +380,7 @@ async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_pat
 
     if await test("-d", f"{scratch}/{results_path}/{project_dirname}", remote):
         result = await remote.run(
-            f"mkdir -p {scratch}/{results_path}/{project_dirname}", warn=True, hide=True
+            f"mkdir -p {scratch}/{results_path}/{project_dirname}", warn=True, hide=False
         )
         if result.returncode != 0:
             logger.warning(

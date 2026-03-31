@@ -70,7 +70,7 @@ async def submit(
     git_status = subprocess.run(
         ["git", "status", "--porcelain"], capture_output=True, text=True
     )
-    dirty_lines = [l for l in git_status.stdout.splitlines() if not l.startswith("??")]
+    dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
     if dirty_lines:
         console.print(
             "[red]Working directory is dirty. Please commit your changes before submitting.[/red]"

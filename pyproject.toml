@@ -73,6 +73,7 @@ show_missing = true
 # IDEA: either the job script is set here, or passed as a positional argument (after the cluster)
 # OR, leave it as a required positional argument. More explicit.
 job_script = "scripts/job.sh"
+results_path = "logs"
 
 [tool.cluv.slurm]
 # Global SBATCH_* defaults applied to all clusters.

@@ -65,7 +65,7 @@ async def submit(
     dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
     if dirty_lines:
         console.print(
-            "[red]Working directory is dirty. Please commit your changes before submitting.[/red]"
+            "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
         )
         sys.exit(1)
 

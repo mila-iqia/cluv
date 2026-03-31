@@ -206,7 +206,8 @@ async def install_uv(remotes: list[Remote]):
     clusters_without_uv = [
         remote.hostname for remote, uv_path in zip(remotes, uv_paths) if not uv_path
     ]
-    logger.info(f"Installing uv on the following clusters: {clusters_without_uv}")
+    if clusters_without_uv:
+        logger.info(f"Installing uv on the following clusters: {clusters_without_uv}")
     await asyncio.gather(
         *(
             remote.run("curl -LsSf https://astral.sh/uv/install.sh | sh")
@@ -386,7 +387,9 @@ async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_pat
         # Doesn't exist, create a symlink.
         await remote.run(
             f"ln -s -T {scratch}/{results_path}/{project_dirname} "
-            f"{project_dir_relative_to_home}/{results_path}"
+            f"{project_dir_relative_to_home}/{results_path}",
+            # TODO: Still getting an error that the link exists. Weird.
+            # warn=True,
         )
         return
 

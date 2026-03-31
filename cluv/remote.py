@@ -148,10 +148,10 @@ async def run(
             + f" exited with {proc.returncode}"
             + (f": {stderr}" if stderr else "")
         )
-        logger.debug(message)
+        logger.debug(message, stacklevel=2)
         if not warn:
             if stderr and hide not in [True, "err", "stderr"]:
-                logger.error(stderr.decode())
+                logger.error(stderr.decode(), stacklevel=2)
             raise subprocess.CalledProcessError(
                 returncode=proc.returncode,
                 cmd=program_and_args,
@@ -159,7 +159,7 @@ async def run(
                 stderr=stderr,
             )
         if hide is not True:  # don't warn if hide is True.
-            logger.warning(RuntimeWarning(message))
+            logger.warning(RuntimeWarning(message), stacklevel=2)
     result = subprocess.CompletedProcess(
         args=program_and_args,
         returncode=proc.returncode,
@@ -169,11 +169,11 @@ async def run(
     if result.stdout:
         if hide not in [True, "out", "stdout"]:
             print(result.stdout)
-        logger.debug(f"{result.stdout}")
+        logger.debug(result.stdout)
     if result.stderr:
         if hide not in [True, "err", "stderr"]:
             print(result.stderr, file=sys.stderr)
-        logger.debug(f"{result.stderr}")
+        logger.debug(result.stderr)
     return result
 
 

@@ -1,6 +1,5 @@
 """Unit tests for cluv/cli/submit.py — no SSH, no git, all mocked."""
 
-import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -277,7 +276,7 @@ async def test_git_commit_always_injected(tmp_path):
 
 async def test_install_scripts_runs_on_all_remotes():
     from pathlib import PurePosixPath
-    from unittest.mock import AsyncMock, call
+    from unittest.mock import AsyncMock
 
     from cluv.cli.sync import install_scripts
 

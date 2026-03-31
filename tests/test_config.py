@@ -1,6 +1,5 @@
 """Unit tests for cluv/config.py — pure, no I/O beyond tmp_path."""
 
-import pytest
 
 from cluv.config import load_cluv_config
 

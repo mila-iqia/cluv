@@ -58,7 +58,8 @@ async def test_dirty_git_aborts(tmp_path):
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=[],
+            sbatch_args=[],
+            program_args=[],
         )
     assert exc_info.value.code == 1
 
@@ -85,7 +86,8 @@ async def test_submit_builds_correct_remote_command(tmp_path):
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=["--", "python", "train.py"],
+            sbatch_args=[],
+            program_args=["python", "train.py"],
         )
 
     fake_remote.run_async.assert_called_once()
@@ -97,7 +99,7 @@ async def test_submit_builds_correct_remote_command(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# sbatch flags before '--' are forwarded to sbatch
+# sbatch flags are forwarded to sbatch, before the job script
 # ---------------------------------------------------------------------------
 
 
@@ -117,23 +119,23 @@ async def test_sbatch_flags_forwarded(tmp_path):
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=["--partition=gpu", "--mem=40G", "--", "python", "train.py"],
+            sbatch_args=["--partition=gpu", "--mem=40G"],
+            program_args=["python", "train.py"],
         )
 
     cmd = fake_remote.run_async.call_args[0][0]
     assert "--partition=gpu" in cmd
     assert "--mem=40G" in cmd
     assert "python train.py" in cmd
-    # sbatch flags must appear before the job script
     assert cmd.index("--partition=gpu") < cmd.index("scripts/job.sh")
 
 
 # ---------------------------------------------------------------------------
-# rest with no '--' → all treated as sbatch flags, no program args
+# sbatch_args only, no program args
 # ---------------------------------------------------------------------------
 
 
-async def test_rest_without_separator_treated_as_sbatch_flags(tmp_path):
+async def test_sbatch_flags_only(tmp_path):
     fake_remote = AsyncMock()
     pyproject = tmp_path / "proj" / "pyproject.toml"
     (tmp_path / "proj").mkdir()
@@ -149,7 +151,8 @@ async def test_rest_without_separator_treated_as_sbatch_flags(tmp_path):
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=["--gres=gpu:1"],
+            sbatch_args=["--gres=gpu:1"],
+            program_args=[],
         )
 
     cmd = fake_remote.run_async.call_args[0][0]
@@ -179,7 +182,8 @@ async def test_submit_includes_global_slurm_vars(tmp_path):
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=["--", "python", "train.py"],
+            sbatch_args=[],
+            program_args=["python", "train.py"],
         )
 
     cmd = fake_remote.run_async.call_args[0][0]
@@ -207,7 +211,8 @@ async def test_submit_per_cluster_vars_override_globals(tmp_path):
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=["--", "python", "train.py"],
+            sbatch_args=[],
+            program_args=["python", "train.py"],
         )
 
     cmd = fake_remote.run_async.call_args[0][0]
@@ -235,7 +240,8 @@ async def test_always_syncs(tmp_path):
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=[],
+            sbatch_args=[],
+            program_args=[],
         )
 
     mock_sync.assert_called_once_with(clusters=["rorqual"])
@@ -262,7 +268,8 @@ async def test_git_commit_always_injected(tmp_path):
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=[],
+            sbatch_args=[],
+            program_args=[],
         )
 
     cmd = fake_remote.run_async.call_args[0][0]

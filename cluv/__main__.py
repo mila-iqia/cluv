@@ -35,6 +35,20 @@ if typing.TYPE_CHECKING:
 
 
 def main(argv: list[str] | None = None):
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # argparse consumes '--' before REMAINDER sees it, so we extract program
+    # args (everything after the first '--' following 'submit') before parsing.
+    submit_program_args: list[str] = []
+    try:
+        sub_idx = argv.index("submit")
+        sep_idx = argv.index("--", sub_idx + 1)
+        submit_program_args = list(argv[sep_idx + 1 :])
+        argv = list(argv[:sep_idx])
+    except ValueError:
+        pass
+
     parser = simple_parsing.ArgumentParser(
         description=__doc__,
         formatter_class=rich_argparse.RichHelpFormatter,
@@ -70,8 +84,11 @@ def main(argv: list[str] | None = None):
 
     verbose: int = args_dict.pop("verbose")
     setup_logging(verbose=verbose, force=True)
-    args_dict.pop("<command>")
+    subcommand = args_dict.pop("<command>")
     function: Callable = args_dict.pop("func")
+
+    if subcommand == "submit":
+        args_dict["program_args"] = submit_program_args
 
     try:
         if inspect.iscoroutinefunction(function):

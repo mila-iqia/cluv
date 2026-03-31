@@ -217,7 +217,8 @@ async def test_submit_rorqual_real():
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=[],
+            sbatch_args=[],
+            program_args=[],
         )
 
     assert completed, "run_async was never called"
@@ -258,7 +259,8 @@ async def test_submit_rorqual_builds_correct_command():
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            rest=["--", "echo", "hello"],
+            sbatch_args=[],
+            program_args=["echo", "hello"],
         )
 
     mock_run_async.assert_called_once()

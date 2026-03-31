@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 import rich_argparse
+
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
 from cluv.utils import console
@@ -34,10 +35,10 @@ def add_submit_args(
         help="Path to the sbatch job script (relative to project root).",
     )
     submit_parser.add_argument(
-        "rest",
+        "sbatch_args",
         nargs=argparse.REMAINDER,
         metavar="...",
-        help="Optional sbatch flags followed by -- and program arguments.",
+        help="sbatch flags (before --) and/or program arguments (after --).",
     )
     submit_parser.set_defaults(func=submit)
     return submit_parser
@@ -46,7 +47,8 @@ def add_submit_args(
 async def submit(
     cluster: str,
     job_script: str,
-    rest: list[str],
+    sbatch_args: list[str],
+    program_args: list[str],
 ):
     """Submit a SLURM job on a remote cluster.
 
@@ -54,18 +56,10 @@ async def submit(
     SBATCH_* env vars configured in [tool.cluv.slurm] / [tool.cluv.clusters.<name>],
     then calls sbatch on the remote.
 
-    Any arguments before -- are forwarded to sbatch as flags; arguments after --
-    are passed to the job script as program arguments.
+    sbatch_args are forwarded as flags to sbatch; program_args are passed to
+    the job script. main() extracts program_args from argv before argparse runs,
+    since argparse strips '--' before REMAINDER sees it.
     """
-    # Split rest on '--': left = sbatch flags, right = program args.
-    if "--" in rest:
-        sep = rest.index("--")
-        sbatch_flags = rest[:sep]
-        program_args = rest[sep + 1 :]
-    else:
-        sbatch_flags = rest
-        program_args = []
-
     # 1. Check git is clean locally (untracked files are fine).
     git_status = subprocess.run(
         ["git", "status", "--porcelain"], capture_output=True, text=True
@@ -78,9 +72,7 @@ async def submit(
         sys.exit(1)
 
     # 2. Capture current commit hash.
-    git_commit = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], text=True
-    ).strip()
+    git_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 
     # 3. Sync.
     remotes = await sync(clusters=[cluster])
@@ -98,14 +90,16 @@ async def submit(
     env_vars["GIT_COMMIT"] = git_commit
 
     env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    sbatch_flags_str = " ".join(shlex.quote(f) for f in sbatch_flags)
+    sbatch_args_str = " ".join(shlex.quote(f) for f in sbatch_args)
     program_args_str = shlex.join(program_args)
 
     # 6. Submit.
-    remote_cmd = f"bash -l -c '{env_prefix} sbatch {sbatch_flags_str} {remote_job_script} {program_args_str}'"
+    remote_cmd = (
+        f"bash -l -c '{env_prefix} sbatch {sbatch_args_str} {remote_job_script} {program_args_str}'"
+    )
     console.print(
         f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
-        + (f" {sbatch_flags_str}" if sbatch_flags_str else "")
+        + (f" {sbatch_args_str}" if sbatch_args_str else "")
         + (f" -- {program_args_str}" if program_args_str else "")
     )
     await remote.run_async(remote_cmd)

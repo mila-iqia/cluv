@@ -217,7 +217,6 @@ async def test_submit_rorqual_builds_correct_command():
         await submit_module.submit(
             cluster="rorqual",
             job_script="scripts/job.sh",
-            no_sync=False,  # uses the mocked sync, which returns our patched remote
             rest=["--", "echo", "hello"],
         )
 

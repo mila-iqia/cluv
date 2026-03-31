@@ -7,8 +7,6 @@ import sys
 from pathlib import Path
 
 import rich_argparse
-from milatools.utils.remote_v2 import RemoteV2
-
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
 from cluv.utils import console
@@ -22,7 +20,7 @@ def add_submit_args(
         "submit",
         help="Submit a SLURM job on a remote cluster.",
         formatter_class=rich_argparse.RichHelpFormatter,
-        usage="cluv submit <cluster> <job.sh> [--no-sync] [sbatch-args...] [-- program-args...]",
+        usage="cluv submit <cluster> <job.sh> [sbatch-args...] [-- program-args...]",
     )
     submit_parser.add_argument(
         "cluster",
@@ -34,12 +32,6 @@ def add_submit_args(
         "job_script",
         metavar="<job.sh>",
         help="Path to the sbatch job script (relative to project root).",
-    )
-    submit_parser.add_argument(
-        "--no-sync",
-        action="store_true",
-        default=False,
-        help="Skip syncing the project to the cluster before submitting.",
     )
     submit_parser.add_argument(
         "rest",
@@ -54,14 +46,13 @@ def add_submit_args(
 async def submit(
     cluster: str,
     job_script: str,
-    no_sync: bool,
     rest: list[str],
 ):
     """Submit a SLURM job on a remote cluster.
 
-    Enforces a clean git state, sets GIT_COMMIT and any SBATCH_* env vars
-    configured in [tool.cluv.slurm] / [tool.cluv.clusters.<name>], then calls
-    sbatch on the remote.
+    Enforces a clean git state, syncs the project, sets GIT_COMMIT and any
+    SBATCH_* env vars configured in [tool.cluv.slurm] / [tool.cluv.clusters.<name>],
+    then calls sbatch on the remote.
 
     Any arguments before -- are forwarded to sbatch as flags; arguments after --
     are passed to the job script as program arguments.
@@ -91,12 +82,9 @@ async def submit(
         ["git", "rev-parse", "HEAD"], text=True
     ).strip()
 
-    # 3. Sync (or just connect).
-    if not no_sync:
-        remotes = await sync(clusters=[cluster])
-        remote = remotes[0]
-    else:
-        remote = await RemoteV2.connect(cluster)
+    # 3. Sync.
+    remotes = await sync(clusters=[cluster])
+    remote = remotes[0]
 
     config = get_config()
 

@@ -100,5 +100,11 @@ async def submit(
     )
     output = await remote.get_output(remote_cmd)
     job_id = int(output.strip())
+
+    console.log(
+        f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
+        f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
+    )
+
     return job_id
     # return the job id?

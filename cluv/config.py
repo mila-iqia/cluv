@@ -22,15 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
-class SubmitConfig:
-    job_script: str | None = None
-
-
-@dataclasses.dataclass
 class CluvConfig:
     clusters: list[str]
     results_path: str | None = None
-    submit: SubmitConfig = dataclasses.field(default_factory=SubmitConfig)
     slurm: dict[str, str] = dataclasses.field(default_factory=dict)
     cluster_configs: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
 
@@ -75,15 +69,11 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
         clusters = list(clusters_section.keys())
         cluster_configs = {k: dict(v) for k, v in clusters_section.items() if v}
 
-    submit_section = cluv.get("submit", {})
-    submit = SubmitConfig(job_script=submit_section.get("job_script"))
-
     slurm: dict[str, str] = cluv.get("slurm", {})
 
     return CluvConfig(
         clusters=clusters,
         results_path=cluv.get("results_path"),
-        submit=submit,
         slurm=slurm,
         cluster_configs=cluster_configs,
     )

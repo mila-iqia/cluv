@@ -22,6 +22,7 @@ def add_submit_args(
         "submit",
         help="Submit a SLURM job on a remote cluster.",
         formatter_class=rich_argparse.RichHelpFormatter,
+        usage="cluv submit <cluster> <job.sh> [--no-sync] [sbatch-args...] [-- program-args...]",
     )
     submit_parser.add_argument(
         "cluster",
@@ -30,16 +31,9 @@ def add_submit_args(
         help="The cluster to submit the job on.",
     )
     submit_parser.add_argument(
-        "command",
-        nargs=argparse.REMAINDER,
-        metavar="<command>",
-        help="The command to run inside the job (passed to the job script).",
-    )
-    submit_parser.add_argument(
-        "--job-script",
-        default=None,
-        metavar="PATH",
-        help="Path to the sbatch job script (relative to project root). Overrides [tool.cluv.submit] job_script.",
+        "job_script",
+        metavar="<job.sh>",
+        help="Path to the sbatch job script (relative to project root).",
     )
     submit_parser.add_argument(
         "--no-sync",
@@ -47,23 +41,41 @@ def add_submit_args(
         default=False,
         help="Skip syncing the project to the cluster before submitting.",
     )
+    submit_parser.add_argument(
+        "rest",
+        nargs=argparse.REMAINDER,
+        metavar="...",
+        help="Optional sbatch flags followed by -- and program arguments.",
+    )
     submit_parser.set_defaults(func=submit)
     return submit_parser
 
 
 async def submit(
     cluster: str,
-    command: list[str],
-    job_script: str | None,
+    job_script: str,
     no_sync: bool,
+    rest: list[str],
 ):
     """Submit a SLURM job on a remote cluster.
 
-    Enforces a clean git state (like safe_sbatch), sets GIT_COMMIT and any
-    SBATCH_* env vars configured in [tool.cluv.slurm] / [tool.cluv.clusters.<name>],
-    then calls sbatch on the remote.
+    Enforces a clean git state, sets GIT_COMMIT and any SBATCH_* env vars
+    configured in [tool.cluv.slurm] / [tool.cluv.clusters.<name>], then calls
+    sbatch on the remote.
+
+    Any arguments before -- are forwarded to sbatch as flags; arguments after --
+    are passed to the job script as program arguments.
     """
-    # 1. Check git is clean locally (untracked files are fine — only tracked changes matter).
+    # Split rest on '--': left = sbatch flags, right = program args.
+    if "--" in rest:
+        sep = rest.index("--")
+        sbatch_flags = rest[:sep]
+        program_args = rest[sep + 1 :]
+    else:
+        sbatch_flags = rest
+        program_args = []
+
+    # 1. Check git is clean locally (untracked files are fine).
     git_status = subprocess.run(
         ["git", "status", "--porcelain"], capture_output=True, text=True
     )
@@ -88,16 +100,9 @@ async def submit(
 
     config = get_config()
 
-    # 4. Resolve job script.
-    resolved_job_script = job_script or config.submit.job_script
-    if not resolved_job_script:
-        console.print(
-            "[red]No job script specified. Pass --job-script or set job_script in [tool.cluv.submit].[/red]"
-        )
-        sys.exit(1)
-
+    # 4. Resolve remote job script path.
     project_path = find_pyproject().parent.relative_to(Path.home())
-    remote_job_script = f"~/{project_path}/{resolved_job_script}"
+    remote_job_script = f"~/{project_path}/{job_script}"
 
     # 5. Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
     env_vars: dict[str, str] = {**config.slurm}
@@ -105,9 +110,14 @@ async def submit(
     env_vars["GIT_COMMIT"] = git_commit
 
     env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    command_str = shlex.join(command)
+    sbatch_flags_str = " ".join(shlex.quote(f) for f in sbatch_flags)
+    program_args_str = shlex.join(program_args)
 
     # 6. Submit.
-    remote_cmd = f"bash -l -c '{env_prefix} sbatch {remote_job_script} {command_str}'"
-    console.print(f"Submitting job on [bold]{cluster}[/bold]: {resolved_job_script} {command_str}")
+    remote_cmd = f"bash -l -c '{env_prefix} sbatch {sbatch_flags_str} {remote_job_script} {program_args_str}'"
+    console.print(
+        f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
+        + (f" {sbatch_flags_str}" if sbatch_flags_str else "")
+        + (f" -- {program_args_str}" if program_args_str else "")
+    )
     await remote.run_async(remote_cmd)

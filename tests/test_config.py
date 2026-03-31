@@ -114,39 +114,6 @@ SBATCH_GPUS = "1"
 
 
 # ---------------------------------------------------------------------------
-# [tool.cluv.submit]
-# ---------------------------------------------------------------------------
-
-
-class TestSubmitConfig:
-    def test_job_script_parsed(self, tmp_path):
-        p = write_pyproject(tmp_path, """
-[tool.cluv.submit]
-job_script = "scripts/job.sh"
-
-[tool.cluv.clusters.mila]
-""")
-        cfg = load_cluv_config(p)
-        assert cfg.submit.job_script == "scripts/job.sh"
-
-    def test_missing_submit_section_defaults_to_none(self, tmp_path):
-        p = write_pyproject(tmp_path, """
-[tool.cluv.clusters.mila]
-""")
-        cfg = load_cluv_config(p)
-        assert cfg.submit.job_script is None
-
-    def test_missing_job_script_key_defaults_to_none(self, tmp_path):
-        p = write_pyproject(tmp_path, """
-[tool.cluv.submit]
-
-[tool.cluv.clusters.mila]
-""")
-        cfg = load_cluv_config(p)
-        assert cfg.submit.job_script is None
-
-
-# ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
 
@@ -162,9 +129,6 @@ name = "foo"
 
     def test_full_config_round_trip(self, tmp_path):
         p = write_pyproject(tmp_path, """
-[tool.cluv.submit]
-job_script = "scripts/job.sh"
-
 [tool.cluv.slurm]
 SBATCH_TIME = "3:00:00"
 
@@ -177,7 +141,6 @@ SBATCH_PARTITION = "main"
 """)
         cfg = load_cluv_config(p)
         assert set(cfg.clusters) == {"mila", "rorqual"}
-        assert cfg.submit.job_script == "scripts/job.sh"
         assert cfg.slurm == {"SBATCH_TIME": "3:00:00"}
         assert cfg.cluster_configs["mila"] == {"SBATCH_PARTITION": "long"}
         assert cfg.cluster_configs["rorqual"] == {

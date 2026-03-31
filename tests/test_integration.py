@@ -193,7 +193,7 @@ async def test_submit_rorqual_builds_correct_command():
     from unittest.mock import AsyncMock, patch
 
     from cluv.cli import submit as submit_module
-    from cluv.config import CluvConfig, SubmitConfig
+    from cluv.config import CluvConfig
 
     remote = await _require_remote("rorqual")
     # Direct assignment avoids descriptor/slot issues with patch.object on instances.
@@ -204,7 +204,6 @@ async def test_submit_rorqual_builds_correct_command():
 
     cfg = CluvConfig(
         clusters=["rorqual"],
-        submit=SubmitConfig(job_script="scripts/job.sh"),
         slurm={"SBATCH_TIME": "0:01:00"},
         cluster_configs={"rorqual": {"SBATCH_PARTITION": "main"}},
     )
@@ -217,9 +216,9 @@ async def test_submit_rorqual_builds_correct_command():
     ):
         await submit_module.submit(
             cluster="rorqual",
-            command=["echo", "hello"],
-            job_script=None,
+            job_script="scripts/job.sh",
             no_sync=False,  # uses the mocked sync, which returns our patched remote
+            rest=["--", "echo", "hello"],
         )
 
     mock_run_async.assert_called_once()

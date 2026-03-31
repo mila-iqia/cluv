@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from cluv.cli import submit as submit_module
-from cluv.config import CluvConfig, SubmitConfig
+from cluv.config import CluvConfig
 
 
 # ---------------------------------------------------------------------------
@@ -19,14 +19,12 @@ FAKE_COMMIT = "abc1234def5678"
 
 def _make_config(
     clusters=None,
-    job_script="scripts/job.sh",
     slurm=None,
     cluster_configs=None,
 ) -> CluvConfig:
     return CluvConfig(
         clusters=clusters or ["rorqual"],
         results_path=None,
-        submit=SubmitConfig(job_script=job_script),
         slurm=slurm or {},
         cluster_configs=cluster_configs or {},
     )
@@ -60,33 +58,9 @@ async def test_dirty_git_aborts(tmp_path):
     ):
         await submit_module.submit(
             cluster="rorqual",
-            command=["python", "train.py"],
-            job_script=None,
+            job_script="scripts/job.sh",
             no_sync=False,
-        )
-    assert exc_info.value.code == 1
-
-
-# ---------------------------------------------------------------------------
-# No job script configured → exit
-# ---------------------------------------------------------------------------
-
-
-async def test_no_job_script_aborts(tmp_path):
-    fake_remote = AsyncMock()
-    with (
-        patch.object(submit_module.subprocess, "run", side_effect=_git_clean_run),
-        patch.object(submit_module.subprocess, "check_output", return_value=FAKE_COMMIT),
-        patch.object(submit_module, "sync", AsyncMock(return_value=[fake_remote])),
-        patch.object(submit_module, "get_config", return_value=_make_config(job_script=None)),
-        patch.object(submit_module, "find_pyproject", return_value=tmp_path / "pyproject.toml"),
-        pytest.raises(SystemExit) as exc_info,
-    ):
-        await submit_module.submit(
-            cluster="rorqual",
-            command=["python", "train.py"],
-            job_script=None,
-            no_sync=False,
+            rest=[],
         )
     assert exc_info.value.code == 1
 
@@ -112,9 +86,9 @@ async def test_submit_builds_correct_remote_command(tmp_path):
     ):
         await submit_module.submit(
             cluster="rorqual",
-            command=["python", "train.py"],
-            job_script=None,
+            job_script="scripts/job.sh",
             no_sync=False,
+            rest=["--", "python", "train.py"],
         )
 
     fake_remote.run_async.assert_called_once()
@@ -123,6 +97,74 @@ async def test_submit_builds_correct_remote_command(tmp_path):
     assert "sbatch" in cmd
     assert "scripts/job.sh" in cmd
     assert "python train.py" in cmd
+
+
+# ---------------------------------------------------------------------------
+# sbatch flags before '--' are forwarded to sbatch
+# ---------------------------------------------------------------------------
+
+
+async def test_sbatch_flags_forwarded(tmp_path):
+    fake_remote = AsyncMock()
+    pyproject = tmp_path / "proj" / "pyproject.toml"
+    (tmp_path / "proj").mkdir()
+
+    with (
+        patch.object(submit_module.subprocess, "run", side_effect=_git_clean_run),
+        patch.object(submit_module.subprocess, "check_output", return_value=FAKE_COMMIT),
+        patch.object(submit_module, "sync", AsyncMock(return_value=[fake_remote])),
+        patch.object(submit_module, "get_config", return_value=_make_config()),
+        patch.object(submit_module, "find_pyproject", return_value=pyproject),
+        patch.object(Path, "home", return_value=tmp_path),
+    ):
+        await submit_module.submit(
+            cluster="rorqual",
+            job_script="scripts/job.sh",
+            no_sync=False,
+            rest=["--partition=gpu", "--mem=40G", "--", "python", "train.py"],
+        )
+
+    cmd = fake_remote.run_async.call_args[0][0]
+    assert "--partition=gpu" in cmd
+    assert "--mem=40G" in cmd
+    assert "python train.py" in cmd
+    # sbatch flags must appear before the job script
+    assert cmd.index("--partition=gpu") < cmd.index("scripts/job.sh")
+
+
+# ---------------------------------------------------------------------------
+# rest with no '--' → all treated as sbatch flags, no program args
+# ---------------------------------------------------------------------------
+
+
+async def test_rest_without_separator_treated_as_sbatch_flags(tmp_path):
+    fake_remote = AsyncMock()
+    pyproject = tmp_path / "proj" / "pyproject.toml"
+    (tmp_path / "proj").mkdir()
+
+    with (
+        patch.object(submit_module.subprocess, "run", side_effect=_git_clean_run),
+        patch.object(submit_module.subprocess, "check_output", return_value=FAKE_COMMIT),
+        patch.object(submit_module, "sync", AsyncMock(return_value=[fake_remote])),
+        patch.object(submit_module, "get_config", return_value=_make_config()),
+        patch.object(submit_module, "find_pyproject", return_value=pyproject),
+        patch.object(Path, "home", return_value=tmp_path),
+    ):
+        await submit_module.submit(
+            cluster="rorqual",
+            job_script="scripts/job.sh",
+            no_sync=False,
+            rest=["--gres=gpu:1"],
+        )
+
+    cmd = fake_remote.run_async.call_args[0][0]
+    assert "--gres=gpu:1" in cmd
+    assert cmd.index("--gres=gpu:1") < cmd.index("scripts/job.sh")
+
+
+# ---------------------------------------------------------------------------
+# Global SBATCH_* env vars from config
+# ---------------------------------------------------------------------------
 
 
 async def test_submit_includes_global_slurm_vars(tmp_path):
@@ -141,9 +183,9 @@ async def test_submit_includes_global_slurm_vars(tmp_path):
     ):
         await submit_module.submit(
             cluster="rorqual",
-            command=["python", "train.py"],
-            job_script=None,
+            job_script="scripts/job.sh",
             no_sync=False,
+            rest=["--", "python", "train.py"],
         )
 
     cmd = fake_remote.run_async.call_args[0][0]
@@ -170,49 +212,16 @@ async def test_submit_per_cluster_vars_override_globals(tmp_path):
     ):
         await submit_module.submit(
             cluster="rorqual",
-            command=["python", "train.py"],
-            job_script=None,
+            job_script="scripts/job.sh",
             no_sync=False,
+            rest=["--", "python", "train.py"],
         )
 
     cmd = fake_remote.run_async.call_args[0][0]
-    # Per-cluster partition overrides global
     assert "SBATCH_PARTITION=main" in cmd
     assert "SBATCH_PARTITION=default" not in cmd
-    # Cluster-specific account is added
     assert "SBATCH_ACCOUNT=def-bengioy" in cmd
-    # Global time is still present
     assert "SBATCH_TIME=1:00:00" in cmd
-
-
-# ---------------------------------------------------------------------------
-# --job-script CLI flag overrides config
-# ---------------------------------------------------------------------------
-
-
-async def test_cli_job_script_overrides_config(tmp_path):
-    fake_remote = AsyncMock()
-    pyproject = tmp_path / "proj" / "pyproject.toml"
-    (tmp_path / "proj").mkdir()
-
-    with (
-        patch.object(submit_module.subprocess, "run", side_effect=_git_clean_run),
-        patch.object(submit_module.subprocess, "check_output", return_value=FAKE_COMMIT),
-        patch.object(submit_module, "sync", AsyncMock(return_value=[fake_remote])),
-        patch.object(submit_module, "get_config", return_value=_make_config(job_script="scripts/job.sh")),
-        patch.object(submit_module, "find_pyproject", return_value=pyproject),
-        patch.object(Path, "home", return_value=tmp_path),
-    ):
-        await submit_module.submit(
-            cluster="rorqual",
-            command=["python", "train.py"],
-            job_script="scripts/other.sh",
-            no_sync=False,
-        )
-
-    cmd = fake_remote.run_async.call_args[0][0]
-    assert "scripts/other.sh" in cmd
-    assert "scripts/job.sh" not in cmd
 
 
 # ---------------------------------------------------------------------------
@@ -239,9 +248,9 @@ async def test_no_sync_skips_sync(tmp_path):
     ):
         await submit_module.submit(
             cluster="rorqual",
-            command=["python", "train.py"],
-            job_script=None,
+            job_script="scripts/job.sh",
             no_sync=True,
+            rest=[],
         )
 
     mock_sync.assert_not_called()
@@ -265,9 +274,9 @@ async def test_sync_called_by_default(tmp_path):
     ):
         await submit_module.submit(
             cluster="rorqual",
-            command=["python", "train.py"],
-            job_script=None,
+            job_script="scripts/job.sh",
             no_sync=False,
+            rest=[],
         )
 
     mock_sync.assert_called_once_with(clusters=["rorqual"])
@@ -293,9 +302,9 @@ async def test_git_commit_always_injected(tmp_path):
     ):
         await submit_module.submit(
             cluster="rorqual",
-            command=["python", "train.py"],
-            job_script=None,
+            job_script="scripts/job.sh",
             no_sync=False,
+            rest=[],
         )
 
     cmd = fake_remote.run_async.call_args[0][0]

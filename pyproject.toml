@@ -69,6 +69,11 @@ source = ["cluv"]
 [tool.coverage.report]
 show_missing = true
 
+[tool.cluv]
+# IDEA: either the job script is set here, or passed as a positional argument (after the cluster)
+# OR, leave it as a required positional argument. More explicit.
+job_script = "scripts/job.sh"
+
 [tool.cluv.slurm]
 # Global SBATCH_* defaults applied to all clusters.
 SBATCH_TIME = "3:00:00"
@@ -80,6 +85,7 @@ SBATCH_PARTITION = "long"
 [tool.cluv.clusters.rorqual]
 SBATCH_ACCOUNT = "def-bengioy"
 SBATCH_PARTITION = "main"
+UV_OFFLINE = 1
 
 [tool.cluv.clusters.tamia]
 # [tool.cluv.clusters.fir]

@@ -92,10 +92,13 @@ async def submit(
     program_args_str = shlex.join(program_args)
 
     # 6. Submit.
-    remote_cmd = f"bash -l -c '{env_prefix} sbatch {sbatch_args_str} {remote_job_script} {program_args_str}'"
+    remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable {sbatch_args_str} {remote_job_script} {program_args_str}'"
     console.print(
         f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
         + (f" {sbatch_args_str}" if sbatch_args_str else "")
         + (f" -- {program_args_str}" if program_args_str else "")
     )
-    await remote.run(remote_cmd)
+    output = await remote.get_output(remote_cmd)
+    job_id = int(output.strip())
+    return job_id
+    # return the job id?

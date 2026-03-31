@@ -202,9 +202,7 @@ async def install_uv(remotes: list[RemoteV2]):
 
     uv_paths = await asyncio.gather(
         *(
-            remote.get_output_async(
-                "bash -l -c 'which uv'", warn=True, hide=True, display=False
-            )
+            remote.get_output_async("bash -l -c 'which uv'", warn=True, hide=True, display=False)
             for remote in remotes
         )
     )
@@ -222,9 +220,7 @@ async def install_uv(remotes: list[RemoteV2]):
     )
     uv_versions = await asyncio.gather(
         *(
-            remote.get_output_async(
-                "bash -l -c 'uv --version'", hide=True, display=False
-            )
+            remote.get_output_async("bash -l -c 'uv --version'", hide=True, display=False)
             for remote in remotes
         )
     )
@@ -240,9 +236,7 @@ async def install_uv(remotes: list[RemoteV2]):
         )
         await asyncio.gather(
             *(
-                remote.run_async(
-                    f"bash -l -c 'uv self update {uv_version_here}'", hide=True
-                )
+                remote.run_async(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
                 for remote in remotes_with_different_uv_versions
             )
         )
@@ -289,9 +283,7 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
     )
     await asyncio.gather(
         *(
-            remote.run_async(
-                f"git clone {github_repo_url}.git {project_path}", hide=True
-            )
+            remote.run_async(f"git clone {github_repo_url}.git {project_path}", hide=True)
             for remote in clusters_without_clones
         )
     )
@@ -314,9 +306,7 @@ async def clone_project(remotes: list[RemoteV2], project_path: PurePosixPath):
             for remote in remotes
         )
     )
-    await asyncio.gather(
-        *(remote.run_async(f"git -C {project_path} pull") for remote in remotes)
-    )
+    await asyncio.gather(*(remote.run_async(f"git -C {project_path} pull") for remote in remotes))
 
 
 async def fetch_results(remotes: list[RemoteV2], results_path: Path | str):
@@ -325,9 +315,7 @@ async def fetch_results(remotes: list[RemoteV2], results_path: Path | str):
     assert not results_path.is_absolute()
     project_dir = find_pyproject().parent
 
-    results_path_relative_to_home = (project_dir / results_path).relative_to(
-        Path.home()
-    )
+    results_path_relative_to_home = (project_dir / results_path).relative_to(Path.home())
 
     # TODO: to simplify, for now we assume that the results are stored in a directory directly under the project directory.
     # A directory with the same name (e.g. logs) is created in $SCRATCH.
@@ -340,10 +328,7 @@ async def fetch_results(remotes: list[RemoteV2], results_path: Path | str):
     results_path.mkdir(parents=True, exist_ok=True)
 
     await asyncio.gather(
-        *(
-            create_results_dir_with_symlink_to_scratch(remote, results_path)
-            for remote in remotes
-        )
+        *(create_results_dir_with_symlink_to_scratch(remote, results_path) for remote in remotes)
     )
 
     await asyncio.gather(
@@ -360,13 +345,11 @@ async def fetch_results(remotes: list[RemoteV2], results_path: Path | str):
     )
 
 
-async def create_results_dir_with_symlink_to_scratch(
-    remote: RemoteV2, results_path: Path
-):
+async def create_results_dir_with_symlink_to_scratch(remote: RemoteV2, results_path: Path):
     project_dir = find_pyproject().parent
     project_dirname = project_dir.name
     project_dir_relative_to_home = project_dir.relative_to(Path.home())
-    results_dir_relative_to_project = str(results_path)
+    _results_dir_relative_to_project = str(results_path)
     # On some clusters (for example Vulcan), $SCRATCH is only defined after the .bashrc and such are loaded (login shells).
     # This is why we have the `bash -c -l` surrounding the command.
     scratch = (

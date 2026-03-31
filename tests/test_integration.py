@@ -27,9 +27,7 @@ async def _require_remote(cluster: str):
     """Return an active RemoteV2 for *cluster*, skip the test if not connected."""
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None:
-        pytest.skip(
-            f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first."
-        )
+        pytest.skip(f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first.")
     return remote
 
 
@@ -38,24 +36,28 @@ async def _require_remote(cluster: str):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_status_tamia_online():
     remote = await _require_remote("tamia")
     status = await get_real_cluster_status(remote)
     assert status.online is True
 
 
+@pytest.mark.asyncio
 async def test_status_tamia_has_gpus():
     remote = await _require_remote("tamia")
     status = await get_real_cluster_status(remote)
     assert status.gpu_total > 0, "Expected tamia to report GPU nodes"
 
 
+@pytest.mark.asyncio
 async def test_status_tamia_gpu_model():
     remote = await _require_remote("tamia")
     status = await get_real_cluster_status(remote)
     assert status.gpu_model != "?", f"GPU model not detected: {status.gpu_model!r}"
 
 
+@pytest.mark.asyncio
 async def test_status_tamia_jobs():
     remote = await _require_remote("tamia")
     status = await get_real_cluster_status(remote)
@@ -66,6 +68,7 @@ async def test_status_tamia_jobs():
     assert status.jobs.my_pending >= 0
 
 
+@pytest.mark.asyncio
 async def test_status_tamia_storage():
     remote = await _require_remote("tamia")
     status = await get_real_cluster_status(remote)
@@ -80,6 +83,7 @@ async def test_status_tamia_storage():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_status_no_args_returns_live_data():
     statuses, is_live = await get_all_cluster_statuses()
     if not is_live:
@@ -104,11 +108,10 @@ def test_status_no_args_via_cli():
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, (
-        f"cluv status exited {result.returncode}:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"cluv status exited {result.returncode}:\n{result.stderr}"
 
 
+@pytest.mark.asyncio
 async def test_status_explicit_cluster_list():
     """Passing remotes explicitly should return exactly those clusters."""
     remote = await _require_remote("tamia")
@@ -123,22 +126,23 @@ async def test_status_explicit_cluster_list():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_status_mila_online():
     remote = await _require_remote("mila")
     status = await get_real_cluster_status(remote)
     assert status.online is True
 
 
+@pytest.mark.asyncio
 async def test_status_mila_gpus_from_savail():
     """GPU data on Mila must come from savail, not sinfo."""
     remote = await _require_remote("mila")
     status = await get_real_cluster_status(remote)
     assert status.gpu_total > 0, "Expected savail to report GPU totals on Mila"
-    assert status.gpu_model != "?", (
-        f"GPU model not detected on Mila: {status.gpu_model!r}"
-    )
+    assert status.gpu_model != "?", f"GPU model not detected on Mila: {status.gpu_model!r}"
 
 
+@pytest.mark.asyncio
 async def test_status_mila_storage():
     remote = await _require_remote("mila")
     status = await get_real_cluster_status(remote)
@@ -151,6 +155,7 @@ async def test_status_mila_storage():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_sync_tamia_connects():
     """Smoke-test that sync reaches tamia without errors (no actual git push)."""
     from unittest.mock import AsyncMock, patch

@@ -10,4 +10,4 @@ wheels/
 .venv
 
 # uv lockfile
-uv.lock
+# uv.lock

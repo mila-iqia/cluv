@@ -183,6 +183,47 @@ async def test_sync_tamia_connects():
 # ---------------------------------------------------------------------------
 
 
+async def test_submit_rorqual_real():
+    """End-to-end: actually submit scripts/job.sh to rorqual via sbatch.
+
+    Requires an active SSH connection to rorqual and a clean git tree.
+    The project must already be synced on rorqual (sync is mocked out).
+    """
+    import subprocess as _subprocess
+    from unittest.mock import AsyncMock, patch
+
+    from cluv.cli import submit as submit_module
+
+    remote = await _require_remote("rorqual")
+
+    git_result = _subprocess.run(
+        ["git", "status", "--porcelain"], capture_output=True, text=True
+    )
+    if any(not line.startswith("??") for line in git_result.stdout.splitlines()):
+        pytest.skip("Working tree is dirty — cluv submit requires a clean git state")
+
+    # Wrap run_async to capture the sbatch response without breaking the call.
+    completed: list[_subprocess.CompletedProcess] = []
+    _original = remote.run_async
+
+    async def _capture(*args, **kwargs):
+        cp = await _original(*args, **kwargs)
+        completed.append(cp)
+        return cp
+
+    remote.run_async = _capture
+
+    with patch.object(submit_module, "sync", AsyncMock(return_value=[remote])):
+        await submit_module.submit(
+            cluster="rorqual",
+            job_script="scripts/job.sh",
+            rest=[],
+        )
+
+    assert completed, "run_async was never called"
+    assert "Submitted batch job" in completed[-1].stdout
+
+
 async def test_submit_rorqual_builds_correct_command():
     """Integration smoke-test: verify submit builds the right sbatch command for rorqual.
 

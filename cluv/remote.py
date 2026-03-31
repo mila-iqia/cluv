@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import functools
-import shlex
 import subprocess
 import sys
 from logging import getLogger as get_logger
@@ -64,21 +63,24 @@ class Remote:
                 "See https://learn.microsoft.com/en-us/windows/wsl/install for a guide on "
                 "setting up WSL."
             )
-        run_command = ("ssh", *get_multiplexing_options_to_use(self.hostname), command)
+        ssh_command = (
+            "ssh",
+            *get_multiplexing_options_to_use(self.hostname),
+            self.hostname,
+            command,
+        )
 
         if display:
-            displayed_command = shlex.join(command)
-            if not input:
-                console.log(f"({self.hostname}) $ {command}", style="green", _stack_offset=2)
-                console.log(f"(localhost) $ {displayed_command}", style="green", _stack_offset=2)
-            else:
-                console.log(
-                    f"({self.hostname}) $ {command=}\n{input}", style="green", _stack_offset=2
-                )
-                console.log(
-                    f"(localhost) $ {displayed_command}\n{input}", style="green", _stack_offset=2
-                )
-        return await run(run_command, input=input, warn=warn, hide=hide)
+            console.log(
+                (
+                    f"({self.hostname}) $ {command}"
+                    if input is None
+                    else f"({self.hostname}) $ {command=}\n{input=}"
+                ),
+                style="green",
+                _stack_offset=2,  # to show a link to the code calling this, instead of here.
+            )
+        return await run(ssh_command, input=input, warn=warn, hide=hide)
 
     async def get_output(
         self,

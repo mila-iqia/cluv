@@ -10,10 +10,14 @@ These tests connect to real clusters. They will fail if you do not have
 active SSH ControlMaster sockets (run `cluv login` first).
 """
 
+from unittest.mock import Mock
+
 import pytest
+import pytest_asyncio
 
 from cluv.cli.login import get_remote_without_2fa_prompt
-from cluv.cli.status import get_all_cluster_statuses, get_real_cluster_status
+from cluv.cli.status import ClusterStatus, get_all_cluster_statuses, get_real_cluster_status
+from cluv.remote import Remote
 
 pytestmark = pytest.mark.integration
 
@@ -36,46 +40,61 @@ async def _require_remote(cluster: str):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_status_tamia_online():
-    remote = await _require_remote("tamia")
-    status = await get_real_cluster_status(remote)
-    assert status.online is True
+@pytest.fixture(
+    scope="session",
+    params=[
+        "mila",
+        "tamia",
+        pytest.param("rorqual", marks=pytest.mark.timeout(30)),
+    ],
+)
+def cluster(request: pytest.FixtureRequest):
+    return getattr(request, "param", "mila")
+
+
+@pytest_asyncio.fixture(scope="session")
+async def remote(cluster: str):
+    remote = await get_remote_without_2fa_prompt(cluster)
+    if remote is None:
+        pytest.skip(f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first.")
+    return remote
+
+
+@pytest_asyncio.fixture(scope="session")
+async def cluster_status(remote: Remote):
+    return await get_real_cluster_status(remote)
 
 
 @pytest.mark.asyncio
-async def test_status_tamia_has_gpus():
-    remote = await _require_remote("tamia")
-    status = await get_real_cluster_status(remote)
-    assert status.gpu_total > 0, "Expected tamia to report GPU nodes"
+async def test_status_online(cluster_status: ClusterStatus):
+    assert cluster_status.online is True
 
 
 @pytest.mark.asyncio
-async def test_status_tamia_gpu_model():
-    remote = await _require_remote("tamia")
-    status = await get_real_cluster_status(remote)
-    assert status.gpu_model != "?", f"GPU model not detected: {status.gpu_model!r}"
+async def test_status_has_gpus(cluster_status: ClusterStatus):
+    assert cluster_status.gpu_total > 0, "Expected tamia to report GPU nodes"
 
 
 @pytest.mark.asyncio
-async def test_status_tamia_jobs():
-    remote = await _require_remote("tamia")
-    status = await get_real_cluster_status(remote)
+async def test_status_gpu_model(cluster_status: ClusterStatus):
+    assert cluster_status.gpu_model != "?", f"GPU model not detected: {cluster_status.gpu_model!r}"
+
+
+@pytest.mark.asyncio
+async def test_status_jobs(cluster_status: ClusterStatus):
     # Job counts must be non-negative integers (tamia is a busy cluster)
-    assert status.jobs.running >= 0
-    assert status.jobs.pending >= 0
-    assert status.jobs.my_running >= 0
-    assert status.jobs.my_pending >= 0
+    assert cluster_status.jobs.running >= 0
+    assert cluster_status.jobs.pending >= 0
+    assert cluster_status.jobs.my_running >= 0
+    assert cluster_status.jobs.my_pending >= 0
 
 
 @pytest.mark.asyncio
-async def test_status_tamia_storage():
-    remote = await _require_remote("tamia")
-    status = await get_real_cluster_status(remote)
-    assert status.storage.home_quota > 0, "Expected non-zero home quota"
-    assert status.storage.scratch_quota > 0, "Expected non-zero scratch quota"
-    assert status.storage.home_used >= 0
-    assert status.storage.scratch_used >= 0
+async def test_status_storage(cluster_status: ClusterStatus):
+    assert cluster_status.storage.home_quota > 0, "Expected non-zero home quota"
+    assert cluster_status.storage.scratch_quota > 0, "Expected non-zero scratch quota"
+    assert cluster_status.storage.home_used >= 0
+    assert cluster_status.storage.scratch_used >= 0
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +175,7 @@ async def test_status_mila_storage():
 
 
 @pytest.mark.asyncio
-async def test_sync_tamia_connects():
+async def test_sync_connects():
     """Smoke-test that sync reaches tamia without errors (no actual git push)."""
     from unittest.mock import AsyncMock, patch
 
@@ -239,7 +258,8 @@ async def test_submit_rorqual_builds_correct_command():
     # sync is mocked to return this remote, so submit() uses it instead of calling
     # Remote.connect() (which would return a different object).
     mock_run_async = AsyncMock()
-    remote.run = mock_run_async
+    fake_remote = Mock(wraps=remote)
+    fake_remote.run = mock_run_async
 
     cfg = CluvConfig(
         clusters=["rorqual"],

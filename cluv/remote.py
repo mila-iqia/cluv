@@ -80,7 +80,7 @@ class Remote:
                 style="green",
                 _stack_offset=2,  # to show a link to the code calling this, instead of here.
             )
-        return await run(ssh_command, input=input, warn=warn, hide=hide)
+        return await run(ssh_command, input=input, warn=warn, hide=hide, _stacklevel=3)
 
     async def get_output(
         self,
@@ -99,6 +99,7 @@ async def run(
     input: str | None = None,
     warn: bool = False,
     hide: Hide = False,
+    _stacklevel: int = 2,
 ) -> subprocess.CompletedProcess[str]:
     """Runs the command *asynchronously* in a subprocess and returns the result.
 
@@ -148,10 +149,10 @@ async def run(
             + f" exited with {proc.returncode}"
             + (f": {stderr}" if stderr else "")
         )
-        logger.debug(message, stacklevel=2)
+        logger.debug(message, stacklevel=_stacklevel)
         if not warn:
             if stderr and hide not in [True, "err", "stderr"]:
-                logger.error(stderr.decode(), stacklevel=2)
+                logger.error(stderr.decode(), stacklevel=_stacklevel)
             raise subprocess.CalledProcessError(
                 returncode=proc.returncode,
                 cmd=program_and_args,
@@ -159,7 +160,7 @@ async def run(
                 stderr=stderr,
             )
         if hide is not True:  # don't warn if hide is True.
-            logger.warning(RuntimeWarning(message), stacklevel=2)
+            logger.warning(RuntimeWarning(message), stacklevel=_stacklevel)
     result = subprocess.CompletedProcess(
         args=program_and_args,
         returncode=proc.returncode,

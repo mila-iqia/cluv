@@ -389,7 +389,7 @@ async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_pat
             f"ln -s -T {scratch}/{results_path}/{project_dirname} "
             f"{project_dir_relative_to_home}/{results_path}",
             # TODO: Still getting an error that the link exists. Weird.
-            # warn=True,
+            warn=True,
         )
         return
 

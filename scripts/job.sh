@@ -13,13 +13,15 @@ echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submi
 
 # Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.
 srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES --input=all bash -e <<END
-git clone $HOME/repos/cluv $SLURM_TMPDIR/cluv
-git -c $SLURM_TMPDIR/cluv checkout --detach $GIT_COMMIT
-exec uv sync --directory=$SLURM_TMPDIR/cluv
+cd $SLURM_TMPDIR
+git clone $project_root
+git checkout --detach $GIT_COMMIT
+cd $SLURM_TMPDIR/cluv
+exec uv sync
 END
 
 # Run the actual job command passed as an argument ('python main.py' for example)
-srun uv --dir=$SLURM_TMPDIR/cluv run "$@"
+srun uv --directory=$SLURM_TMPDIR/cluv run "$@"
 
 # IDEA: Display a warning if there are files in $SLURM_TMPDIR that would be lost.
 

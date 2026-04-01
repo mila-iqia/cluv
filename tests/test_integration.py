@@ -110,7 +110,7 @@ async def test_submit(remote: Remote):
     The project must already be synced on rorqual (sync is mocked out).
     """
     job_id = await submit(
-        cluster="rorqual",
+        cluster=remote.hostname,
         job_script="scripts/job.sh",
         sbatch_args=[],
         program_args=["python", "--version"],

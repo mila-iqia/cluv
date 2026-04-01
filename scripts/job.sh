@@ -15,8 +15,8 @@ echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submi
 srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES --input=all bash -e <<END
 cd $SLURM_TMPDIR
 git clone $project_root
-git checkout --detach $GIT_COMMIT
 cd $SLURM_TMPDIR/cluv
+git checkout --detach $GIT_COMMIT
 exec uv sync
 END
 

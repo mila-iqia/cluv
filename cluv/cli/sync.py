@@ -135,18 +135,6 @@ async def sync(
         overall_progress_task_description="[green]Syncing project",
     )
     return remotes
-    # Other approach: Do each step for all clusters before moving to the next step.
-    remotes = await login(clusters)
-
-    await install_uv(remotes)
-    project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
-    config = get_config()
-    await clone_project(remotes, project_path)
-    await asyncio.gather(
-        *(remote.run(f"bash -l -c 'uv --directory={project_path} sync'") for remote in remotes)
-    )
-    if config.results_path:
-        await fetch_results(remotes, config.results_path)
 
 
 async def sync_task_function(
@@ -156,7 +144,6 @@ async def sync_task_function(
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_config()
-    remotes = [remote]
 
     def _update_progress(progress: int, status: str, total: int):
         info = textwrap.shorten(status, 50, placeholder="...")
@@ -165,21 +152,17 @@ async def sync_task_function(
     num_tasks = 4 if config.results_path else 3
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
-    await install_uv(remotes)
+    await install_uv([remote])
 
     _update_progress(1, "Setting up project", num_tasks)
-    await clone_project(remotes, project_path)
+    await clone_project([remote], project_path)
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
-    await asyncio.gather(
-        *(
-            remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
-            for remote in remotes
-        )
-    )
+    await remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
+
     if config.results_path:
         _update_progress(3, "Fetching results", num_tasks)
-        await fetch_results(remotes, config.results_path)
+        await fetch_results([remote], config.results_path)
 
     _update_progress(num_tasks, "Done", num_tasks)
 
@@ -359,66 +342,62 @@ async def fetch_results(remotes: list[Remote], results_path: Path | str):
 
 
 async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_path: Path):
-    """Create a symlink on the remote, from ~/<project>/results_path to $SCRATCH/logs/<project_name>.
+    """On the remote, symlink ~/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>.
 
-    TODO: Doesn't work, there are bugs with how the dir / symlink is created.
+    This keeps large outputs out of $HOME and in $SCRATCH where storage limits are more generous.
     """
     project_dir = find_pyproject().parent
-    project_dirname = project_dir.name
     project_dir_relative_to_home = project_dir.relative_to(Path.home())
-    _results_dir_relative_to_project = str(results_path)
-    # On some clusters (for example Vulcan), $SCRATCH is only defined after the .bashrc and such are loaded (login shells).
-    # This is why we have the `bash -c -l` surrounding the command.
+    symlink_path = project_dir_relative_to_home / results_path
+
+    # On some clusters (e.g. Vulcan), $SCRATCH is only defined in login shells.
     scratch = (
-        await remote.get_output("bash -c -l 'echo $SCRATCH'", hide=True, warn=True, display=False)
+        await remote.get_output("bash -l -c 'echo $SCRATCH'", hide=True, warn=True, display=False)
     ).strip()
     if not scratch:
-        logger.warning(
-            f"[orange]Remote {remote.hostname} does not have $SCRATCH defined?![/orange]"
-        )
+        logger.warning(f"Remote {remote.hostname} does not have $SCRATCH defined.")
         return
 
-    if await test("-d", f"{scratch}/{results_path}/{project_dirname}", remote):
-        result = await remote.run(
-            f"mkdir -p {scratch}/{results_path}/{project_dirname}", warn=True, hide=False
-        )
+    scratch_dir = f"{scratch}/{results_path}/{project_dir.name}"
+
+    # Create the target directory in $SCRATCH if it doesn't already exist.
+    if not await remote_test("-d", scratch_dir, remote):
+        result = await remote.run(f"mkdir -p {scratch_dir}", warn=True, hide=True)
         if result.returncode != 0:
             logger.warning(
-                f"[orange]Failed to create directory {scratch}/{results_path}/{project_dirname} on {remote.hostname}.\n"
-                f"Results will be saved in the project directory ({project_dir}/{results_path}) which might not be ideal![/orange]"
+                f"Failed to create {scratch_dir} on {remote.hostname}. "
+                f"Results will be stored in {symlink_path}, which may fill up $HOME."
             )
-            await remote.run(f"mkdir -p {project_dir_relative_to_home}/{results_path}", warn=True)
+            await remote.run(f"mkdir -p {symlink_path}", warn=True, hide=True)
             return
-    # Check if {project_dir}/{results_path} exists.
-    # If it doesn't exist, create a symlink.
 
-    if not await test("-e", project_dir_relative_to_home / results_path, remote):
-        # Doesn't exist, create a symlink.
-        await remote.run(
-            f"ln -s -T {scratch}/{results_path}/{project_dirname} "
-            f"{project_dir_relative_to_home}/{results_path}",
-            # TODO: Still getting an error that the link exists. Weird.
-            warn=True,
-        )
+    # If a symlink already exists at the path (valid or broken), nothing to do.
+    if await remote_test("-L", symlink_path, remote):
         return
 
-    # It does exist. Is it a symlink? If not, warn the user, they might be filling up their HOME without realizing it!
-    if not await test("-L", project_dir_relative_to_home / results_path, remote):
+    # If a real file/directory exists there, warn — the user may be filling up $HOME.
+    if await remote_test("-e", symlink_path, remote):
         logger.warning(
-            f"[red]{project_dir_relative_to_home / results_path} on {remote.hostname} (the output directory) "
-            f"is not a symlink to $SCRATCH!\n"
-            f"Please beware that you might quickly end up filling up your $HOME! Consider instead creating a symlink to scratch![/red]"
+            f"{symlink_path} on {remote.hostname} is a real directory, not a symlink to $SCRATCH. "
+            f"You may end up filling up $HOME. Consider replacing it with a symlink to {scratch_dir}."
         )
         return
 
+    # Nothing at the path yet — create the symlink.
+    result = await remote.run(
+        f"ln -s -T {scratch_dir} {symlink_path}",
+        warn=True,
+        hide=True,
+    )
+    if result.returncode != 0:
+        logger.warning(
+            f"Failed to create symlink {symlink_path} -> {scratch_dir} on {remote.hostname}."
+        )
 
-async def file_exists(remote: Remote, path: str | Path) -> bool:
-    return await test("-e", path, remote)
 
-
-async def test(type: Literal["-d", "-e", "-L"], path: str | Path, remote: Remote):
-    """Returns whether `ssh test {type} {path}` success on the remote."""
-    result = await remote.run(f"test {type} {path}", warn=True, hide=True)
+async def remote_test(flag: Literal["-d", "-e", "-L"], path: str | Path, remote: Remote) -> bool:
+    """Returns True if `test {flag} {path}` succeeds on the remote."""
+    result = await remote.run(f"test {flag} {path}", warn=True, hide=True)
     return result.returncode == 0
 
 

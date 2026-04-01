@@ -21,5 +21,7 @@ END
 # Run the actual job command passed as an argument ('python main.py' for example)
 srun uv --dir=$SLURM_TMPDIR/cluv run "$@"
 
+# IDEA: Display a warning if there are files in $SLURM_TMPDIR that would be lost.
+
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
 srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/cluv/logs $project_root/logs

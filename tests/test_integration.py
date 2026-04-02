@@ -117,7 +117,7 @@ async def test_submit(remote: Remote):
     )
     assert isinstance(job_id, int)
 
-    comment = await remote.get_output(
-        f"sacct -j {job_id} --format=Comment --noheader --parsable2 | head -1"
+    job_name = await remote.get_output(
+        f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
     )
-    assert comment.strip().startswith("cluv")
+    assert job_name.strip().startswith("cluv-")

@@ -85,9 +85,9 @@ async def submit(
     # 5. Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
     env_vars: dict[str, str] = {**config.slurm}
     env_vars.update(config.cluster_configs.get(cluster, {}))
-    # SBATCH_COMMENT is not a recognized sbatch env var; pop it and pass as --comment flag.
-    user_comment = env_vars.pop("SBATCH_COMMENT", None)
-    comment = f"cluv:{user_comment}" if user_comment else "cluv"
+    # Prefix the job name with "cluv-" so admins can identify cluv-submitted jobs in sacct.
+    base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
+    env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
     env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
@@ -95,7 +95,7 @@ async def submit(
     program_args_str = shlex.join(program_args)
 
     # 6. Submit.
-    remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable --comment={shlex.quote(comment)} --chdir={project_path} {sbatch_args_str} {remote_job_script} {program_args_str}'"
+    remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable --chdir={project_path} {sbatch_args_str} {remote_job_script} {program_args_str}'"
     console.print(
         f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
         + (f" {sbatch_args_str}" if sbatch_args_str else "")

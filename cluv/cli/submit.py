@@ -85,6 +85,8 @@ async def submit(
     # 5. Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
     env_vars: dict[str, str] = {**config.slurm}
     env_vars.update(config.cluster_configs.get(cluster, {}))
+    existing_comment = env_vars.get("SBATCH_COMMENT")
+    env_vars["SBATCH_COMMENT"] = f"cluv:{existing_comment}" if existing_comment else "cluv"
     env_vars["GIT_COMMIT"] = git_commit
 
     env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())

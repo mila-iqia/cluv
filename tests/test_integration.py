@@ -116,3 +116,8 @@ async def test_submit(remote: Remote):
         program_args=["python", "--version"],
     )
     assert isinstance(job_id, int)
+
+    job_name = await remote.get_output(
+        f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
+    )
+    assert job_name.strip().startswith("cluv-")

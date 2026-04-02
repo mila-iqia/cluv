@@ -1,6 +1,6 @@
 import os
+import socket
 import sys
-from pathlib import Path
 
 import rich.console
 
@@ -9,7 +9,7 @@ console = rich.console.Console(record=True, file=sys.stdout)
 
 
 def current_cluster() -> str | None:
-    if Path("/home/mila").exists():
+    if socket.gethostname().endswith(".mila.quebec"):
         return "mila"
     if "CC_CLUSTER" in os.environ:
         return os.environ["CC_CLUSTER"]

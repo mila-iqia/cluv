@@ -85,6 +85,9 @@ async def submit(
     # 5. Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
     env_vars: dict[str, str] = {**config.slurm}
     env_vars.update(config.cluster_configs.get(cluster, {}))
+    # Prefix the job name with "cluv-" so admins can identify cluv-submitted jobs in sacct.
+    base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
+    env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
     env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())

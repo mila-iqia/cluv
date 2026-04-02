@@ -4,7 +4,7 @@ cluv — sync UV-based Python projects across HPC clusters.
 
 ## Status
 
-Early development. Core commands (`login`, `sync`, `run`) are functional. `status` shows live cluster data. `init` is not yet implemented.
+Early development. Core commands (`login`, `sync`, `submit`) are functional. `status` shows live cluster data. `run` and `init` are not yet implemented.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ Then you can run `cluv` directly as a command:
 ```bash
 cluv login mila
 cluv sync mila
-cluv run mila sbatch job.sh
+cluv submit mila job.sh
 ```
 
 ## Quick Start
@@ -59,6 +59,7 @@ results_path = "results"                  # optional: rsync remote results back 
 | `cluv login` | Open SSH ControlMaster connections to all configured clusters. Run this first, or before any command that requires a live connection. |
 | `cluv sync` | Push local git changes, then on each cluster: clone or fetch the repo, check out the current branch, and run `uv sync`. Optionally rsyncs results back. |
 | `cluv status` | Display an overview of each cluster: partition availability, running/queued jobs, and storage usage. |
+| `cluv submit` | Submit a SLURM job on a remote cluster. Enforces a clean git tree, injects `GIT_COMMIT`, merges global and per-cluster `SBATCH_*` env vars from config, then runs `sbatch` on the remote. Usage: `cluv submit <cluster> <job.sh> [sbatch-flags...] [-- program-args...]` |
 | `cluv run` | Run a command in the synced project on a remote cluster. *(Not yet implemented.)* |
 | `cluv init` | Set up the project on all configured clusters for the first time. *(Not yet implemented.)* |
 

@@ -32,6 +32,11 @@ dev = [
 testpaths = ["cluv", "tests"]
 norecursedirs = [".venv"]
 addopts = ["--doctest-modules"]
+asyncio_mode = "auto"
+timeout = 10
+markers = [
+    "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",
+]
 
 [tool.uv]
 managed = true
@@ -57,3 +62,33 @@ packages = ["cluv"]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
+
+[tool.coverage.run]
+source = ["cluv"]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.cluv]
+# IDEA: either the job script is set here, or passed as a positional argument (after the cluster)
+# OR, leave it as a required positional argument. More explicit.
+job_script = "scripts/job.sh"
+results_path = "logs"
+
+[tool.cluv.slurm]
+# Global SBATCH_* defaults applied to all clusters.
+SBATCH_TIME = "3:00:00"
+SBATCH_REQUE = true
+
+[tool.cluv.clusters.mila]
+SBATCH_PARTITION = "long"
+
+[tool.cluv.clusters.rorqual]
+UV_OFFLINE = 1
+
+[tool.cluv.clusters.tamia]
+# [tool.cluv.clusters.fir]
+# [tool.cluv.clusters.nibi]
+# [tool.cluv.clusters.killarney]
+# [tool.cluv.clusters.vulcan]
+# [tool.cluv.clusters.trillium-gpu]

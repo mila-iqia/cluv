@@ -25,6 +25,7 @@ from .cli.init import init
 from .cli.login import login
 from .cli.run import add_run_args
 from .cli.status import status
+from .cli.submit import add_submit_args
 from .cli.sync import add_sync_args
 from .utils import console
 
@@ -34,6 +35,20 @@ if typing.TYPE_CHECKING:
 
 
 def main(argv: list[str] | None = None):
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # argparse consumes '--' before REMAINDER sees it, so we extract program
+    # args (everything after the first '--' following 'submit') before parsing.
+    submit_program_args: list[str] = []
+    try:
+        sub_idx = argv.index("submit")
+        sep_idx = argv.index("--", sub_idx + 1)
+        submit_program_args = list(argv[sep_idx + 1 :])
+        argv = list(argv[:sep_idx])
+    except ValueError:
+        pass
+
     parser = simple_parsing.ArgumentParser(
         description=__doc__,
         formatter_class=rich_argparse.RichHelpFormatter,
@@ -58,6 +73,9 @@ def main(argv: list[str] | None = None):
     sync_parser = add_sync_args(subparsers)
     _add_v_arg(sync_parser)
 
+    submit_parser = add_submit_args(subparsers)
+    _add_v_arg(submit_parser)
+
     status_parser = add_status_args(subparsers)
     _add_v_arg(status_parser)
 
@@ -66,8 +84,11 @@ def main(argv: list[str] | None = None):
 
     verbose: int = args_dict.pop("verbose")
     setup_logging(verbose=verbose, force=True)
-    args_dict.pop("<command>")
+    subcommand = args_dict.pop("<command>")
     function: Callable = args_dict.pop("func")
+
+    if subcommand == "submit":
+        args_dict["program_args"] = submit_program_args
 
     try:
         if inspect.iscoroutinefunction(function):
@@ -100,10 +121,7 @@ def add_status_args(subparsers: Subparsers):
         nargs="*",
         default=None,
         metavar="<cluster>",
-        help=(
-            "Cluster(s) to query. "
-            "Leave empty to query all clusters with an active connection."
-        ),
+        help=("Cluster(s) to query. Leave empty to query all clusters with an active connection."),
     )
     # TODO: Add sub-commands to query the status with respect to different things, GPUs, storage, jobs, etc?
     # Or just display everything?
@@ -167,18 +185,6 @@ def setup_logging(verbose: int | None, force: bool = False):
     # elif verbose >= 2:
     #     logger.setLevel(logging.DEBUG)
     #     cluv_logger.setLevel(logging.DEBUG)
-
-    milatools_logger = logging.getLogger("milatools")
-    milatools_logger.setLevel(
-        logging.DEBUG
-        if verbose == 3
-        else logging.INFO
-        if verbose == 2
-        else logging.WARNING
-    )
-    # for handler in milatools_logger.handlers:
-    #     milatools_logger.removeHandler(handler)
-    milatools_logger.addHandler(handler)
 
 
 def _add_v_arg(parser: argparse.ArgumentParser):

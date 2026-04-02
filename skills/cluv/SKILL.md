@@ -46,7 +46,7 @@ results_path = "results"        # optional: local path to rsync results into
 
 ## SSH and authentication
 
-All remote operations use SSH ControlMaster sockets (via milatools `RemoteV2`). A socket must already be open before running `sync` or `status` — if it is not, the cluster is silently skipped.
+All remote operations use SSH ControlMaster sockets (via milatools `Remote`). A socket must already be open before running `sync` or `status` — if it is not, the cluster is silently skipped.
 
 Run `cluv login` once per session to open sockets for all clusters. Login is sequential to avoid concurrent 2FA prompts.
 

@@ -2,7 +2,7 @@
 _commit: v0.0.4
 _src_path: gh:mila-iqia/tool_template
 project_description: A new project/tool called cluv.
-python_version: '3.13'
+python_version: "3.13"
 tool_name: cluv
 your_email: normandf@mila.quebec
 your_name: Fabrice Normandin

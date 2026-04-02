@@ -7,17 +7,14 @@ import shlex
 from pathlib import Path
 
 import rich_argparse
-from milatools.cli import console
-from milatools.utils.remote_v2 import (
-    RemoteV2,
-)
 from rich.console import Group
 from rich.panel import Panel
 
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
-from cluv.utils import current_cluster
+from cluv.remote import Remote
+from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
 
@@ -62,28 +59,28 @@ async def run(command: str | list[str], cluster: str):
     project_path = find_pyproject().parent.relative_to(Path.home())
     await asyncio.gather(
         *[
-            remote.run_async(f"bash -l -c 'uv run --directory={project_path} {command}'")
+            remote.run(f"bash -l -c 'uv run --directory={project_path} {command}'")
             for remote in remotes
         ]
     )
 
 
-async def _get_cluster_remotes(clusters: list[str] | None) -> list[RemoteV2]:
+async def _get_cluster_remotes(clusters: list[str] | None) -> list[Remote]:
     """Returns the list remote objects for each cluster with a current active connection."""
     if clusters:
         # User specified clusters
         # We don't check for active connection if user explicitly asks for a cluster.
-        # RemoteV2.connect will try to connect (and start the socket if needed/possible)
+        # Remote.connect will try to connect (and start the socket if needed/possible)
         # When there isn't an existing connection, this might generate a ton of 2FA
         # prompts at once.
-        return list(await asyncio.gather(*[RemoteV2.connect(cluster) for cluster in clusters]))
+        return list(await asyncio.gather(*[Remote.connect(cluster) for cluster in clusters]))
     # Use default list and filter for active connections
     # We need to check which ones are active WITHOUT trying to connect interactively
     # control_socket_is_running_async checks if the socket exists and is running
 
-    # We need to construct RemoteV2 objects to get the control path, but we
+    # We need to construct Remote objects to get the control path, but we
     # shouldn't start them yet
-    # Actually RemoteV2 constructor doesn't start if _start_control_socket=False
+    # Actually Remote constructor doesn't start if _start_control_socket=False
     this_cluster = current_cluster()
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     clusters = get_config().clusters

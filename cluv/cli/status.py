@@ -5,7 +5,6 @@ import logging
 import random
 from dataclasses import dataclass
 
-from milatools.utils.remote_v2 import RemoteV2
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
@@ -14,6 +13,7 @@ from rich.text import Text
 
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_config
+from cluv.remote import Remote
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ squeue -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 _MILA_CLUSTERS = {"mila"}
 
 
-async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
+async def get_real_cluster_status(remote: Remote) -> ClusterStatus:
     """Fetch live Slurm data from a remote cluster and return a ClusterStatus.
 
     Uses a single SSH round-trip. Falls back gracefully when commands are
@@ -158,7 +158,7 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
     script = _REMOTE_SCRIPT_MILA if cluster in _MILA_CLUSTERS else _REMOTE_SCRIPT_DRAC
 
     try:
-        raw = await remote.get_output_async(
+        raw = await remote.get_output(
             f"bash -l -c '{script}'",
             hide=True,
             warn=True,
@@ -173,9 +173,7 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
             gpu_total=0,
             gpu_model="?",
             jobs=JobStats(running=0, pending=0, my_running=0, my_pending=0),
-            storage=StorageStats(
-                home_used=0, home_quota=0, scratch_used=0, scratch_quota=0
-            ),
+            storage=StorageStats(home_used=0, home_quota=0, scratch_used=0, scratch_quota=0),
         )
 
     parts = raw.split(_SEP)
@@ -257,7 +255,7 @@ async def get_real_cluster_status(remote: RemoteV2) -> ClusterStatus:
 
 
 async def get_all_cluster_statuses(
-    remotes: list[RemoteV2] | None = None,
+    remotes: list[Remote] | None = None,
 ) -> tuple[list[ClusterStatus], bool]:
     """Query clusters in parallel.
 
@@ -272,18 +270,14 @@ async def get_all_cluster_statuses(
         clusters = get_config().clusters
         remotes = [
             r
-            for r in await asyncio.gather(
-                *(get_remote_without_2fa_prompt(c) for c in clusters)
-            )
+            for r in await asyncio.gather(*(get_remote_without_2fa_prompt(c) for c in clusters))
             if r is not None
         ]
 
     if not remotes:
         return [], False
 
-    statuses = list(
-        await asyncio.gather(*(get_real_cluster_status(r) for r in remotes))
-    )
+    statuses = list(await asyncio.gather(*(get_real_cluster_status(r) for r in remotes)))
     return statuses, True
 
 
@@ -454,9 +448,7 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
             _gpu_bar(c.gpu_idle, c.gpu_total),
             my_jobs,
             all_jobs,
-            Text("—", style="dim")
-            if c.avg_wait_min is None
-            else _wait_text(c.avg_wait_min),
+            Text("—", style="dim") if c.avg_wait_min is None else _wait_text(c.avg_wait_min),
             Text("—", style="dim")
             if c.avg_gpu_util_pct is None
             else _util_text(c.avg_gpu_util_pct),
@@ -487,9 +479,7 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
             continue
         # Approximate user's cancelled count proportionally to their share of running jobs.
         if c.jobs.cancelled is not None:
-            my_can = max(
-                0, int(c.jobs.cancelled * c.jobs.my_running / max(c.jobs.running, 1))
-            )
+            my_can = max(0, int(c.jobs.cancelled * c.jobs.my_running / max(c.jobs.running, 1)))
             my_can_str = str(my_can)
         else:
             my_can = 0
@@ -544,9 +534,7 @@ async def status(clusters: list[str] | None = None):
         # perfectly usable even when /home/mila is mounted locally.
         remotes = [
             r
-            for r in await asyncio.gather(
-                *(get_remote_without_2fa_prompt(c) for c in clusters)
-            )
+            for r in await asyncio.gather(*(get_remote_without_2fa_prompt(c) for c in clusters))
             if r is not None
         ]
         data, is_live = await get_all_cluster_statuses(remotes=remotes)

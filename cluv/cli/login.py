@@ -1,20 +1,14 @@
 import asyncio
 import logging
-from pathlib import Path
-
-from milatools.utils.remote_v2 import (
-    RemoteV2,
-    control_socket_is_running_async,
-    get_controlpath_for,
-)
 
 from cluv.config import get_config
+from cluv.remote import Remote, control_socket_is_running
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
 
 
-async def login(clusters: list[str]) -> list[RemoteV2]:
+async def login(clusters: list[str]) -> list[Remote]:
     """Create an SSH connection with the given clusters, reusing existing connections when possible to avoid triggering 2FA prompts."""
     clusters = clusters or get_config().clusters
     if (this_cluster := current_cluster()) and this_cluster in clusters:
@@ -31,36 +25,21 @@ async def login(clusters: list[str]) -> list[RemoteV2]:
         )
     else:
         console.log("No active connections to any clusters found.")
-    missing_connections = [
-        cluster for cluster, remote in zip(clusters, connections) if not remote
-    ]
+    missing_connections = [cluster for cluster, remote in zip(clusters, connections) if not remote]
     if missing_connections:
-        console.log(
-            f"Will attempt to connect to the following clusters: {missing_connections}"
-        )
+        console.log(f"Will attempt to connect to the following clusters: {missing_connections}")
     # Need to do each thing sequentially to avoid triggering multiple 2FA prompts at the same time.
     return [
-        remote if remote is not None else (await RemoteV2.connect(cluster))
+        remote if remote is not None else (await Remote.connect(cluster))
         for cluster, remote in zip(clusters, connections)
     ]
 
 
-async def get_remote_without_2fa_prompt(cluster_hostname: str) -> RemoteV2 | None:
+async def get_remote_without_2fa_prompt(cluster_hostname: str) -> Remote | None:
     """Returns the Remote object for a given cluster if we already have a connection to it.
 
     If we don't already have a connection, this will not block for 2FA, and will return None.
     """
-    remote = RemoteV2(cluster_hostname, _start_control_socket=False)
-    active = await control_socket_is_running_async(
-        cluster_hostname,
-        control_path=get_controlpath_for(
-            cluster_hostname, ssh_config_path=Path.home() / ".ssh" / "config"
-        ),
-    )
-    if active:
-        # It's active, so we can "connect" (this just sets _started=True since it's
-        # already running)
-        # NOTE: This is a bit weird.
-        remote._started = True
-        return remote
+    if await control_socket_is_running(cluster_hostname):
+        return Remote(cluster_hostname)
     return None

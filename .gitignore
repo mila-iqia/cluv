@@ -13,3 +13,4 @@ wheels/
 # uv.lock
 .claude
 .vscode
+logs/

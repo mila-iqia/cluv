@@ -268,7 +268,7 @@ async def clone_project(remotes: list[Remote], project_path: PurePosixPath):
     )
     await asyncio.gather(
         *(
-            remote.run(f"git clone {github_repo_url}.git {project_path}", hide=True)
+            remote.run(f"git clone {github_repo_url} {project_path}", hide=True)
             for remote in clusters_without_clones
         )
     )

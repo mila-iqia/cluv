@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import logging
 import shlex
 from pathlib import Path
 
-import rich_argparse
 from rich.console import Group
 from rich.panel import Panel
 
@@ -17,33 +15,6 @@ from cluv.remote import Remote
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
-
-
-def add_run_args(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
-    cluster_choices = get_config().clusters
-    run_parser = subparsers.add_parser(
-        "run",
-        help="Run a command on a cluster",
-        formatter_class=rich_argparse.RichHelpFormatter,
-    )
-    run_parser.add_argument(
-        "cluster",
-        choices=cluster_choices if cluster_choices else None,
-        # default=,
-        metavar="<cluster>",
-        help="The cluster to run the command on",
-    )
-    run_parser.add_argument(
-        "command",
-        type=str,
-        metavar="<command>",
-        help="The command to run",
-        nargs=argparse.REMAINDER,
-    )
-    run_parser.set_defaults(func=run)
-    return run_parser
 
 
 async def run(command: str | list[str], cluster: str):

@@ -23,7 +23,7 @@ from cluv.config import CluvConfig, get_config
 
 from .cli.init import init
 from .cli.login import login
-from .cli.run import add_run_args
+from .cli.run import run
 from .cli.status import status
 from .cli.submit import add_submit_args
 from .cli.sync import add_sync_args
@@ -156,6 +156,33 @@ def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     )
     init_parser.set_defaults(func=init)
     return init_parser
+
+
+def add_run_args(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> argparse.ArgumentParser:
+    cluster_choices = get_config().clusters
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run a command on a cluster",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    run_parser.add_argument(
+        "cluster",
+        choices=cluster_choices if cluster_choices else None,
+        # default=,
+        metavar="<cluster>",
+        help="The cluster to run the command on",
+    )
+    run_parser.add_argument(
+        "command",
+        type=str,
+        metavar="<command>",
+        help="The command to run",
+        nargs=argparse.REMAINDER,
+    )
+    run_parser.set_defaults(func=run)
+    return run_parser
 
 
 def setup_logging(verbose: int | None, force: bool = False):

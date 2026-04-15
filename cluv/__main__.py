@@ -97,14 +97,10 @@ def main(argv: list[str] | None = None):
             function(**args_dict)
     except subprocess.CalledProcessError as err:
         logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}:")
-        if err.output:
-            logger.error(f"Standard output:\n{err.output}")
-        else:
-            logger.error("No standard output.")
-        if err.stderr:
-            logger.error(f"Standard error:\n{err.stderr}")
-        else:
-            logger.error("No standard error.")
+        console.rule("[bold red]stdout[/]")
+        print(err.stdout.decode(), file=sys.stdout)
+        console.rule("[bold red]stderr[/]")
+        print(err.stderr.decode(), file=sys.stderr)
         sys.exit(err.returncode)
 
 

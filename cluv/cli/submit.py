@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import shlex
 import subprocess
 import sys
@@ -11,6 +12,8 @@ import rich_argparse
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
 from cluv.utils import console
+
+logger = logging.getLogger(__name__)
 
 
 def add_submit_args(
@@ -96,11 +99,12 @@ async def submit(
 
     # 6. Submit.
     remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable --chdir={project_path} {sbatch_args_str} {remote_job_script} {program_args_str}'"
-    console.print(
-        f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
-        + (f" {sbatch_args_str}" if sbatch_args_str else "")
-        + (f" -- {program_args_str}" if program_args_str else "")
-    )
+    console.print(f"Running remote command: [dim]{remote_cmd}[/dim]")
+    # console.print(
+    #     f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
+    #     + (f" {sbatch_args_str}" if sbatch_args_str else "")
+    #     + (f" -- {program_args_str}" if program_args_str else "")
+    # )
     output = await remote.get_output(remote_cmd)
     job_id = int(output.strip())
 

@@ -83,13 +83,9 @@ jobs:
   integration_tests:
     needs: [unit_tests]
     runs-on: self-hosted
-    # todo: remove this once we have a decently solid setup, not too reliant on the dev machine
+    # TODO: remove this once we have a decently solid setup, not too reliant on the dev machine
     # having active SSH connections to the Slurm clusters.
     continue-on-error: true
-    strategy:
-      max-parallel: 4
-      matrix:
-        cluster: ["mila", "tamia", "rorqual"]
     steps:
       - uses: actions/checkout@v6
       - name: Install the latest version of uv
@@ -102,9 +98,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
       - name: Run all tests
-        run: uv run pytest -v --cov=cluv --cov-report=xml --cov-append
-        env:
-          SLURM_CLUSTER: ${{ matrix.cluster }}
+        run: uv run pytest -v --slow --cov=cluv --cov-report=xml --cov-append
       - name: Store coverage report as an artifact
         uses: actions/upload-artifact@v4
         with:

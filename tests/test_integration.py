@@ -1,12 +1,14 @@
 """Integration tests that require live SSH connections to a real Slurm cluster.
 
-These tests connect to a cluster at the hostname $SLURM_CLUSTER.
-They will be skipped if that variable is not set, and fail if they are set and
-there is not an active SSH connection to that cluster.
+TODO: Do we prefer having tests for only one remote cluster at a time, in different CI steps?
+Or have tests for every cluster in the same pytest session?
+--> Choosing to have tests for all clusters in the same test session for now. This is more
+efficient, since at some point there might be like 10 different clusters, and 10 CI steps to run.
 """
 
-import os
-
+import milatools
+import milatools.cli
+import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
@@ -15,25 +17,52 @@ from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.remote import Remote, control_socket_is_running
 
-SLURM_CLUSTER = os.environ.get("SLURM_CLUSTER")
+REQUIRED_CLUSTERS = ("mila", "rorqual", "tamia")
+ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)
+
+# Mark all the tests here as 'slow', so they are only run when the --slow flag is passed to pytest,
+# specifically in the integration-tests CI step, which happens on a self-hosted runner that has
+# reusable SSH connections to those clusters.
+pytestmark = pytest.mark.slow
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)
 async def cluster(request: pytest.FixtureRequest) -> str:
-    # NOTE: with this `getattr` thing on request, we can also parametrize the cluster fixture to
-    # run the same tests on multiple clusters in the same test session, if we want.
-    # For example:
-    # @pytest.mark.parametrize("cluster", ["mila", "tamia", "rorqual"], indirect=True)
-    cluster = getattr(request, "param", SLURM_CLUSTER)
+    """Fixture that gives the hostname of the Slurm cluster to run tests with.
+
+    - If the SLURM_CLUSTER environment variable is not set, all tests that depend on this fixture
+      will be skipped.
+    - If it is set and there is not an active SSH connection to that cluster, this fixture will
+      fail, causing all tests that use it to fail, since they require a live connection to a
+      cluster.
+
+    NOTE: This fixture can also be (indirectly) parametrized by tests that want to run with a remote
+    connected to a particular cluster.
+
+    For example:
+
+    ```python
+    @pytest.mark.parametrize("cluster", ["mila", "tamia", "rorqual"], indirect=True)
+    def test_something(remote: Remote):
+        assert remote.hostname in ["mila", "tamia", "rorqual"]
+    ```
+    """
+    cluster = getattr(request, "param", None)
     if cluster is None:
         pytest.skip(
             "No cluster specified. Set the SLURM_CLUSTER environment variable to a "
             "cluster with an active SSH connection to run these tests."
         )
-    if not (await control_socket_is_running(cluster)):
-        pytest.fail(f"These tests require an active connection to the {cluster} cluster.")
-    assert isinstance(cluster, str)
-    return cluster
+    existing_ssh_connection = await control_socket_is_running(cluster)
+    if existing_ssh_connection:
+        assert isinstance(cluster, str)
+        return cluster
+    if cluster in REQUIRED_CLUSTERS:
+        pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
+    else:
+        pytest.xfail(
+            f"No active SSH connection to {cluster}, but it is not necessary to test against it."
+        )
 
 
 @pytest_asyncio.fixture(scope="session")

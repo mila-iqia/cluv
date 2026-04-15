@@ -22,19 +22,6 @@ pytestmark = pytest.mark.integration
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-async def _require_remote(cluster: str):
-    """Return an active Remote for *cluster*, skip the test if not connected."""
-    remote = await get_remote_without_2fa_prompt(cluster)
-    if remote is None:
-        pytest.skip(f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first.")
-    return remote
-
-
-# ---------------------------------------------------------------------------
 # cluv status – per-cluster
 # ---------------------------------------------------------------------------
 
@@ -55,7 +42,7 @@ def cluster(request: pytest.FixtureRequest):
 async def remote(cluster: str):
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None:
-        pytest.skip(f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first.")
+        pytest.fail(f"Test needs an active SSH connection to the {cluster} cluster.")
     return remote
 
 
@@ -103,7 +90,7 @@ async def test_status_storage(cluster_status: ClusterStatus):
 
 @pytest.mark.timeout(60)
 @pytest.mark.parametrize(cluster.__name__, ["mila", "tamia", "rorqual"], indirect=True)
-async def test_submit(remote: Remote):
+async def test_submit_test_only(remote: Remote):
     """End-to-end: actually submit scripts/job.sh to rorqual via sbatch.
 
     Requires an active SSH connection to rorqual and a clean git tree.
@@ -112,7 +99,7 @@ async def test_submit(remote: Remote):
     job_id = await submit(
         cluster=remote.hostname,
         job_script="scripts/job.sh",
-        sbatch_args=[],
+        sbatch_args=["--test-only"],
         program_args=["python", "--version"],
     )
     assert isinstance(job_id, int)

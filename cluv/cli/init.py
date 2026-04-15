@@ -2,17 +2,17 @@ import os
 import subprocess
 from pathlib import Path
 
-from cluv.config import find_pyproject, has_cluv_config
+from cluv.config import find_pyproject, has_cluv_config, load_cluv_config
 from cluv.utils import console
 
-# TODO : not a great import... But it can be helpful instead of updating a const
-from milatools.cli.init_command import DRAC_CLUSTERS    
+from milatools.cli.init_command import DRAC_CLUSTERS    # TODO : not a great import but can be useful instead of updating manually
 
 JOB_SCRIPT_PATH = "scripts/job.sh"
-RESULTS_DIR_PATH = "logs"
+DEFAULT_RESULTS_PATH = "logs"
 
 CLUV_DEFAUT_CONFIG = [
-    "[tool.cluv]"
+    "[tool.cluv]",
+    f'results_path = "{DEFAULT_RESULTS_PATH}"'
 ]
 
 CLUV_SLURM_DEFAULT_CONFIG = [
@@ -22,14 +22,14 @@ CLUV_SLURM_DEFAULT_CONFIG = [
     'WANDB_MODE = "offline"',
 ]
 
-CLUV_MILA_CLUSTER_DEFAULT_CONFIG = [
+CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS = [
     "UV_OFFLINE = 0",
     'WANDB_MODE = "online"',
 ]
 
 def init() -> None:
     """
-    TODO
+    Initialize a new project for use with cluv.
     """
     console.print()
     console.rule("[bold cyan]cluv init[/bold cyan]")
@@ -64,13 +64,18 @@ def init() -> None:
     console.print("Reading pyproject.toml...")
     pyproject_path = find_pyproject()
 
+    results_path = DEFAULT_RESULTS_PATH
     if has_cluv_config(pyproject_path):
         console.print("[green]✅ Project already have a cluv config in pyproject.toml.[/green]")
+        config = load_cluv_config(pyproject_path)
+        results_path = config.results_path
+        console.print(config)
     else:
         console.print("No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config...")
-        add_cluv_config(pyproject_path, RESULTS_DIR_PATH)
-        add_cluv_slurm_config(pyproject_path)
-        add_cluv_cluster_config("mila", pyproject_path, CLUV_MILA_CLUSTER_DEFAULT_CONFIG)
+        console.print(f"Adding config for cluv tool :")
+        add_cluv_config_section(pyproject_path, CLUV_DEFAUT_CONFIG)
+        add_cluv_config_section(pyproject_path, CLUV_SLURM_DEFAULT_CONFIG)
+        add_cluv_cluster_config("mila", pyproject_path, CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
         for cluster in DRAC_CLUSTERS: add_cluv_cluster_config(cluster, pyproject_path)
         console.print("[green]✅ Pyproject config completed.[/green]")
 
@@ -79,21 +84,15 @@ def init() -> None:
     console.print("Validating project structure...")
 
     # Check if the job script exists
-    if os.path.exists(JOB_SCRIPT_PATH):
+    if os.path.exists(JOB_SCRIPT_PATH): # TODO : check if the content is correct ?
         console.print(f"[green]✅ Job template script already exists at '{JOB_SCRIPT_PATH}'.[/green]")
     else:
         os.makedirs("scripts")
         console.print(f"Adding job template script at '{JOB_SCRIPT_PATH}'.")
-        generate_job_script(pyproject_path.parent, RESULTS_DIR_PATH)
-
-    # Check if the results_dir exists
-    if os.path.exists(RESULTS_DIR_PATH):
-        console.print(f"[green]✅ Results directory already exists at '{RESULTS_DIR_PATH}'.[/green]")
-    else:
-        console.print(f"Adding results directory at '{RESULTS_DIR_PATH}'.")
-        os.makedirs(RESULTS_DIR_PATH)
-    else:
-        console.print(f"[green]✅ Results directory already exists at '{RESULTS_DIR_PATH}'.[/green]")
+        generate_job_script(pyproject_path.parent, results_path)
+    
+    # Check if the results path is correctly symlinked to scratch
+    check_symlink_to_scratch(pyproject_path, results_path)
 
     console.print()
     console.print(":tada: Your cluv config is ready to go !")
@@ -105,64 +104,77 @@ def init() -> None:
     console.print("=> [bold] cluv sync [/bold]  : synchronize the project on all configured clusters.")
     console.print()
 
-def add_cluv_config(pyproject_path: Path, results_path: str) -> None:
+
+def add_cluv_config_section(pyproject_path: Path, section_lines: list[str]) -> None:
     """
-    TODO
+    Write the given lines to the pyproject.toml file.
     """
-    console.print(f"Adding config for cluv tool :")
-    section_lines = CLUV_DEFAUT_CONFIG + [f'results_path = "{results_path}"']
-    console.log(f'{"\n" + "\n".join(section_lines) + "\n"}'.replace("[", "\\["))    # TODO : Log not displayed correctly ?
+    console.log(f'{"\n" + "\n".join(section_lines) + "\n"}'.replace("[", "\\["))
     with pyproject_path.open("a") as f:
         f.write("\n" + "\n".join(section_lines) + "\n")
 
 
-def add_cluv_slurm_config(pyproject_path: Path) -> None:
-    """
-    TODO
-    """
-    console.print(f"Adding config for global env vars when using SLURM :")
-    console.log(f'{"\n" + "\n".join(CLUV_SLURM_DEFAULT_CONFIG) + "\n"}'.replace("[", "\\["))    # TODO : Log not displayed correctly ?
-    with pyproject_path.open("a") as f:
-        f.write("\n" + "\n".join(CLUV_SLURM_DEFAULT_CONFIG) + "\n")
-
-
 def add_cluv_cluster_config(cluster: str, pyproject_path: Path, vars: list[str] = []) -> None:
     """
-    TODO
+    Add a cluster config section for the given cluster to the pyproject.toml file, with the given variables.
     """
     console.print(f"Adding config for cluster [bold]{cluster}[/bold] :")
-    section_lines = [f"\n[tool.cluv.clusters.{cluster}]"] + vars
-    console.log(f'{"\n".join(section_lines) + "\n"}'.replace("[", "\\["))    # TODO : Log not displayed correctly ?
+    section_lines = [f"[tool.cluv.clusters.{cluster}]"] + vars
+    console.log(f'{"\n" + "\n".join(section_lines) + "\n"}'.replace("[", "\\["))
     with pyproject_path.open("a") as f:
-        f.write("\n".join(section_lines) + "\n")
+        f.write("\n" + "\n".join(section_lines) + "\n")
 
 
 def check_git() -> None:
     """
-    TODO
+    Check if the current project is in a git repository. If not, raise an error and exit.
     """
     if os.path.isdir(".git"):   # TODO : Very simple approch. Only works at the project root.
-        console.print("[green]✅ Project is in git repository.[/green]")
+        console.print("[green]✅ Project is in a git repository.[/green]")
     else:
         console.print("[red]❌ No git repository found.[/red]")
         raise RuntimeError("The current project is not a git repository. Try running 'git init' or clone a GitHub project.")
 
 
-def generate_job_script(project_root: Path, results_dir: str) -> None:
+def check_symlink_to_scratch(pyproject_path: Path, results_path: str) -> None:
     """
-    TODO
+    Check if a symlink from the results_path in the project to the corresponding path in $SCRATCH already exists. If not, create it.
+    Should be like : $HOME/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>
+    """
+    # Generate the expected scratch path and the expected symlink path
+    project_path_name = pyproject_path.parent.name
+    scratch_dir = Path(os.path.expandvars(f"$SCRATCH/{results_path}/{project_path_name}"))
+    results_dir = pyproject_path.parent / results_path
+
+    if results_dir.is_symlink():
+        if results_dir.resolve() == scratch_dir.resolve():
+            console.print(f"[green]✅ Symlink from $HOME results_path to $SCRATCH already exists.[/green]")
+            return
+        else:
+            console.print(f"[red]❌ Symlink from {results_dir} points to {results_dir.resolve()} instead of {scratch_dir}.[/red]")
+            raise RuntimeError(f"Symlink from {results_dir} points to {results_dir.resolve()} instead of {scratch_dir}. Please fix this symlink before running cluv.")
+    else:
+        console.print(f"Creating symlink from {results_dir} to {scratch_dir}")
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        results_dir.symlink_to(scratch_dir, target_is_directory=True)
+
+
+def generate_job_script(project_root: Path, results_path: str) -> None:
+    """
+    Generate a job script template at JOB_SCRIPT_PATH with the following content, replacing {results_path} with the provided results_path argument and {project_root} with the provided project_root argument.
+    The script should be executable and contain the necessary SLURM directives to run a job on a cluster, including setting up the environment, syncing the project, and running a command passed as an argument to the script.
     """
     project_name = project_root.name
     project_root = str(project_root.relative_to(Path.home()))
 
     script_content = f"""#!/bin/bash
-#SBATCH --output={results_dir}/%j/slurm-%j.out
+#SBATCH --output={results_path}/%j/slurm-%j.out
 #SBATCH --ntasks=1
 #SBATCH --mem=8G
 #SBATCH --time=0:05:00
 
 project_name="{project_name}"
-results_dir="{results_dir}"
+results_path="{results_path}"
 project_root="{project_root}"
 """
 
@@ -189,8 +201,8 @@ echo "Running command: $@"
 srun --gres-flags=allow-task-sharing uv --directory=$SLURM_TMPDIR/$project_name run "$@"
 
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
-echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_dir to $project_root/$results_dir"
-srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_dir $project_root/
+echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path to $project_root/$results_path"
+srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_path $project_root/
 """
 
     with open(JOB_SCRIPT_PATH, 'w') as sh_file:

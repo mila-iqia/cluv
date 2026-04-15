@@ -159,7 +159,7 @@ async def get_real_cluster_status(remote: Remote) -> ClusterStatus:
 
     try:
         raw = await remote.get_output(
-            f"bash -l -c '{script}'",
+            f"bash --login -c '{script}'",
             hide=True,
             warn=True,
             display=False,

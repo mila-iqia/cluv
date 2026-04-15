@@ -59,7 +59,7 @@ async def run(command: str | list[str], cluster: str):
     project_path = find_pyproject().parent.relative_to(Path.home())
     await asyncio.gather(
         *[
-            remote.run(f"bash -l -c 'uv run --directory={project_path} {command}'")
+            remote.run(f"bash --login -c 'uv run --directory={project_path} {command}'")
             for remote in remotes
         ]
     )

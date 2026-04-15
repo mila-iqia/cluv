@@ -158,7 +158,7 @@ async def sync_task_function(
     await clone_project([remote], project_path)
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
-    await remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
+    await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
 
     if config.results_path:
         _update_progress(3, "Fetching results", num_tasks)
@@ -186,7 +186,7 @@ async def install_uv(remotes: list[Remote]):
 
     uv_paths = await asyncio.gather(
         *(
-            remote.get_output("bash -l -c 'which uv'", warn=True, hide=True, display=False)
+            remote.get_output("bash --login -c 'which uv'", warn=True, hide=True, display=False)
             for remote in remotes
         )
     )
@@ -205,7 +205,7 @@ async def install_uv(remotes: list[Remote]):
     )
     uv_versions = await asyncio.gather(
         *(
-            remote.get_output("bash -l -c 'uv --version'", hide=True, display=False)
+            remote.get_output("bash --login -c 'uv --version'", hide=True, display=False)
             for remote in remotes
         )
     )
@@ -221,7 +221,7 @@ async def install_uv(remotes: list[Remote]):
         )
         await asyncio.gather(
             *(
-                remote.run(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
+                remote.run(f"bash --login -c 'uv self update {uv_version_here}'", hide=True)
                 for remote in remotes_with_different_uv_versions
             )
         )
@@ -352,7 +352,9 @@ async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_pat
 
     # On some clusters (e.g. Vulcan), $SCRATCH is only defined in login shells.
     scratch = (
-        await remote.get_output("bash -l -c 'echo $SCRATCH'", hide=True, warn=True, display=False)
+        await remote.get_output(
+            "bash --login -c 'echo $SCRATCH'", hide=True, warn=True, display=False
+        )
     ).strip()
     if not scratch:
         logger.warning(f"Remote {remote.hostname} does not have $SCRATCH defined.")

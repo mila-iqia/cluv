@@ -10,7 +10,7 @@ wheels/
 .venv
 
 # uv lockfile
-uv.lock
+# uv.lock
 .claude
 .vscode
 logs/

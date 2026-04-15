@@ -19,7 +19,6 @@ import rich.logging
 import rich_argparse
 import simple_parsing
 
-from cluv.config import CluvConfig, get_config
 
 from .cli.init import init
 from .cli.login import login
@@ -34,7 +33,7 @@ if typing.TYPE_CHECKING:
     Subparsers = argparse._SubParsersAction[simple_parsing.ArgumentParser]
 
 
-def main(argv: list[str] | None = None):
+def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
 
@@ -56,8 +55,6 @@ def main(argv: list[str] | None = None):
     )
     _add_v_arg(parser)  # add -v/--verbose on the top-level parser.
 
-    config = get_config()
-
     subparsers = parser.add_subparsers(dest="<command>", required=True)
 
     # add -v/--verbose to each subparser as well.
@@ -67,7 +64,7 @@ def main(argv: list[str] | None = None):
     run_parser = add_run_args(subparsers)
     _add_v_arg(run_parser)
 
-    login_parser = add_login_args(subparsers, config=config)
+    login_parser = add_login_args(subparsers)
     _add_v_arg(login_parser)
 
     sync_parser = add_sync_args(subparsers)
@@ -108,8 +105,7 @@ def main(argv: list[str] | None = None):
         sys.exit(err.returncode)
 
 
-def add_status_args(subparsers: Subparsers):
-    cluster_choices = get_config().clusters
+def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser(
         "status",
         help="Get the status of available clusters.",
@@ -117,7 +113,6 @@ def add_status_args(subparsers: Subparsers):
     )
     status_parser.add_argument(
         "clusters",
-        choices=cluster_choices if cluster_choices else None,
         nargs="*",
         default=None,
         metavar="<cluster>",
@@ -129,10 +124,7 @@ def add_status_args(subparsers: Subparsers):
     return status_parser
 
 
-def add_login_args(
-    subparsers: Subparsers,
-    config: CluvConfig,
-):
+def add_login_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     login_parser = subparsers.add_parser(
         "login",
         help="Login to the specified clusters.",
@@ -140,7 +132,6 @@ def add_login_args(
     )
     login_parser.add_argument(
         "clusters",
-        choices=(config.clusters) if config.clusters else None,
         nargs="*",
         help="The cluster(s) to login to. Leave empty to login to all clusters.",
     )
@@ -161,7 +152,6 @@ def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
 def add_run_args(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> argparse.ArgumentParser:
-    cluster_choices = get_config().clusters
     run_parser = subparsers.add_parser(
         "run",
         help="Run a command on a cluster",
@@ -169,7 +159,6 @@ def add_run_args(
     )
     run_parser.add_argument(
         "cluster",
-        choices=cluster_choices if cluster_choices else None,
         # default=,
         metavar="<cluster>",
         help="The cluster to run the command on",
@@ -185,7 +174,7 @@ def add_run_args(
     return run_parser
 
 
-def setup_logging(verbose: int | None, force: bool = False):
+def setup_logging(verbose: int | None, force: bool = False) -> None:
     verbose = verbose or 0
     handler = rich.logging.RichHandler(
         console=console,
@@ -214,7 +203,7 @@ def setup_logging(verbose: int | None, force: bool = False):
     #     cluv_logger.setLevel(logging.DEBUG)
 
 
-def _add_v_arg(parser: argparse.ArgumentParser):
+def _add_v_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-v",
         "--verbose",

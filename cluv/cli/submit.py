@@ -16,7 +16,6 @@ from cluv.utils import console
 def add_submit_args(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> argparse.ArgumentParser:
-    cluster_choices = get_config().clusters
     submit_parser = subparsers.add_parser(
         "submit",
         help="Submit a SLURM job on a remote cluster.",
@@ -25,7 +24,6 @@ def add_submit_args(
     )
     submit_parser.add_argument(
         "cluster",
-        choices=cluster_choices if cluster_choices else None,
         metavar="<cluster>",
         help="The cluster to submit the job on.",
     )

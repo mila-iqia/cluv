@@ -40,7 +40,6 @@ logger = logging.getLogger(__name__)
 def add_sync_args(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> argparse.ArgumentParser:
-    cluster_choices = get_config().clusters
     sync_parser = subparsers.add_parser(
         "sync",
         help="Synchronizes the current project across clusters.",
@@ -48,7 +47,6 @@ def add_sync_args(
     )
     sync_parser.add_argument(
         "clusters",
-        choices=cluster_choices if cluster_choices else None,
         nargs="*",
         default=None,
         metavar="<cluster>",

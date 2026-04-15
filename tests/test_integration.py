@@ -10,31 +10,37 @@ These tests connect to real clusters. They will fail if you do not have
 active SSH ControlMaster sockets (run `cluv login` first).
 """
 
+import os
+
 import pytest
 import pytest_asyncio
 
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
-from cluv.remote import Remote
+from cluv.remote import Remote, control_socket_is_running
 
 pytestmark = pytest.mark.integration
+SLURM_CLUSTER = os.environ.get(
+    "SLURM_CLUSTER"
+)  # for manual test runs, can also be set in the environment
 
 
-@pytest.fixture(
+@pytest_asyncio.fixture(
     scope="session",
-    params=[
-        "mila",
-        "tamia",
-        pytest.param(
-            "rorqual",
-            # filesystem can be very very slow, uv sync can take forever the first time.
-            marks=pytest.mark.timeout(30),
-        ),
-    ],
+    params=[SLURM_CLUSTER] if SLURM_CLUSTER else [],
 )
-def cluster(request: pytest.FixtureRequest):
-    return getattr(request, "param", "mila")
+async def cluster(request: pytest.FixtureRequest) -> str:
+    cluster = getattr(request, "param", None)
+    if cluster is None:
+        pytest.skip(
+            "No cluster specified. Set the SLURM_CLUSTER environment variable to a "
+            "cluster with an active SSH connection to run these tests."
+        )
+    if not (await control_socket_is_running(cluster)):
+        pytest.fail(f"These tests require an active connection to the {cluster} cluster.")
+    assert isinstance(cluster, str)
+    return cluster
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -88,7 +94,6 @@ async def test_status_storage(cluster_status: ClusterStatus):
 
 
 @pytest.mark.timeout(60)
-@pytest.mark.parametrize(cluster.__name__, ["mila", "tamia", "rorqual"], indirect=True)
 async def test_submit(remote: Remote):
     """End-to-end: actually submit scripts/job.sh to rorqual via sbatch.
 

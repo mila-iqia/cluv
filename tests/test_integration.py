@@ -95,6 +95,8 @@ async def cluster_status(remote: Remote):
     return await get_real_cluster_status(remote)
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.asyncio
 async def test_status_online(cluster_status: ClusterStatus):
     assert cluster_status.online is True

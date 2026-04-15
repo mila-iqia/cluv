@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import functools
 import logging
-import os
 import shutil
 import subprocess
 import textwrap
@@ -118,12 +117,7 @@ async def sync(
         remotes = await login(clusters)
 
     # Git push first?
-    # NOTE: If we're running in the GitHub CI, the commit has already been pushed, and, most importantly,
-    # we are probably not on a branch, and so this would fail.
-    if "GITHUB_ACTIONS" in os.environ:
-        logger.info("Skipping git push, since this is running inside the GitHub CI environment.")
-    else:
-        await run(("git", "push"), hide=False)
+    await run(("git", "push"), hide=False)
 
     # TODO: Do we raise an error if we fail to connect to a given cluster?
     # TODO: Add an --ignore flag to ignore some clusters?

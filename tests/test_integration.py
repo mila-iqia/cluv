@@ -21,11 +21,6 @@ from cluv.remote import Remote
 pytestmark = pytest.mark.integration
 
 
-# ---------------------------------------------------------------------------
-# cluv status – per-cluster
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(
     scope="session",
     params=[
@@ -99,12 +94,14 @@ async def test_submit_test_only(remote: Remote):
     job_id = await submit(
         cluster=remote.hostname,
         job_script="scripts/job.sh",
-        sbatch_args=["--test-only"],
+        sbatch_args=["--time=00:00:30"],
         program_args=["python", "--version"],
     )
     assert isinstance(job_id, int)
-
-    job_name = await remote.get_output(
-        f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
-    )
-    assert job_name.strip().startswith("cluv-")
+    try:
+        job_name = await remote.get_output(
+            f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
+        )
+        assert job_name.strip().startswith("cluv-")
+    finally:
+        await remote.run(f"scancel {job_id}")

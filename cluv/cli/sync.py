@@ -152,22 +152,23 @@ async def sync_task_function(
     num_tasks = 4 if config.results_path else 3
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
-    await install_uv([remote])
+    await install_uv(remote)
 
     _update_progress(1, "Setting up project", num_tasks)
-    await clone_project([remote], project_path)
+    await clone_project(remote, project_path)
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
     await remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
 
     if config.results_path:
         _update_progress(3, "Fetching results", num_tasks)
-        await fetch_results([remote], config.results_path)
+        await fetch_results(remote, config.results_path)
 
     _update_progress(num_tasks, "Done", num_tasks)
 
 
-async def install_uv(remotes: list[Remote]):
+async def install_uv(remote: Remote):
+    # todo: These parts are common. No need to do them for each cluster. Not a big deal though.
     if not shutil.which("uv"):
         logger.error(
             "`uv` is not installed on this machine. Please install `uv` to ensure it's installed on the remote clusters as well."
@@ -184,50 +185,23 @@ async def install_uv(remotes: list[Remote]):
         f"[green]Using uv version {uv_version_here} everywhere, since this is the version on this machine.[/green]"
     )
 
-    uv_paths = await asyncio.gather(
-        *(
-            remote.get_output("bash -l -c 'which uv'", warn=True, hide=True, display=False)
-            for remote in remotes
-        )
-    )
-    uv_paths = [uv_path.strip() for uv_path in uv_paths]
-    clusters_without_uv = [
-        remote.hostname for remote, uv_path in zip(remotes, uv_paths) if not uv_path
-    ]
-    if clusters_without_uv:
-        logger.info(f"Installing uv on the following clusters: {clusters_without_uv}")
-    await asyncio.gather(
-        *(
-            remote.run("curl -LsSf https://astral.sh/uv/install.sh | sh")
-            for remote in remotes
-            if remote.hostname in clusters_without_uv
-        )
-    )
-    uv_versions = await asyncio.gather(
-        *(
-            remote.get_output("bash -l -c 'uv --version'", hide=True, display=False)
-            for remote in remotes
-        )
-    )
-    uv_versions = [uv_version.strip().split()[1] for uv_version in uv_versions]
-    remotes_with_different_uv_versions = [
-        remote
-        for remote, version in zip(remotes, uv_versions)
-        if version.strip() != uv_version_here
-    ]
-    if remotes_with_different_uv_versions:
-        logger.info(
-            f"Updating uv to version {uv_version_here} on the following clusters: {[remote.hostname for remote in remotes_with_different_uv_versions]}"
-        )
-        await asyncio.gather(
-            *(
-                remote.run(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
-                for remote in remotes_with_different_uv_versions
-            )
-        )
+    uv_path = await remote.get_output("bash -l -c 'which uv'", warn=True, hide=True, display=False)
+    uv_path = uv_path.strip()
+    cluster_doesnt_have_uv = not uv_path
+    if cluster_doesnt_have_uv:
+        logger.info(f"Installing uv on {remote.hostname}.")
+        await remote.run("curl -LsSf https://astral.sh/uv/install.sh | sh")
+
+    uv_version = await remote.get_output("bash -l -c 'uv --version'", hide=True, display=False)
+    uv_version = uv_version.strip().split()[1]
+
+    uv_version_is_different = uv_version.strip() != uv_version_here
+    if uv_version_is_different:
+        logger.info(f"Updating uv to version {uv_version_here} on the {remote.hostname} cluster.")
+        await remote.run(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
 
 
-async def clone_project(remotes: list[Remote], project_path: PurePosixPath):
+async def clone_project(remote: Remote, project_path: PurePosixPath):
     """Setup the project repo on all the remote clusters.
 
     New idea:
@@ -235,6 +209,8 @@ async def clone_project(remotes: list[Remote], project_path: PurePosixPath):
     - Worry about authentication later, just raise an error if need be for now.
 
     """
+    # TODO: This git info is shared, but currently repeatedly executed for each cluster.
+    # Could be done only once.
     current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
     git_remote_name = subprocess.getoutput(
         f"git config --get branch.{current_git_branch}.remote"
@@ -246,55 +222,24 @@ async def clone_project(remotes: list[Remote], project_path: PurePosixPath):
     # TODO: Scp the ~/.git-credentials file if needed?
     # Or configure the config credential-helper to store first?
 
-    # For each cluster where the project isn't cloned yet, clone it.
-    _clusters_without_clones_result = await asyncio.gather(
-        *(
-            remote.run(
-                f"test -d {project_path}",
-                warn=True,
-                hide=True,
-                display=False,
-            )
-            for remote in remotes
+    # If the project isn't cloned yet, clone it.
+    _is_cloned_on_cluster = (
+        await remote.run(
+            f"test -d {project_path}",
+            warn=True,
+            hide=True,
+            display=False,
         )
-    )
-    clusters_without_clones = [
-        remote
-        for remote, result in zip(remotes, _clusters_without_clones_result)
-        if result.returncode != 0
-    ]
-    logger.debug(
-        f"Clusters where the project isn't cloned yet: {[remote.hostname for remote in clusters_without_clones]}   "
-    )
-    await asyncio.gather(
-        *(
-            remote.run(f"git clone {github_repo_url} {project_path}", hide=True)
-            for remote in clusters_without_clones
-        )
-    )
-
-    await asyncio.gather(
-        *(
-            remote.run(f"git -C {project_path} fetch --all --prune", hide=True)
-            for remote in remotes
-        )
-    )
-
-    # TODO: Look into why the command still has the Controlpath explicitly there, even if the ssh config already has it.
-    await asyncio.gather(
-        *(
-            remote.run(
-                f"git -C {project_path} checkout {current_git_branch}",
-                # warn=True,
-                hide=False,
-            )
-            for remote in remotes
-        )
-    )
-    await asyncio.gather(*(remote.run(f"git -C {project_path} pull") for remote in remotes))
+    ).returncode == 0
+    if not _is_cloned_on_cluster:
+        logger.debug(f"Project isn't cloned yet on {remote.hostname}.")
+    await remote.run(f"git clone {github_repo_url} {project_path}", hide=True)
+    await remote.run(f"git -C {project_path} fetch --all --prune", hide=True)
+    await remote.run(f"git -C {project_path} checkout {current_git_branch}", hide=False)
+    await remote.run(f"git -C {project_path} pull")
 
 
-async def fetch_results(remotes: list[Remote], results_path: Path | str):
+async def fetch_results(remote: Remote, results_path: Path | str):
     """Fetches results from all remote clusters to the current (mila for now) cluster using rsync."""
     results_path = Path(results_path)
     assert not results_path.is_absolute()
@@ -312,32 +257,24 @@ async def fetch_results(remotes: list[Remote], results_path: Path | str):
 
     results_path.mkdir(parents=True, exist_ok=True)
 
-    await asyncio.gather(
-        *(create_results_dir_with_symlink_to_scratch(remote, results_path) for remote in remotes)
-    )
-
-    await asyncio.gather(
-        *(
-            run(
-                # Using --full-form flags (not -avz) for better readability.
-                (
-                    "rsync",
-                    "--archive",
-                    "--verbose",
-                    "--compress",
-                    "--copy-links",
-                    f"{remote.hostname}:{results_path_relative_to_home}",
-                    str((Path.home() / results_path_relative_to_home).parent),
-                    # shlex.split(
-                    #     f"rsync --archive --verbose --compress --copy-links "
-                    #     f"{remote.hostname}:{results_path_relative_to_home} {(Path.home() / results_path_relative_to_home).parent}"
-                    # )
-                ),
-                warn=True,
-                hide=False,
-            )
-            for remote in remotes
-        )
+    await create_results_dir_with_symlink_to_scratch(remote, results_path)
+    await run(
+        # Using --full-form flags (not -avz) for better readability.
+        (
+            "rsync",
+            "--archive",
+            "--verbose",
+            "--compress",
+            "--copy-links",
+            f"{remote.hostname}:{results_path_relative_to_home}",
+            str((Path.home() / results_path_relative_to_home).parent),
+            # shlex.split(
+            #     f"rsync --archive --verbose --compress --copy-links "
+            #     f"{remote.hostname}:{results_path_relative_to_home} {(Path.home() / results_path_relative_to_home).parent}"
+            # )
+        ),
+        warn=True,
+        hide=False,
     )
 
 

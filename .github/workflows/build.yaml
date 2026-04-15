@@ -74,7 +74,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
       - name: Test with pytest
-        run: uv run pytest -v -m "not integration" --cov=cluv --cov-report=xml --cov-append
+        run: uv run pytest -v --cov=cluv --cov-report=xml --cov-append
       - name: Store coverage report as an artifact
         uses: actions/upload-artifact@v4
         with:
@@ -102,7 +102,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
       - name: Run all tests
-        run: uv run pytest -v -m integration --cov=cluv --cov-report=xml --cov-append
+        run: uv run pytest -v --cov=cluv --cov-report=xml --cov-append
         env:
           SLURM_CLUSTER: ${{ matrix.cluster }}
       - name: Store coverage report as an artifact

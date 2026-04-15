@@ -47,6 +47,12 @@ def find_pyproject(start: Path | None = None) -> Path:
     )
 
 
+def has_cluv_config(pyproject_path: Path) -> bool:
+    with pyproject_path.open("rb") as handle:
+        data = tomllib.load(handle)
+    return "cluv" in data.get("tool", {})
+
+
 def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     with pyproject_path.open("rb") as handle:
         data = tomllib.load(handle)

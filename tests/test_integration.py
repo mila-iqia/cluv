@@ -1,13 +1,8 @@
-"""Integration tests that require live SSH connections to real clusters.
+"""Integration tests that require live SSH connections to a real Slurm cluster.
 
-Run with:
-    uv run pytest -m integration -v
-
-Skip with:
-    uv run pytest -m "not integration"
-
-These tests connect to real clusters. They will fail if you do not have
-active SSH ControlMaster sockets (run `cluv login` first).
+These tests connect to a cluster at the hostname $SLURM_CLUSTER.
+They will be skipped if that variable is not set, and fail if they are set and
+there is not an active SSH connection to that cluster.
 """
 
 import os
@@ -20,18 +15,16 @@ from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.remote import Remote, control_socket_is_running
 
-pytestmark = pytest.mark.integration
-SLURM_CLUSTER = os.environ.get(
-    "SLURM_CLUSTER"
-)  # for manual test runs, can also be set in the environment
+SLURM_CLUSTER = os.environ.get("SLURM_CLUSTER")
 
 
-@pytest_asyncio.fixture(
-    scope="session",
-    params=[SLURM_CLUSTER] if SLURM_CLUSTER else [],
-)
+@pytest_asyncio.fixture(scope="session")
 async def cluster(request: pytest.FixtureRequest) -> str:
-    cluster = getattr(request, "param", None)
+    # NOTE: with this `getattr` thing on request, we can also parametrize the cluster fixture to
+    # run the same tests on multiple clusters in the same test session, if we want.
+    # For example:
+    # @pytest.mark.parametrize("cluster", ["mila", "tamia", "rorqual"], indirect=True)
+    cluster = getattr(request, "param", SLURM_CLUSTER)
     if cluster is None:
         pytest.skip(
             "No cluster specified. Set the SLURM_CLUSTER environment variable to a "
@@ -88,17 +81,14 @@ async def test_status_storage(cluster_status: ClusterStatus):
     assert cluster_status.storage.scratch_used >= 0
 
 
-# ---------------------------------------------------------------------------
-# cluv submit — rorqual integration
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.timeout(60)
 async def test_submit(remote: Remote):
-    """End-to-end: actually submit scripts/job.sh to rorqual via sbatch.
+    """End-to-end: actually submit scripts/job.sh to a slurm cluster via sbatch.
 
-    Requires an active SSH connection to rorqual and a clean git tree.
-    The project must already be synced on rorqual (sync is mocked out).
+    Requires an active SSH connection to the cluster and a clean git tree.
+    Also actually performs a `cluv sync` to that cluster.
+
+    NOTE: This **will** push the current branch to GitHub (since it runs `cluv sync`).
     """
     job_id = await submit(
         cluster=remote.hostname,

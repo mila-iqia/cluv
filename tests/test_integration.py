@@ -25,8 +25,16 @@ pytestmark = pytest.mark.integration
     scope="session",
     params=[
         "mila",
-        "tamia",
-        pytest.param("rorqual", marks=pytest.mark.timeout(30)),
+        pytest.param(
+            "tamia", marks=pytest.mark.xfail(reason="Dev machine isn't always connected to Tamia.")
+        ),
+        pytest.param(
+            "rorqual",
+            marks=[
+                pytest.mark.timeout(30),
+                pytest.mark.xfail(reason="Dev machine isn't always connected to Tamia."),
+            ],
+        ),
     ],
 )
 def cluster(request: pytest.FixtureRequest):

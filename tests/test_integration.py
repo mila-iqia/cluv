@@ -25,15 +25,11 @@ pytestmark = pytest.mark.integration
     scope="session",
     params=[
         "mila",
-        pytest.param(
-            "tamia", marks=pytest.mark.xfail(reason="Dev machine isn't always connected to Tamia.")
-        ),
+        "tamia",
         pytest.param(
             "rorqual",
-            marks=[
-                pytest.mark.timeout(30),
-                pytest.mark.xfail(reason="Dev machine isn't always connected to Tamia."),
-            ],
+            # filesystem can be very very slow, uv sync can take forever the first time.
+            marks=pytest.mark.timeout(30),
         ),
     ],
 )
@@ -45,7 +41,7 @@ def cluster(request: pytest.FixtureRequest):
 async def remote(cluster: str):
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None:
-        pytest.fail(f"Test needs an active SSH connection to the {cluster} cluster.")
+        pytest.xfail(f"Test needs an active SSH connection to the {cluster} cluster.")
     return remote
 
 

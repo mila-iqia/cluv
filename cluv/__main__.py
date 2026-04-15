@@ -9,7 +9,6 @@ import argparse
 import asyncio
 import inspect
 import logging
-import subprocess
 import sys
 import typing
 from typing import Callable
@@ -90,18 +89,18 @@ def main(argv: list[str] | None = None):
     if subcommand == "submit":
         args_dict["program_args"] = submit_program_args
 
-    try:
-        if inspect.iscoroutinefunction(function):
-            asyncio.run(function(**args_dict))
-        else:
-            function(**args_dict)
-    except subprocess.CalledProcessError as err:
-        logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}:")
-        console.rule("[bold red]stdout[/]")
-        print(err.stdout.decode(), file=sys.stdout)
-        console.rule("[bold red]stderr[/]")
-        print(err.stderr.decode(), file=sys.stderr)
-        sys.exit(err.returncode)
+    # try:
+    if inspect.iscoroutinefunction(function):
+        asyncio.run(function(**args_dict))
+    else:
+        function(**args_dict)
+    # except subprocess.CalledProcessError as err:
+    #     logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}:")
+    #     console.rule("[bold red]stdout[/]")
+    #     print(err.stdout.decode(), file=sys.stdout)
+    #     console.rule("[bold red]stderr[/]")
+    #     print(err.stderr.decode(), file=sys.stderr)
+    #     sys.exit(err.returncode)
 
 
 def add_status_args(subparsers: Subparsers):

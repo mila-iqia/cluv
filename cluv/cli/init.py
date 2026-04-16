@@ -38,9 +38,9 @@ def init() -> None:
     
     # 1. Check if the current directory is under the home directory. If not, raise an error and exit.
     if str(Path.cwd()).startswith(str(Path.home())):
-        console.print(f"[green]✅ Current directory is under home directory : {Path.cwd()}[/green]")
+        console.print(f"[green]✅ Current directory is under home directory.[/green]")
     else:
-        console.print("[red]❌ Error: cluv init should be run in a directory under your home directory.[/red]")
+        console.print("[red]❌ cluv init should be run in a directory under your home directory.[/red]")
         raise RuntimeError("cluv init should be run in a directory under your home directory.")
 
     # 2. Try to run "uv run" to create a new project
@@ -57,6 +57,14 @@ def init() -> None:
         else: raise RuntimeError("Error occurred while initializing uv project: ", uv_init.stderr)
     else:
         console.print("[green]✅ uv: project initialized.[/green]")
+
+    # Check if the git repository have access to a remote repository.
+    git_remote = subprocess.run(["git", "remote"], capture_output=True, text=True)
+    if git_remote.returncode == 0:
+        if git_remote.stdout.strip() == "":
+            console.print("[yellow]⚠️  Warning: No git remote found. You won't be able to use some features (like syncing or submitting jobs). Consider adding a remote repository to your git config.[/yellow]")
+        else:
+            console.print(f"[green]✅ Git remote repository found: {git_remote.stdout.strip()}[/green]")
 
     # 3. Read the pyproject.toml file and try to find a cluv config.
     # If it doesn't exist, add a cluv config section with the default settings and clusters.
@@ -84,7 +92,7 @@ def init() -> None:
     console.print("Validating project structure...")
 
     # Check if the job script exists
-    if os.path.exists(JOB_SCRIPT_PATH): # TODO : check if the content is correct ?
+    if os.path.exists(JOB_SCRIPT_PATH):
         console.print(f"[green]✅ Job template script already exists at '{JOB_SCRIPT_PATH}'.[/green]")
     else:
         os.makedirs("scripts")
@@ -92,7 +100,7 @@ def init() -> None:
         generate_job_script(pyproject_path.parent, results_path)
     
     # Check if the results path is correctly symlinked to scratch
-    check_symlink_to_scratch(pyproject_path, results_path)
+    check_symlink_to_scratch(pyproject_path.parent, results_path)
 
     console.print()
     console.print(":tada: Your cluv config is ready to go !")
@@ -136,15 +144,14 @@ def check_git() -> None:
         raise RuntimeError("The current project is not a git repository. Try running 'git init' or clone a GitHub project.")
 
 
-def check_symlink_to_scratch(pyproject_path: Path, results_path: str) -> None:
+def check_symlink_to_scratch(project_root: Path, results_path: str) -> None:
     """
     Check if a symlink from the results_path in the project to the corresponding path in $SCRATCH already exists. If not, create it.
-    Should be like : $HOME/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>
+    The symlink should be like : $HOME/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>
     """
-    # Generate the expected scratch path and the expected symlink path
-    project_path_name = pyproject_path.parent.name
-    scratch_dir = Path(os.path.expandvars(f"$SCRATCH/{results_path}/{project_path_name}"))
-    results_dir = pyproject_path.parent / results_path
+    # Generate the expected scratch and symlink path
+    scratch_dir = Path(os.path.expandvars(f"$SCRATCH/{results_path}/{project_root.name}"))
+    results_dir = project_root / results_path
 
     if results_dir.is_symlink():
         if results_dir.resolve() == scratch_dir.resolve():

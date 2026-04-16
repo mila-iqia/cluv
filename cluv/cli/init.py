@@ -135,7 +135,7 @@ def check_git() -> None:
     """
     Check if the current project is in a git repository. If not, raise an error and exit.
     """
-    if os.path.isdir(".git"):   # TODO : Very simple approch. Only works at the project root.
+    if os.path.isdir(".git"):   # TODO : Only works at the project root.
         console.print("[green]✅ Project is in a git repository.[/green]")
     else:
         console.print("[red]❌ No git repository found.[/red]")

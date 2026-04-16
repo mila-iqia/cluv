@@ -19,7 +19,6 @@ import rich.logging
 import rich_argparse
 import simple_parsing
 
-
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run

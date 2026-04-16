@@ -72,23 +72,10 @@ def init() -> None:
     console.print()
     console.print("Reading pyproject.toml...")
     pyproject_path = find_pyproject()
-    results_path = DEFAULT_RESULTS_PATH
 
     ### If it doesn't exist, add a cluv config section with the default settings and clusters.
-    if has_cluv_config(pyproject_path):
-        console.print("[green]✅ Project already have a cluv config in pyproject.toml.[/green]")
-        config = load_cluv_config(pyproject_path)
-        results_path = config.results_path
-        console.print(config)
-    else:
-        console.print("No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config...")
-        console.print("Adding config for cluv tool :")
-        add_cluv_config_section(pyproject_path, CLUV_DEFAUT_CONFIG)
-        add_cluv_config_section(pyproject_path, CLUV_SLURM_DEFAULT_CONFIG)
-        add_cluv_cluster_config("mila", pyproject_path, CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
-        for cluster in DRAC_CLUSTERS:
-            add_cluv_cluster_config(cluster, pyproject_path)
-        console.print("[green]✅ Pyproject config completed.[/green]")
+    ### Get the results_path from the config to use for the next checks.
+    results_path = check_cluv_config(pyproject_path)
 
     # 4. Check if project structure is correct
     console.print()
@@ -100,15 +87,36 @@ def init() -> None:
     ### Check if the results path is correctly symlinked to scratch
     check_symlink_to_scratch(pyproject_path.parent, results_path)
 
+    # 5. Show what the user can do next after the project setup
     console.print()
     console.print(":tada: Your cluv config is ready to go !")
-
-    # 5. Show what the user can do next after the project setup
     console.print()
     console.print("Next steps :")
     console.print("=> [bold] cluv login [/bold] : open a SSH connections to all configured clusters.")
     console.print("=> [bold] cluv sync [/bold]  : synchronize the project on all configured clusters.")
     console.print()
+
+
+def check_cluv_config(pyproject_path: Path) -> str:
+    """
+    Check if the pyproject.toml file contains a cluv config. If not, add a default config section with the default clusters and settings.
+    """
+    if has_cluv_config(pyproject_path):
+        console.print("[green]✅ Project already have a cluv config in pyproject.toml.[/green]")
+        config = load_cluv_config(pyproject_path)
+        console.print(config)
+        return config.results_path
+
+    console.print("No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config...")
+    console.print("Adding config for cluv tool :")
+
+    add_cluv_config_section(pyproject_path, CLUV_DEFAUT_CONFIG)
+    add_cluv_config_section(pyproject_path, CLUV_SLURM_DEFAULT_CONFIG)
+    add_cluv_cluster_config("mila", pyproject_path, CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
+    for cluster in DRAC_CLUSTERS:
+        add_cluv_cluster_config(cluster, pyproject_path)
+
+    return DEFAULT_RESULTS_PATH
 
 
 def add_cluv_config_section(pyproject_path: Path, section_lines: list[str]) -> None:

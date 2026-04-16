@@ -23,8 +23,8 @@ from .cli.init import init
 from .cli.login import login
 from .cli.run import run
 from .cli.status import status
-from .cli.submit import add_submit_args
-from .cli.sync import add_sync_args
+from .cli.submit import submit
+from .cli.sync import sync
 from .utils import console
 
 logger = logging.getLogger(__name__)
@@ -103,6 +103,34 @@ def main(argv: list[str] | None = None) -> None:
             logger.error("No standard error.")
         sys.exit(err.returncode)
 
+def add_submit_args(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> argparse.ArgumentParser:
+    submit_parser = subparsers.add_parser(
+        "submit",
+        help="Submit a SLURM job on a remote cluster.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+        usage="cluv submit <cluster> <job.sh> [sbatch-args...] [-- program-args...]",
+    )
+    submit_parser.add_argument(
+        "cluster",
+        metavar="<cluster>",
+        help="The cluster to submit the job on.",
+    )
+    submit_parser.add_argument(
+        "job_script",
+        metavar="<job.sh>",
+        help="Path to the sbatch job script (relative to project root).",
+    )
+    submit_parser.add_argument(
+        "sbatch_args",
+        nargs=argparse.REMAINDER,
+        metavar="...",
+        help="sbatch flags (before --) and/or program arguments (after --).",
+    )
+    submit_parser.set_defaults(func=submit)
+    return submit_parser
+
 
 def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser(
@@ -121,6 +149,45 @@ def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     # Or just display everything?
     status_parser.set_defaults(func=status)
     return status_parser
+
+
+def add_sync_args(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> argparse.ArgumentParser:
+    sync_parser = subparsers.add_parser(
+        "sync",
+        help="Synchronizes the current project across clusters.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    sync_parser.add_argument(
+        "clusters",
+        nargs="*",
+        default=None,
+        metavar="<cluster>",
+        help=(
+            "The cluster(s) to synchronize with. "
+            "Leave empty to synchronize with all currently logged in clusters. "
+            "Use a comma to separate multiple clusters."
+        ),
+    )
+    # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
+    # sync_parser.add_argument(
+    #     "--",
+    #     dest="_",
+    #     # type=str,
+    #     # help="The arguments to pass to `uv sync` on the remote cluster.",
+    #     # dest=argparse.SUPPRESS,
+    # )
+    # sync_parser.add_argument(
+    #     "--",
+    #     dest="uv_sync_args",
+    #     # type=str,
+    #     # metavar="<uv sync arguments>",
+    #     help="The arguments to pass to `uv sync` on the remote cluster.",
+    #     nargs=argparse.REMAINDER,
+    # )
+    sync_parser.set_defaults(func=sync)
+    return sync_parser
 
 
 def add_login_args(subparsers: Subparsers) -> argparse.ArgumentParser:

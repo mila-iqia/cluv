@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import asyncio
 import functools
 import logging
@@ -13,7 +12,6 @@ from typing import Literal
 # TODO: Figure out what the issues are with the console output
 import milatools.cli
 import milatools.utils.parallel_progress
-import rich_argparse
 
 # Reuse some code milatools. Could also extract it here to remove the dependency.
 from milatools.utils.parallel_progress import (
@@ -35,45 +33,6 @@ logger = logging.getLogger(__name__)
 # TODO: Control the 'hide' and 'display' / etc using the --verbose flag value, in addition to the loglevel.
 # TODO: Pipe the commands and their outputs / stderr to separate files for each cluster, so people can easily inspect
 # what might have gone wrong. Also include a message at the end like "Check <logs_dir>/{cluster}.log for details."
-
-
-def add_sync_args(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
-    sync_parser = subparsers.add_parser(
-        "sync",
-        help="Synchronizes the current project across clusters.",
-        formatter_class=rich_argparse.RichHelpFormatter,
-    )
-    sync_parser.add_argument(
-        "clusters",
-        nargs="*",
-        default=None,
-        metavar="<cluster>",
-        help=(
-            "The cluster(s) to synchronize with. "
-            "Leave empty to synchronize with all currently logged in clusters. "
-            "Use a comma to separate multiple clusters."
-        ),
-    )
-    # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
-    # sync_parser.add_argument(
-    #     "--",
-    #     dest="_",
-    #     # type=str,
-    #     # help="The arguments to pass to `uv sync` on the remote cluster.",
-    #     # dest=argparse.SUPPRESS,
-    # )
-    # sync_parser.add_argument(
-    #     "--",
-    #     dest="uv_sync_args",
-    #     # type=str,
-    #     # metavar="<uv sync arguments>",
-    #     help="The arguments to pass to `uv sync` on the remote cluster.",
-    #     nargs=argparse.REMAINDER,
-    # )
-    sync_parser.set_defaults(func=sync)
-    return sync_parser
 
 
 async def sync(

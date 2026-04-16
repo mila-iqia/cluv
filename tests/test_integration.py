@@ -14,7 +14,7 @@ import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
-from cluv.cli.login import get_remote_without_2fa_prompt
+from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.remote import Remote, control_socket_is_running
@@ -88,6 +88,10 @@ async def remote(cluster: str):
     if remote is None:
         pytest.xfail(f"Test needs an active SSH connection to the {cluster} cluster.")
     return remote
+
+
+async def test_login(remote: Remote):
+    assert (await login([remote.hostname])) == [remote]
 
 
 @pytest_asyncio.fixture(scope="session")

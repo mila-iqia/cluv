@@ -80,10 +80,34 @@ jobs:
         with:
           name: coverage-reports-unit-tests-${{ matrix.platform }}-${{ matrix.python-version }}
           path: ./coverage.xml
+  integration_tests:
+    needs: [unit_tests]
+    runs-on: self-hosted
+    # TODO: remove this once we have a decently solid setup, not too reliant on the dev machine
+    # having active SSH connections to the Slurm clusters.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+          # https://github.com/astral-sh/setup-uv?tab=readme-ov-file#github-authentication-token
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Run all tests
+        run: uv run pytest -v --slow --cov=cluv --cov-report=xml --cov-append
+      - name: Store coverage report as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-integration-tests
+          path: ./coverage.xml
 
   # https://about.codecov.io/blog/uploading-code-coverage-in-a-separate-job-on-github-actions/
   upload-coverage-codecov:
-    needs: [unit_tests]
+    needs: [unit_tests, integration_tests]
     runs-on: ubuntu-latest
     name: Upload coverage reports to Codecov
     timeout-minutes: 5

@@ -27,6 +27,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "pytest-timeout>=2.3.1",
     "ruff",
+    "pytest-skip-slow>=0.0.5",
 ]
 
 [tool.pytest.ini_options]
@@ -34,7 +35,6 @@ testpaths = ["cluv", "tests"]
 norecursedirs = [".venv"]
 addopts = ["--doctest-modules"]
 asyncio_mode = "auto"
-timeout = 10
 markers = [
     "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",
 ]

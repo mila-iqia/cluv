@@ -1,62 +1,98 @@
-"""Integration tests that require live SSH connections to real clusters.
+"""Integration tests that require live SSH connections to a real Slurm cluster.
 
-Run with:
-    uv run pytest -m integration -v
-
-Skip with:
-    uv run pytest -m "not integration"
-
-These tests connect to real clusters. They will fail if you do not have
-active SSH ControlMaster sockets (run `cluv login` first).
+TODO: Do we prefer having tests for only one remote cluster at a time, in different CI steps?
+Or have tests for every cluster in the same pytest session?
+--> Choosing to have tests for all clusters in the same test session for now. This is more
+efficient, since at some point there might be like 10 different clusters, and 10 CI steps to run.
 """
 
+import os
+
+import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
-from cluv.cli.login import get_remote_without_2fa_prompt
+from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
-from cluv.remote import Remote
+from cluv.remote import Remote, control_socket_is_running
 
-pytestmark = pytest.mark.integration
+# Some useful constants used to turn tests on and off depending on where we are.
+IN_GITHUB_CI = "GITHUB_ACTIONS" in os.environ
+IN_SELF_HOSTED_GITHUB_CI = IN_GITHUB_CI and ("self-hosted" in os.environ.get("RUNNER_LABELS", ""))
+IN_GITHUB_CLOUD_CI = IN_GITHUB_CI and not IN_SELF_HOSTED_GITHUB_CI
+ON_DEV_MACHINE = not IN_GITHUB_CI
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-async def _require_remote(cluster: str):
-    """Return an active Remote for *cluster*, skip the test if not connected."""
-    remote = await get_remote_without_2fa_prompt(cluster)
-    if remote is None:
-        pytest.skip(f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first.")
-    return remote
+# We should either be on a dev machine (not in GitHub CI), on a self-hosted runner, or on a cloud runner.
+assert ON_DEV_MACHINE ^ IN_GITHUB_CLOUD_CI ^ IN_SELF_HOSTED_GITHUB_CI
 
 
-# ---------------------------------------------------------------------------
-# cluv status – per-cluster
-# ---------------------------------------------------------------------------
+pytestmark = [
+    pytest.mark.skipif(
+        IN_GITHUB_CLOUD_CI,
+        reason="Integration tests are only run on a self-hosted github runner or on a dev machine.",
+    ),
+    pytest.mark.integration,
+    pytest.mark.timeout(20),
+]
 
 
-@pytest.fixture(
-    scope="session",
-    params=[
-        "mila",
-        "tamia",
-        pytest.param("rorqual", marks=pytest.mark.timeout(30)),
-    ],
-)
-def cluster(request: pytest.FixtureRequest):
-    return getattr(request, "param", "mila")
+REQUIRED_CLUSTERS = ("mila", "rorqual", "tamia")
+ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)
+# Mark all the tests here as 'slow', so they are only run when the --slow flag is passed to pytest,
+# specifically in the integration-tests CI step, which happens on a self-hosted runner that has
+# reusable SSH connections to those clusters.
+
+
+@pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)
+async def cluster(request: pytest.FixtureRequest) -> str:
+    """Fixture that gives the hostname of the Slurm cluster to run tests with.
+
+    - If the SLURM_CLUSTER environment variable is not set, all tests that depend on this fixture
+      will be skipped.
+    - If it is set and there is not an active SSH connection to that cluster, this fixture will
+      fail, causing all tests that use it to fail, since they require a live connection to a
+      cluster.
+
+    NOTE: This fixture can also be (indirectly) parametrized by tests that want to run with a remote
+    connected to only some clusters in particular. For example:
+
+    ```python
+    @pytest.mark.parametrize("cluster", ["mila", "tamia", "rorqual"], indirect=True)
+    def test_something(remote: Remote):
+        assert remote.hostname in ["mila", "tamia", "rorqual"]
+    ```
+    """
+    cluster = getattr(request, "param", None)
+    if cluster is None:
+        pytest.skip(
+            "No cluster specified. Set the SLURM_CLUSTER environment variable to a "
+            "cluster with an active SSH connection to run these tests."
+        )
+    existing_ssh_connection = await control_socket_is_running(cluster)
+    if existing_ssh_connection:
+        assert isinstance(cluster, str)
+        return cluster
+    if cluster not in REQUIRED_CLUSTERS:
+        pytest.skip(
+            f"No active SSH connection to {cluster}, but it is not necessary to test against it."
+        )
+    if IN_SELF_HOSTED_GITHUB_CI:
+        pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
+    # On a dev machine. Just skip and display some instructions.
+    pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
 
 
 @pytest_asyncio.fixture(scope="session")
 async def remote(cluster: str):
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None:
-        pytest.skip(f"No active SSH connection to {cluster!r}. Run `cluv login {cluster}` first.")
+        pytest.xfail(f"Test needs an active SSH connection to the {cluster} cluster.")
     return remote
+
+
+async def test_login(remote: Remote):
+    assert (await login([remote.hostname])) == [remote]
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -64,6 +100,8 @@ async def cluster_status(remote: Remote):
     return await get_real_cluster_status(remote)
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.asyncio
 async def test_status_online(cluster_status: ClusterStatus):
     assert cluster_status.online is True
@@ -96,28 +134,32 @@ async def test_status_storage(cluster_status: ClusterStatus):
     assert cluster_status.storage.scratch_used >= 0
 
 
-# ---------------------------------------------------------------------------
-# cluv submit — rorqual integration
-# ---------------------------------------------------------------------------
-
-
+@pytest.mark.xfail(
+    IN_SELF_HOSTED_GITHUB_CI,
+    reason="TODO: Running `cluv sync` does a git push / git pull from the runner's work folder, this causes issues.",
+    strict=True,
+)
+@pytest.mark.slow
 @pytest.mark.timeout(60)
-@pytest.mark.parametrize(cluster.__name__, ["mila", "tamia", "rorqual"], indirect=True)
 async def test_submit(remote: Remote):
-    """End-to-end: actually submit scripts/job.sh to rorqual via sbatch.
+    """End-to-end: actually submit scripts/job.sh to a slurm cluster via sbatch.
 
-    Requires an active SSH connection to rorqual and a clean git tree.
-    The project must already be synced on rorqual (sync is mocked out).
+    Requires an active SSH connection to the cluster and a clean git tree.
+    Also actually performs a `cluv sync` to that cluster.
+
+    NOTE: This **will** push the current branch to GitHub (since it runs `cluv sync`).
     """
     job_id = await submit(
         cluster=remote.hostname,
         job_script="scripts/job.sh",
-        sbatch_args=[],
+        sbatch_args=["--time=00:00:30"],
         program_args=["python", "--version"],
     )
     assert isinstance(job_id, int)
-
-    job_name = await remote.get_output(
-        f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
-    )
-    assert job_name.strip().startswith("cluv-")
+    try:
+        job_name = await remote.get_output(
+            f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
+        )
+        assert job_name.strip().startswith("cluv-")
+    finally:
+        await remote.run(f"scancel {job_id}")

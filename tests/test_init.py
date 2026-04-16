@@ -17,7 +17,7 @@ class TestInitCluvConfig:
     def test_init_fails_if_not_under_home(self, tmp_path, monkeypatch) -> None:
         """init() should raise an error if the current directory is not under the user's home directory"""
         monkeypatch.setattr(os.path, "expanduser", lambda _: str(tmp_path)) # Set the home directory to tmp_path
-        os.chdir(tmp_path.parent)  # Move to the parent of tmp_path, which is not under the "home" directory
+        monkeypatch.chdir(tmp_path.parent) # Move to the parent of tmp_path, which is not under the "home" directory
         
         with pytest.raises(RuntimeError, match="cluv init should be run in a directory under your home directory."):
             init()
@@ -25,7 +25,7 @@ class TestInitCluvConfig:
     def test_init_generates_toml_default_config(self, tmp_path, monkeypatch) -> None:
         """init() should create a pyproject.toml file with the default configuration if it doesn't exist"""
         monkeypatch.setattr(os.path, "expanduser", lambda _: str(tmp_path)) # Set the home directory to tmp_path to pass the home check
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path)
 
         init()
         config = get_config()

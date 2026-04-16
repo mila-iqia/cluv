@@ -75,12 +75,14 @@ async def cluster(request: pytest.FixtureRequest) -> str:
     if existing_ssh_connection:
         assert isinstance(cluster, str)
         return cluster
-    if cluster in REQUIRED_CLUSTERS:
-        pytest.xfail(f"No active SSH connection to {cluster}, which must be tested against!")
-    else:
+    if cluster not in REQUIRED_CLUSTERS:
         pytest.skip(
             f"No active SSH connection to {cluster}, but it is not necessary to test against it."
         )
+    if IN_SELF_HOSTED_GITHUB_CI:
+        pytest.xfail(f"No active SSH connection to {cluster}, which must be tested against!")
+    # On a dev machine. Just skip and display some instructions.
+    pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
 
 
 @pytest_asyncio.fixture(scope="session")

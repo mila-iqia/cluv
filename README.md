@@ -35,7 +35,6 @@ cluv submit mila job.sh
    ```bash
    cluv init
    ```
-   This sets up a UV project and adds a default `[tool.cluv]` section to your `pyproject.toml`. You can customize this config later (see [Configuration](#configuration) below). 
 2. Establish SSH connections to all configured clusters:
    ```bash
    cluv login

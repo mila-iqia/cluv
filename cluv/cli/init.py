@@ -35,7 +35,7 @@ def init() -> None:
     console.rule("[bold cyan]cluv init[/bold cyan]")
     console.print()
     # TODO : give path to create project
-    
+
     # 1. Check if the current directory is under the home directory. If not, raise an error and exit.
     if str(Path.cwd()).startswith(str(Path.home())):
         console.print("[green]✅ Current directory is under home directory.[/green]")
@@ -96,7 +96,7 @@ def init() -> None:
 
     ### Check if the job script exists
     check_job_script(pyproject_path.parent, results_path)
-    
+
     ### Check if the results path is correctly symlinked to scratch
     check_symlink_to_scratch(pyproject_path.parent, results_path)
 
@@ -179,7 +179,7 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
     if results_path is None:
         console.print("[yellow]⚠️  Warning: Results path is not configured. Skipping job template script generation.[/yellow]")
         return
-    
+
     console.print(f"Adding job template script at '{JOB_SCRIPT_PATH}'.")
 
     project_name = project_root.name

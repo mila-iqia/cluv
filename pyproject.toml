@@ -35,7 +35,6 @@ testpaths = ["cluv", "tests"]
 norecursedirs = [".venv"]
 addopts = ["--doctest-modules"]
 asyncio_mode = "auto"
-timeout = 10
 markers = [
     "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",
 ]

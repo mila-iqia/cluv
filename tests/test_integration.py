@@ -35,6 +35,7 @@ pytestmark = [
         reason="Integration tests are only run on a self-hosted github runner or on a dev machine.",
     ),
     pytest.mark.integration,
+    pytest.mark.timeout(20),
 ]
 
 
@@ -75,7 +76,7 @@ async def cluster(request: pytest.FixtureRequest) -> str:
         assert isinstance(cluster, str)
         return cluster
     if cluster in REQUIRED_CLUSTERS:
-        pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
+        pytest.xfail(f"No active SSH connection to {cluster}, which must be tested against!")
     else:
         pytest.skip(
             f"No active SSH connection to {cluster}, but it is not necessary to test against it."

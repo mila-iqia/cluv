@@ -14,6 +14,8 @@ from cluv.cli.slurm import (
     parse_sinfo_nodes,
 )
 
+pytestmark = pytest.mark.timeout(10)
+
 # ---------------------------------------------------------------------------
 # Fixtures – real output captured from live clusters
 # ---------------------------------------------------------------------------

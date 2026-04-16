@@ -47,7 +47,6 @@ def init() -> None:
     console.print()
     console.print("Initializing uv project: running [bold]uv init[/bold]...")
     console.log("uv init --package --build-backend hatch --python 3.13")
-    console.print()
     run_uv_init()
 
     # 3. Check status of the git repository
@@ -139,18 +138,16 @@ def check_git() -> None:
     """
     Check if the current project is in a git repository. If not, raise an error and exit.
     """
-    if os.path.isdir(".git"):   # TODO : Only works at the project root.
-        console.print("[green]✅ Project is in a git repository.[/green]")
-    else:
-        console.print("[red]❌ No git repository found.[/red]")
-        raise RuntimeError("The current project is not a git repository. Try running 'git init' or clone a GitHub project.")
-
     git_remote = subprocess.run(["git", "remote"], capture_output=True, text=True)
     if git_remote.returncode == 0:
         if git_remote.stdout.strip() == "":
             console.print("[yellow]⚠️  Warning: No git remote found. You won't be able to use some features (like syncing or submitting jobs). Consider adding a remote repository to your git config.[/yellow]")
         else:
             console.print(f"[green]✅ Git remote repository found: {git_remote.stdout.strip()}[/green]")
+    else:
+        console.print("[red]❌ Invalid git repository found.[/red]")
+        raise RuntimeError("Error when checking git remote: ", git_remote.stderr)
+
 
 def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> None:
     """
@@ -207,7 +204,7 @@ project_root="{project_root}"
 """
 
     script_content +=  """
-# Minimal test job for cluv submit integration tests.
+# Minimal test job for cluv submit.
 echo "hostname: $(hostname)"
 echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
 

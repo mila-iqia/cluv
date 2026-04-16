@@ -49,7 +49,7 @@ def init() -> None:
     console.log("uv init --package --build-backend hatch --python 3.13")
     console.print()
     run_uv_init()
-    
+
     # 3. Check status of the git repository
     check_git()
 

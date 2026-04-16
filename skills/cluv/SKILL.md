@@ -27,9 +27,9 @@ uv run cluv -v status
 |---------|--------|-------------|
 | `cluv login` | implemented | Establish SSH ControlMaster connections to all configured clusters (run this first; prompts for 2FA sequentially) |
 | `cluv sync` | implemented | Push local git changes then pull + `uv sync` on each cluster in parallel; optionally rsync results back |
-| `cluv status` | partial | Show per-cluster job and storage stats (mock data for now) |
-| `cluv init` | stub | Initialize a new cluv-managed project (not yet implemented) |
-| `cluv run` | stub | Submit a job to one or more clusters (not yet implemented) |
+| `cluv status` | implemented | Show per-cluster job and storage stats |
+| `cluv init` | implemented | Initialize a new cluv-managed project |
+| `cluv run` | implemented | Submit a job to one or more clusters |
 
 ## Configuration
 

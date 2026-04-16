@@ -43,7 +43,7 @@ class TestInitCommand:
         """init() should keep the cluv config of an already existing pyproject.toml"""
         monkeypatch.setattr(os.path, "expanduser", lambda _: str(tmp_path)) # Set the home directory to tmp_path to pass the home check
         monkeypatch.chdir(tmp_path)
-        (tmp_path / ".git").mkdir()     # Add .git dir to pass the git check 
+        (tmp_path / ".git").mkdir()     # Add .git dir to pass the git check
         write_pyproject(tmp_path, """
 [tool.cluv]
 clusters = ["mila"]

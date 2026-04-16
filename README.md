@@ -11,7 +11,6 @@ In early development. Commands are functional, but expect bugs or missing featur
 - Python >= 3.13
 - [UV](https://docs.astral.sh/uv/)
 - SSH access configured for each cluster in `~/.ssh/config` (run `cluv login` to open ControlMaster sessions)
-- A GitHub repository 
 
 ## Installation
 

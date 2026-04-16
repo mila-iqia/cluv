@@ -44,7 +44,7 @@ class TestInitCommand:
         monkeypatch.setattr(os.path, "expanduser", lambda _: str(tmp_path)) # Set the home directory to tmp_path to pass the home check
         monkeypatch.chdir(tmp_path)
         (tmp_path / ".git").mkdir()     # Add .git dir to pass the git check 
-        write_pyproject(tmp_path, f"""
+        write_pyproject(tmp_path, """
 [tool.cluv]
 clusters = ["mila"]
 results_path = "results"

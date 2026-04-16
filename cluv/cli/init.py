@@ -29,7 +29,7 @@ CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS = [
 
 def init() -> None:
     """
-    Initialize a new project for use with cluv.
+    Initialize a new project with cluv.
     """
     console.print()
     console.rule("[bold cyan]cluv init[/bold cyan]")
@@ -48,27 +48,12 @@ def init() -> None:
     console.print("Initializing uv project: running [bold]uv init[/bold]...")
     console.log("uv init --package --build-backend hatch --python 3.13")
     console.print()
-    uv_init = subprocess.run(["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"], capture_output=True, text=True)
+    run_uv_init()
+    
+    # 3. Check status of the git repository
+    check_git()
 
-    ### An expected error is that uv fails if a pyproject.toml file already exists
-    if uv_init.returncode == 2:
-        if uv_init.stderr.endswith("(`pyproject.toml` file exists)\n"):
-            console.print("[green]✅ uv: a project already exists (see pyproject.toml file). Skipping initialization.[/green]")
-            check_git()
-        else:
-            raise RuntimeError("Error occurred while initializing uv project: ", uv_init.stderr)
-    else:
-        console.print("[green]✅ uv: project initialized.[/green]")
-
-    ### Check if the git repository have access to a remote repository.
-    git_remote = subprocess.run(["git", "remote"], capture_output=True, text=True)
-    if git_remote.returncode == 0:
-        if git_remote.stdout.strip() == "":
-            console.print("[yellow]⚠️  Warning: No git remote found. You won't be able to use some features (like syncing or submitting jobs). Consider adding a remote repository to your git config.[/yellow]")
-        else:
-            console.print(f"[green]✅ Git remote repository found: {git_remote.stdout.strip()}[/green]")
-
-    # 3. Read the pyproject.toml file and try to find a cluv config.
+    # 4. Read the pyproject.toml file and try to find a cluv config.
     console.print()
     console.print("Reading pyproject.toml...")
     pyproject_path = find_pyproject()
@@ -77,7 +62,7 @@ def init() -> None:
     ### Get the results_path from the config to use for the next checks.
     results_path = check_cluv_config(pyproject_path)
 
-    # 4. Check if project structure is correct
+    # 5. Check if project structure is correct
     console.print()
     console.print("Validating project structure...")
 
@@ -87,7 +72,7 @@ def init() -> None:
     ### Check if the results path is correctly symlinked to scratch
     check_symlink_to_scratch(pyproject_path.parent, results_path)
 
-    # 5. Show what the user can do next after the project setup
+    # 6. Show what the user can do next after the project setup
     console.print()
     console.print(":tada: Your cluv config is ready to go !")
     console.print()
@@ -96,6 +81,17 @@ def init() -> None:
     console.print("=> [bold] cluv sync [/bold]  : synchronize the project on all configured clusters.")
     console.print()
 
+def run_uv_init() -> None:
+    uv_init = subprocess.run(["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"], capture_output=True, text=True)
+
+    # An expected error is that uv fails if a pyproject.toml file already exists
+    if uv_init.returncode == 2:
+        if uv_init.stderr.endswith("(`pyproject.toml` file exists)\n"):
+            console.print("[green]✅ uv: a project already exists (see pyproject.toml file). Skipping initialization.[/green]")
+        else:
+            raise RuntimeError("Error occurred while initializing uv project: ", uv_init.stderr)
+    else:
+        console.print("[green]✅ uv: project initialized.[/green]")
 
 def check_cluv_config(pyproject_path: Path) -> str:
     """
@@ -149,6 +145,12 @@ def check_git() -> None:
         console.print("[red]❌ No git repository found.[/red]")
         raise RuntimeError("The current project is not a git repository. Try running 'git init' or clone a GitHub project.")
 
+    git_remote = subprocess.run(["git", "remote"], capture_output=True, text=True)
+    if git_remote.returncode == 0:
+        if git_remote.stdout.strip() == "":
+            console.print("[yellow]⚠️  Warning: No git remote found. You won't be able to use some features (like syncing or submitting jobs). Consider adding a remote repository to your git config.[/yellow]")
+        else:
+            console.print(f"[green]✅ Git remote repository found: {git_remote.stdout.strip()}[/green]")
 
 def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> None:
     """

@@ -144,7 +144,7 @@ def check_git() -> None:
 
 def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> None:
     """
-    Check if a symlink from the results_path in the project to the corresponding path in $SCRATCH already exists. If not, create it.
+    Check if a symlink from the results_path in the project in $HOME to the corresponding path in $SCRATCH already exists. If not, create it.
     The symlink should be like : $HOME/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>
     """
     if results_path is None:
@@ -170,8 +170,7 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
 
 def check_job_script(project_root: Path, results_path: str | None) -> None:
     """
-    Generate a job script template at JOB_SCRIPT_PATH with the following content, replacing {results_path} with the provided results_path argument and {project_root} with the provided project_root argument.
-    The script should be executable and contain the necessary SLURM directives to run a job on a cluster, including setting up the environment, syncing the project, and running a command passed as an argument to the script.
+    Check if the job script template to set and run the project on a cluster with SLURM exists. If not, create it.
     """
     if os.path.exists(JOB_SCRIPT_PATH):
         console.print(f"[green]✅ Job template script already exists at '{JOB_SCRIPT_PATH}'.[/green]")

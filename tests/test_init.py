@@ -7,9 +7,9 @@ from milatools.cli.init_command import DRAC_CLUSTERS
 import pytest
 
 class TestInitGitCheck:
-    def test_init_fails_if_not_in_git_repo(self, tmp_path) -> None:
+    def test_init_fails_if_not_in_git_repo(self, tmp_path, monkeypatch) -> None:
         """check_git() should raise an error if the current directory is not a git repository"""
-        os.chdir(tmp_path)
+        monkeypatch.chdir(tmp_path) # No git project in tmp_path
         with pytest.raises(RuntimeError, match="The current project is not a git repository. Try running 'git init' or clone a GitHub project."):
             check_git()
 

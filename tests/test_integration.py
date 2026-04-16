@@ -8,8 +8,6 @@ efficient, since at some point there might be like 10 different clusters, and 10
 
 import os
 
-import milatools
-import milatools.cli
 import milatools.cli.init_command
 import pytest
 import pytest_asyncio

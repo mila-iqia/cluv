@@ -171,20 +171,20 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
         return
 
     # Generate the expected scratch and symlink path
-    scratch_dir = Path(os.path.expandvars(f"$SCRATCH/{results_path}/{project_root.name}"))
-    results_dir = project_root / results_path
+    scratch_path = Path(os.path.expandvars(f"$SCRATCH/{results_path}/{project_root.name}"))
+    symlink_path = project_root / results_path
 
-    if results_dir.is_symlink():
-        if results_dir.resolve() == scratch_dir.resolve():
+    if symlink_path.is_symlink():
+        if symlink_path.resolve() == scratch_path.resolve():
             console.print("[green]✅ Symlink from $HOME results_path to $SCRATCH already exists.[/green]")
             return
         else:
-            console.print(f"[red]❌ Symlink from {results_dir} points to {results_dir.resolve()} instead of {scratch_dir}.[/red]")
-            raise RuntimeError(f"Symlink from {results_dir} points to {results_dir.resolve()} instead of {scratch_dir}. Please fix this symlink before running cluv.")
+            console.print(f"[yellow]⚠️  Warning: Symlink from {symlink_path} points to an other expected scratch path ({symlink_path.resolve()}).[/yellow]")
+            return
     else:
-        console.print(f"Creating symlink from {results_dir} to {scratch_dir}")
-        scratch_dir.mkdir(parents=True, exist_ok=True)
-        results_dir.symlink_to(scratch_dir, target_is_directory=True)
+        console.print(f"Creating symlink from {symlink_path} to {scratch_path}")
+        scratch_path.mkdir(parents=True, exist_ok=True)
+        symlink_path.symlink_to(scratch_path, target_is_directory=True)
 
 
 def check_job_script(project_root: Path, results_path: str | None) -> None:

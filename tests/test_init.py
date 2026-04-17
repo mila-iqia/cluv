@@ -11,7 +11,9 @@ from cluv.cli.init import (
     check_git,
     check_cluv_config,
     check_symlink_to_scratch,
-    DEFAULT_RESULTS_PATH
+    check_job_script,
+    DEFAULT_RESULTS_PATH,
+    JOB_SCRIPT_PATH
 )
 from .utils import write_pyproject
 
@@ -65,7 +67,7 @@ results_path = "results"
         assert config.clusters == ["mila"]
         assert config.results_path == "results"
 
-
+# TODO : fixture to set environment variables ?
 class TestSymlinkCheck():
     def test_no_symlink_if_results_path_is_none(self, tmp_path) -> None:
         """check_symlink_to_scratch() should not create a symlink if the results_path is None"""
@@ -96,3 +98,42 @@ class TestSymlinkCheck():
         assert expected_results_path.is_symlink()
         assert expected_results_scratch_path.exists()
         assert expected_results_path.resolve() == expected_results_scratch_path.resolve()
+
+
+    def test_keep_existing_symlink(self, tmp_path, monkeypatch) -> None:
+        """check_symlink_to_scratch() should not overwrite an existing symlink not pointing to scratch"""
+        scratch_path = tmp_path / "scratch"
+        monkeypatch.setenv("SCRATCH", str(scratch_path))
+        expected_results_path = tmp_path / DEFAULT_RESULTS_PATH
+        expected_results_scratch_path = scratch_path / DEFAULT_RESULTS_PATH / tmp_path.name
+
+        # Create a symlink pointing to the wrong location
+        expected_results_path.symlink_to(tmp_path / "some_other_folder")
+
+        check_symlink_to_scratch(tmp_path, DEFAULT_RESULTS_PATH)
+
+        # The original symlink should be kept, and not changed to point to scratch
+        assert expected_results_path.exists()
+        assert expected_results_path.is_symlink()
+        assert expected_results_path.resolve() == (tmp_path / "some_other_folder").resolve()
+        assert not expected_results_scratch_path.exists()
+
+
+class TestJobScriptCheck:
+    def test_no_job_script_if_results_path_is_none(self, tmp_path) -> None:
+        """check_job_script() should not create a job script if the results_path is None"""
+
+        check_job_script(tmp_path, None)
+
+        assert not (tmp_path / JOB_SCRIPT_PATH).exists()
+
+    def test_keep_existing_job_script(self, tmp_path) -> None:
+        """check_job_script() should not overwrite an existing job script"""
+        job_script_path = tmp_path / JOB_SCRIPT_PATH
+        job_script_path.parent.mkdir(exist_ok=True)
+        job_script_path.write_text("#!/bin/bash\necho 'Hello world!'")
+
+        check_job_script(tmp_path, DEFAULT_RESULTS_PATH)
+
+        assert job_script_path.exists()
+        assert job_script_path.read_text() == "#!/bin/bash\necho 'Hello world!'"

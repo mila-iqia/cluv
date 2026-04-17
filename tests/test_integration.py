@@ -9,6 +9,8 @@ efficient, since at some point there might be like 10 different clusters, and 10
 import os
 
 import milatools.cli.init_command
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
 
@@ -16,6 +18,7 @@ from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.remote import Remote, control_socket_is_running
+from cluv.config import load_cluv_config
 
 # Some useful constants used to turn tests on and off depending on where we are.
 IN_GITHUB_CI = "GITHUB_ACTIONS" in os.environ
@@ -163,3 +166,53 @@ async def test_submit(remote: Remote):
         assert job_name.strip().startswith("cluv-")
     finally:
         await remote.run(f"scancel {job_id}")
+
+
+@pytest.fixture
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)  # Set the home directory to tmp_path
+    return tmp_path
+
+
+@pytest.fixture(params=[True, False])
+def scratch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Path | None:
+    """Fixture that sets up a fake SCRATCH directory if requested, or pretends that SCRATCH doesn't exist otherwise."""
+    use_scratch = request.param
+    if use_scratch:
+        fake_scratch_dir = tmp_path / "fake_scratch"
+        monkeypatch.setenv("SCRATCH", str(fake_scratch_dir))  # Set the SCRATCH env var to tmp_path
+        return fake_scratch_dir
+    if "SCRATCH" in os.environ:
+        # Remove the SCRATCH environment variable
+        monkeypatch.delenv("SCRATCH")
+    return None
+
+
+@pytest.mark.timeout(5)
+def test_init_empty_folder(
+    fake_home: Path, scratch: Path | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that cluv init creates the expected files and directories."""
+    from cluv.cli.init import DEFAULT_RESULTS_PATH, DRAC_CLUSTERS, init
+
+    project_name = "my_project"
+    project_dir = fake_home / project_name
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+
+    init()
+
+    generated_config = load_cluv_config(project_dir / "pyproject.toml")
+    assert generated_config.results_path == DEFAULT_RESULTS_PATH
+    assert (project_dir / "scripts").is_dir()
+    assert (project_dir / "scripts" / "job.sh").is_file()
+    if scratch:
+        assert (project_dir / generated_config.results_path).exists()
+        assert (project_dir / generated_config.results_path).is_symlink()
+        assert (
+            project_dir / generated_config.results_path
+        ).resolve() == scratch / DEFAULT_RESULTS_PATH / project_name
+
+    assert generated_config.clusters == ["mila"] + DRAC_CLUSTERS

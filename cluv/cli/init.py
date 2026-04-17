@@ -35,19 +35,19 @@ def init() -> None:
     console.rule("[bold cyan]cluv init[/bold cyan]")
     console.print()
 
-    # 1. Check if the current directory is under the home directory. If not, raise an error and exit.
+    # Check if the current directory is under the home directory. If not, raise an error and exit.
     check_home_dir()
 
-    # 2. Try to run "uv init" to create a new project
+    # Try to run "uv init" to create a new project
     console.print()
     console.print("Initializing uv project: running [bold]uv init[/bold]...")
     console.log("uv init --package --build-backend hatch --python 3.13")
     run_uv_init()
 
-    # 3. Check status of the git repository
+    # Check status of the git repository
     check_git()
 
-    # 4. Read the pyproject.toml file and try to find a cluv config.
+    # Read the pyproject.toml file and try to find a cluv config.
     console.print()
     console.print("Reading pyproject.toml...")
     pyproject_path = find_pyproject()
@@ -55,7 +55,7 @@ def init() -> None:
     # If it doesn't exist, add a cluv config section with the default settings and clusters.
     results_path = check_cluv_config(pyproject_path)
 
-    # 5. Check if project structure is correct
+    # Check if project structure is correct
     console.print()
     console.print("Validating project structure...")
 
@@ -65,7 +65,7 @@ def init() -> None:
     # Check if the results path is correctly symlinked to scratch
     check_symlink_to_scratch(pyproject_path.parent, results_path)
 
-    # 6. Show what the user can do next after the project setup
+    # Show what the user can do next after the project setup
     console.print()
     console.print(":tada: Your cluv config is ready to go !")
     console.print()

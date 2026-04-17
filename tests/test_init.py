@@ -1,5 +1,6 @@
 """Unit tests for cluv/cli/init.py check functions."""
 
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -54,11 +55,16 @@ class TestCheckCluvConfig:
 
     def test_keep_existing_cluv_config(self, tmp_path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
-        p = write_pyproject(tmp_path, """
-[tool.cluv]
-clusters = ["mila"]
-results_path = "results"
-""")
+        p = write_pyproject(
+            tmp_path,
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            clusters = ["mila"]
+            results_path = "results"
+            """
+            ),
+        )
 
         results_path = check_cluv_config(p)
         config = load_cluv_config(p)

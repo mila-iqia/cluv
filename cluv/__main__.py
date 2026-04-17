@@ -19,14 +19,12 @@ import rich.logging
 import rich_argparse
 import simple_parsing
 
-from cluv.config import CluvConfig, get_config
-
 from .cli.init import init
 from .cli.login import login
-from .cli.run import add_run_args
+from .cli.run import run
 from .cli.status import status
-from .cli.submit import add_submit_args
-from .cli.sync import add_sync_args
+from .cli.submit import submit
+from .cli.sync import sync
 from .utils import console
 
 logger = logging.getLogger(__name__)
@@ -34,7 +32,7 @@ if typing.TYPE_CHECKING:
     Subparsers = argparse._SubParsersAction[simple_parsing.ArgumentParser]
 
 
-def main(argv: list[str] | None = None):
+def main(argv: list[str] | None = None) -> None:
     if argv is None:
         argv = sys.argv[1:]
 
@@ -56,8 +54,6 @@ def main(argv: list[str] | None = None):
     )
     _add_v_arg(parser)  # add -v/--verbose on the top-level parser.
 
-    config = get_config()
-
     subparsers = parser.add_subparsers(dest="<command>", required=True)
 
     # add -v/--verbose to each subparser as well.
@@ -67,7 +63,7 @@ def main(argv: list[str] | None = None):
     run_parser = add_run_args(subparsers)
     _add_v_arg(run_parser)
 
-    login_parser = add_login_args(subparsers, config=config)
+    login_parser = add_login_args(subparsers)
     _add_v_arg(login_parser)
 
     sync_parser = add_sync_args(subparsers)
@@ -107,9 +103,36 @@ def main(argv: list[str] | None = None):
             logger.error("No standard error.")
         sys.exit(err.returncode)
 
+def add_submit_args(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> argparse.ArgumentParser:
+    submit_parser = subparsers.add_parser(
+        "submit",
+        help="Submit a SLURM job on a remote cluster.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+        usage="cluv submit <cluster> <job.sh> [sbatch-args...] [-- program-args...]",
+    )
+    submit_parser.add_argument(
+        "cluster",
+        metavar="<cluster>",
+        help="The cluster to submit the job on.",
+    )
+    submit_parser.add_argument(
+        "job_script",
+        metavar="<job.sh>",
+        help="Path to the sbatch job script (relative to project root).",
+    )
+    submit_parser.add_argument(
+        "sbatch_args",
+        nargs=argparse.REMAINDER,
+        metavar="...",
+        help="sbatch flags (before --) and/or program arguments (after --).",
+    )
+    submit_parser.set_defaults(func=submit)
+    return submit_parser
 
-def add_status_args(subparsers: Subparsers):
-    cluster_choices = get_config().clusters
+
+def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser(
         "status",
         help="Get the status of available clusters.",
@@ -117,7 +140,6 @@ def add_status_args(subparsers: Subparsers):
     )
     status_parser.add_argument(
         "clusters",
-        choices=cluster_choices if cluster_choices else None,
         nargs="*",
         default=None,
         metavar="<cluster>",
@@ -129,10 +151,46 @@ def add_status_args(subparsers: Subparsers):
     return status_parser
 
 
-def add_login_args(
-    subparsers: Subparsers,
-    config: CluvConfig,
-):
+def add_sync_args(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> argparse.ArgumentParser:
+    sync_parser = subparsers.add_parser(
+        "sync",
+        help="Synchronizes the current project across clusters.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    sync_parser.add_argument(
+        "clusters",
+        nargs="*",
+        default=None,
+        metavar="<cluster>",
+        help=(
+            "The cluster(s) to synchronize with. "
+            "Leave empty to synchronize with all currently logged in clusters. "
+            "Use a comma to separate multiple clusters."
+        ),
+    )
+    # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
+    # sync_parser.add_argument(
+    #     "--",
+    #     dest="_",
+    #     # type=str,
+    #     # help="The arguments to pass to `uv sync` on the remote cluster.",
+    #     # dest=argparse.SUPPRESS,
+    # )
+    # sync_parser.add_argument(
+    #     "--",
+    #     dest="uv_sync_args",
+    #     # type=str,
+    #     # metavar="<uv sync arguments>",
+    #     help="The arguments to pass to `uv sync` on the remote cluster.",
+    #     nargs=argparse.REMAINDER,
+    # )
+    sync_parser.set_defaults(func=sync)
+    return sync_parser
+
+
+def add_login_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     login_parser = subparsers.add_parser(
         "login",
         help="Login to the specified clusters.",
@@ -140,7 +198,6 @@ def add_login_args(
     )
     login_parser.add_argument(
         "clusters",
-        choices=(config.clusters) if config.clusters else None,
         nargs="*",
         help="The cluster(s) to login to. Leave empty to login to all clusters.",
     )
@@ -158,7 +215,32 @@ def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     return init_parser
 
 
-def setup_logging(verbose: int | None, force: bool = False):
+def add_run_args(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> argparse.ArgumentParser:
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run a command on a cluster",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    run_parser.add_argument(
+        "cluster",
+        # default=,
+        metavar="<cluster>",
+        help="The cluster to run the command on",
+    )
+    run_parser.add_argument(
+        "command",
+        type=str,
+        metavar="<command>",
+        help="The command to run",
+        nargs=argparse.REMAINDER,
+    )
+    run_parser.set_defaults(func=run)
+    return run_parser
+
+
+def setup_logging(verbose: int | None, force: bool = False) -> None:
     verbose = verbose or 0
     handler = rich.logging.RichHandler(
         console=console,
@@ -187,7 +269,7 @@ def setup_logging(verbose: int | None, force: bool = False):
     #     cluv_logger.setLevel(logging.DEBUG)
 
 
-def _add_v_arg(parser: argparse.ArgumentParser):
+def _add_v_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-v",
         "--verbose",

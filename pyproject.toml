@@ -77,7 +77,7 @@ job_script = "scripts/job.sh"
 results_path = "logs"
 
 [tool.cluv.slurm]
-# Global SBATCH_* defaults applied to all clusters.
+# Environment variables applied when using Slurm commands on all clusters.
 SBATCH_TIME = "3:00:00"
 SBATCH_REQUE = true
 

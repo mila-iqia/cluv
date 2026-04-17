@@ -1,47 +1,13 @@
 from __future__ import annotations
 
-import argparse
 import shlex
 import subprocess
 import sys
 from pathlib import Path
 
-import rich_argparse
-
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
 from cluv.utils import console
-
-
-def add_submit_args(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
-    cluster_choices = get_config().clusters
-    submit_parser = subparsers.add_parser(
-        "submit",
-        help="Submit a SLURM job on a remote cluster.",
-        formatter_class=rich_argparse.RichHelpFormatter,
-        usage="cluv submit <cluster> <job.sh> [sbatch-args...] [-- program-args...]",
-    )
-    submit_parser.add_argument(
-        "cluster",
-        choices=cluster_choices if cluster_choices else None,
-        metavar="<cluster>",
-        help="The cluster to submit the job on.",
-    )
-    submit_parser.add_argument(
-        "job_script",
-        metavar="<job.sh>",
-        help="Path to the sbatch job script (relative to project root).",
-    )
-    submit_parser.add_argument(
-        "sbatch_args",
-        nargs=argparse.REMAINDER,
-        metavar="...",
-        help="sbatch flags (before --) and/or program arguments (after --).",
-    )
-    submit_parser.set_defaults(func=submit)
-    return submit_parser
 
 
 async def submit(

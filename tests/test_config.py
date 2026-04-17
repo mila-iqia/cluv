@@ -2,12 +2,7 @@
 
 
 from cluv.config import load_cluv_config
-
-
-def write_pyproject(tmp_path, content: str):
-    p = tmp_path / "pyproject.toml"
-    p.write_text(content)
-    return p
+from .utils import write_pyproject
 
 
 # ---------------------------------------------------------------------------

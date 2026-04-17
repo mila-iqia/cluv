@@ -9,13 +9,19 @@ efficient, since at some point there might be like 10 different clusters, and 10
 import os
 
 import milatools.cli.init_command
+import stat
+import subprocess
+from pathlib import Path
+
 import pytest
 import pytest_asyncio
 
 from cluv.cli.login import get_remote_without_2fa_prompt, login
+from cluv.cli.init import DEFAULT_RESULTS_PATH, DRAC_CLUSTERS, init
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.remote import Remote, control_socket_is_running
+from cluv.config import load_cluv_config
 
 # Some useful constants used to turn tests on and off depending on where we are.
 IN_GITHUB_CI = "GITHUB_ACTIONS" in os.environ
@@ -163,3 +169,93 @@ async def test_submit(remote: Remote):
         assert job_name.strip().startswith("cluv-")
     finally:
         await remote.run(f"scancel {job_id}")
+
+
+@pytest.fixture
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)  # Set the home directory to tmp_path
+    return tmp_path
+
+
+@pytest.fixture(params=[True, False], ids=["with_scratch", "without_scratch"])
+def scratch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Path | None:
+    """Fixture that sets up a fake SCRATCH directory if requested, or pretends that SCRATCH doesn't exist otherwise."""
+    use_scratch = request.param
+    if use_scratch:
+        fake_scratch_dir = tmp_path / "fake_scratch"
+        monkeypatch.setenv("SCRATCH", str(fake_scratch_dir))  # Set the SCRATCH env var to tmp_path
+        return fake_scratch_dir
+    if "SCRATCH" in os.environ:
+        # Remove the SCRATCH environment variable
+        monkeypatch.delenv("SCRATCH")
+    return None
+
+
+@pytest.fixture
+def project_name(request: pytest.FixtureRequest) -> str:
+    return getattr(request, "param", "my_project")
+
+
+@pytest.fixture(params=[True, False], ids=["existing_project", "new_project"])
+def is_existing_project(request: pytest.FixtureRequest) -> str:
+    return request.param
+
+
+@pytest.fixture
+def project_dir(fake_home: Path, project_name: str, is_existing_project: bool) -> Path:
+    """Fixture that creates a project directory and changes into it."""
+    project_dir = fake_home / project_name
+    project_dir.mkdir()
+    if is_existing_project:
+        subprocess.run(f"uv init {project_dir}", shell=True, check=True)
+        job_script = project_dir / "scripts" / "job.sh"
+        job_script.parent.mkdir(exist_ok=False, parents=True)
+        job_script.touch()  # Touch the job script to simulate an existing project
+        # Make the job script executable:
+        job_script.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    return project_dir
+
+
+@pytest.mark.timeout(5)
+def test_init(
+    project_dir: Path,
+    project_name: str,
+    scratch: Path | None,
+    is_existing_project: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    monkeypatch.chdir(project_dir)
+
+    init()
+
+    generated_config = load_cluv_config(project_dir / "pyproject.toml")
+    assert generated_config.results_path == DEFAULT_RESULTS_PATH
+    assert (project_dir / "scripts").is_dir()
+    assert (project_dir / "scripts" / "job.sh").is_file()
+
+    job_script = project_dir / "scripts" / "job.sh"
+    if is_existing_project:
+        assert job_script.read_text() == "", "cluv init overwrote the job script!"
+    else:
+        # TODO: The created job script should be executable!
+        with pytest.raises(AssertionError):
+            assert job_script.stat().st_mode & stat.S_IXUSR, "Job script is not executable!"
+
+    if scratch:
+        assert (project_dir / generated_config.results_path).exists()
+        assert (project_dir / generated_config.results_path).is_symlink()
+        assert (
+            project_dir / generated_config.results_path
+        ).resolve() == scratch / DEFAULT_RESULTS_PATH / project_name
+
+    assert generated_config.clusters == ["mila"] + DRAC_CLUSTERS
+
+
+@pytest.mark.timeout(5)
+def test_init_twice_doesnt_raise(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(project_dir)
+    init()
+    init()

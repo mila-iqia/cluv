@@ -99,7 +99,7 @@ def run_uv_init() -> None:
         console.print("[green]✅ uv: project initialized.[/green]")
 
 
-def check_cluv_config(pyproject_path: Path) -> str:
+def check_cluv_config(pyproject_path: Path) -> str | None:
     """
     Check if the pyproject.toml file contains a cluv config.
     If not, add a default config section with the default clusters and settings.

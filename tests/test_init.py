@@ -106,14 +106,11 @@ class TestSymlinkCheck():
         monkeypatch.setenv("SCRATCH", str(scratch_path))
         expected_results_path = tmp_path / DEFAULT_RESULTS_PATH
         expected_results_scratch_path = scratch_path / DEFAULT_RESULTS_PATH / tmp_path.name
-
-        # Create a symlink pointing to the wrong location
-        expected_results_path.symlink_to(tmp_path / "some_other_folder")
+        expected_results_path.symlink_to(tmp_path / "some_other_folder")    # Create a symlink pointing to a new location
 
         check_symlink_to_scratch(tmp_path, DEFAULT_RESULTS_PATH)
 
         # The original symlink should be kept, and not changed to point to scratch
-        assert expected_results_path.exists()
         assert expected_results_path.is_symlink()
         assert expected_results_path.resolve() == (tmp_path / "some_other_folder").resolve()
         assert not expected_results_scratch_path.exists()

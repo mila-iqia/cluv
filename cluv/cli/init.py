@@ -179,7 +179,7 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
             console.print("[green]✅ Symlink from $HOME results_path to $SCRATCH already exists.[/green]")
             return
         else:
-            console.print(f"[yellow]⚠️  Warning: Symlink from {symlink_path} points to an other expected scratch path ({symlink_path.resolve()}).[/yellow]")
+            console.print(f"[yellow]⚠️  Warning: Symlink from {symlink_path} points to an other path ({symlink_path.resolve()}) than the expected scratch path.[/yellow]")
             return
     else:
         console.print(f"Creating symlink from {symlink_path} to {scratch_path}")

@@ -17,6 +17,7 @@ import pytest
 import pytest_asyncio
 
 from cluv.cli.login import get_remote_without_2fa_prompt, login
+from cluv.cli.init import DEFAULT_RESULTS_PATH, DRAC_CLUSTERS, init
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.remote import Remote, control_socket_is_running
@@ -225,8 +226,6 @@ def test_init(
     is_existing_project: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Test that cluv init creates the expected files and directories."""
-    from cluv.cli.init import DEFAULT_RESULTS_PATH, DRAC_CLUSTERS, init
 
     monkeypatch.chdir(project_dir)
 
@@ -253,3 +252,10 @@ def test_init(
         ).resolve() == scratch / DEFAULT_RESULTS_PATH / project_name
 
     assert generated_config.clusters == ["mila"] + DRAC_CLUSTERS
+
+
+@pytest.mark.timeout(5)
+def test_init_twice_doesnt_raise(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(project_dir)
+    init()
+    init()

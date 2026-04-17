@@ -11,6 +11,7 @@ In early development. Commands are functional, but expect bugs or missing featur
 - Python >= 3.13
 - [UV](https://docs.astral.sh/uv/)
 - SSH access configured for each cluster in `~/.ssh/config` (run `cluv login` to open ControlMaster sessions)
+- A GitHub repository with your project
 
 ## Installation
 
@@ -56,7 +57,7 @@ Add a `[tool.cluv]` section to the `pyproject.toml` of your project. `cluv init`
 | `results_path` | string (optional) | Path relative to the project root. When set, `cluv sync` rsyncs that directory back from each remote cluster. |
 
 ### `[tool.cluv.slurm]`
-Environment variables (key/value pairs) applied when using Slurm commands on all clusters. Use this for global Slurm defaults such as resource limits or for tool configuration like (uv of W&B).
+Environment variables applied when using Slurm commands on all clusters. Use this for global Slurm defaults such as resource limits or for tool configuration like (uv or W&B).
 
 ### `[tool.cluv.clusters.<name>]`
 Environment variables for a specific cluster. Values here are merged on top of `[tool.cluv.slurm]` when submitting.
@@ -65,8 +66,8 @@ Environment variables for a specific cluster. Values here are merged on top of `
 
 ```toml
 [tool.cluv]
-clusters = ["mila", "narval", "tamia"]   # SSH hostnames from ~/.ssh/config
-results_path = "logs"                    # rsynced back by `cluv sync`
+clusters = ["mila", "narval", "tamia"]
+results_path = "logs"
 
 [tool.cluv.slurm]
 # Applied to every cluster by default
@@ -90,20 +91,14 @@ Initialize the current directory as a cluv project. Must be run from inside your
 cluv init
 ```
 
-Steps performed:
-1. Runs `uv init` as a package (skipped if `pyproject.toml` already exists).
-2. Warns if no git remote is configured (required for `sync` and `submit`).
-3. Appends a `[tool.cluv]` section to `pyproject.toml` if one is not already present, with defaults for Mila and DRAC clusters.
-4. Creates `scripts/job.sh`, a Slurm job script template, if it does not already exist.
-5. Creates a symlink `<results_path>/ → $SCRATCH/<results_path>/<project_name>/` so large outputs go to `$SCRATCH` rather than filling `$HOME`.
-
 Default project structure after `cluv init`:
 ```
 my_project/
+├── README.md
+├── logs -> $SCRATCH/logs/my_project   # symlink to $SCRATCH
 ├── pyproject.toml        # includes [tool.cluv] config
 ├── scripts/
 │   └── job.sh            # Slurm job script template
-├── logs -> $SCRATCH/logs/my_project   # symlink to $SCRATCH
 └── src/
     └── my_project/
         └── __init__.py
@@ -123,7 +118,7 @@ cluv login [<cluster> ...]
 
 ### `cluv sync`
 
-Push local git changes, then on each cluster: clone or fetch the repo, check out the current branch, and run uv sync. Optionally rsyncs results back if `results_path` is set in the config.
+Push local git changes, then on each cluster: clone or fetch the repo, check out the current branch, and run `uv sync`. Optionally rsyncs results back if `results_path` is set in the config.
 
 ```
 cluv sync [<cluster> ...]
@@ -133,11 +128,6 @@ cluv sync [<cluster> ...]
 |----------|-------------|
 | `<cluster> ...` | Clusters to sync. Defaults to all configured clusters. Pass explicit names to connect to specific clusters. |
 
-Sync steps per cluster:
-1. Install or update `uv` to match the local version.
-2. Clone the repo from GitHub (if not present).
-3. Run `uv sync` on the remote.
-4. Rsync `results_path/` back to the local machine (if configured).
 
 ### `cluv status`
 
@@ -165,13 +155,6 @@ cluv submit <cluster> <job.sh> [<sbatch-flags> ...] [-- <program-args> ...]
 | `<job.sh>` | Path to the job script. |
 | `<sbatch-flags>` | Any extra flags to pass to `sbatch`. |
 | `-- <program-args>` | Arguments passed to the job script itself (after `--`). |
-
-Steps performed:
-1. Checks that the git working tree is clean.
-2. Captures the current commit hash and sets it as `GIT_COMMIT`.
-3. Syncs the project to the cluster (equivalent to `cluv sync <cluster>`).
-4. Merges `[tool.cluv.slurm]` env vars with per-cluster overrides from `[tool.cluv.clusters.<name>]`.
-5. Runs `sbatch` on the remote with all env vars, sbatch flags, and program args.
 
 ### `cluv run`
 

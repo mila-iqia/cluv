@@ -20,7 +20,7 @@ from .utils import write_pyproject
 
 
 class TestCheckHomeDir:
-    def test_not_under_home(self, tmp_path, monkeypatch) -> None:
+    def test_not_under_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """check_home_dir() should raise an error if the current directory is not under the user's home directory"""
         monkeypatch.setattr(Path, "home", lambda: str(tmp_path)) # Set the home directory to tmp_path
         monkeypatch.chdir(tmp_path.parent) # Set the current work dir to the parent of tmp_path, which is not under the "home" directory
@@ -30,7 +30,7 @@ class TestCheckHomeDir:
 
 
 class TestGitCheck:
-    def test_not_in_git_repo(self, tmp_path, monkeypatch) -> None:
+    def test_not_in_git_repo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """check_git() should raise an error if the current directory is not a git repository"""
         monkeypatch.chdir(tmp_path) # Set the working dir to tmp_path
 
@@ -39,7 +39,7 @@ class TestGitCheck:
 
 
 class TestCheckCluvConfig:
-    def test_add_missing_cluv_config(self, tmp_path) -> None:
+    def test_add_missing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should add a cluv config section if the toml doesn't have it"""
         p = write_pyproject(tmp_path, "")
 
@@ -52,8 +52,7 @@ class TestCheckCluvConfig:
         assert config.slurm == {'UV_OFFLINE': 1, 'WANDB_MODE': 'offline'}
         assert config.cluster_configs == {"mila": {"UV_OFFLINE": 0, "WANDB_MODE": "online"}}
 
-
-    def test_keep_existing_cluv_config(self, tmp_path) -> None:
+    def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
         p = write_pyproject(
             tmp_path,
@@ -105,8 +104,7 @@ class TestSymlinkCheck():
         assert expected_results_scratch_path.exists()
         assert expected_results_path.resolve() == expected_results_scratch_path.resolve()
 
-
-    def test_keep_existing_symlink(self, tmp_path, monkeypatch) -> None:
+    def test_keep_existing_symlink(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """check_symlink_to_scratch() should not overwrite an existing symlink not pointing to scratch"""
         scratch_path = tmp_path / "scratch"
         monkeypatch.setenv("SCRATCH", str(scratch_path))
@@ -123,14 +121,14 @@ class TestSymlinkCheck():
 
 
 class TestJobScriptCheck:
-    def test_no_job_script_if_results_path_is_none(self, tmp_path) -> None:
+    def test_no_job_script_if_results_path_is_none(self, tmp_path: Path) -> None:
         """check_job_script() should not create a job script if the results_path is None"""
 
         check_job_script(tmp_path, None)
 
         assert not (tmp_path / JOB_SCRIPT_PATH).exists()
 
-    def test_keep_existing_job_script(self, tmp_path) -> None:
+    def test_keep_existing_job_script(self, tmp_path: Path) -> None:
         """check_job_script() should not overwrite an existing job script"""
         job_script_path = tmp_path / JOB_SCRIPT_PATH
         job_script_path.parent.mkdir(exist_ok=True)

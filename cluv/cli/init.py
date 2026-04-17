@@ -74,6 +74,7 @@ def init() -> None:
     console.print("=> [bold] cluv sync [/bold]  : synchronize the project on all configured clusters.")
     console.print()
 
+
 def check_home_dir() -> None:
     """
     Check if the current directory is under the home directory. If not, raise an error and exit.
@@ -83,6 +84,7 @@ def check_home_dir() -> None:
     else:
         console.print("[red]❌ cluv init should be run in a directory under your home directory.[/red]")
         raise RuntimeError("cluv init should be run in a directory under your home directory.")
+
 
 def run_uv_init() -> None:
     uv_init = subprocess.run(["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"], capture_output=True, text=True)
@@ -95,6 +97,7 @@ def run_uv_init() -> None:
             raise RuntimeError("Error occurred while initializing uv project: ", uv_init.stderr)
     else:
         console.print("[green]✅ uv: project initialized.[/green]")
+
 
 def check_cluv_config(pyproject_path: Path) -> str:
     """

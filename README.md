@@ -20,7 +20,7 @@ Install as a UV tool:
 uv tool install git+https://github.com/mila-iqia/cluv
 ```
 
-Then you can run `cluv` directly as a command like :
+Then you can run `cluv` directly as a command:
 
 ```bash
 cluv init
@@ -31,7 +31,7 @@ cluv submit mila job.sh
 
 ## Quick Start
 
-1. Initialize your project with :
+1. Initialize your project with:
    ```bash
    cluv init
    ```
@@ -91,11 +91,11 @@ cluv init
 ```
 
 Steps performed:
-1. Runs `uv init --package --build-backend hatch --python 3.13` (skipped if `pyproject.toml` already exists).
+1. Runs `uv init` as a package (skipped if `pyproject.toml` already exists).
 2. Warns if no git remote is configured (required for `sync` and `submit`).
-3. Appends a `[tool.cluv]` section to `pyproject.toml` if one is not already present, with defaults for Mila and all DRAC clusters.
-4. Creates `scripts/job.sh` — a Slurm job script template — if it does not already exist.
-5. Creates a symlink `<results_path>/ → $SCRATCH/<results_path>/<project_name>/` so large outputs go to scratch rather than filling `$HOME`.
+3. Appends a `[tool.cluv]` section to `pyproject.toml` if one is not already present, with defaults for Mila and DRAC clusters.
+4. Creates `scripts/job.sh`, a Slurm job script template, if it does not already exist.
+5. Creates a symlink `<results_path>/ → $SCRATCH/<results_path>/<project_name>/` so large outputs go to `$SCRATCH` rather than filling `$HOME`.
 
 Default project structure after `cluv init`:
 ```
@@ -111,7 +111,7 @@ my_project/
 
 ### `cluv login`
 
-Open SSH ControlMaster connections to all configured clusters. Run this first, or before any command that requires a live connection.
+Open SSH ControlMaster connections to all configured clusters. Run this before any command that requires a live connection.
 
 ```
 cluv login [<cluster> ...]
@@ -141,7 +141,7 @@ Sync steps per cluster:
 
 ### `cluv status`
 
-Display an overview of each cluster: GPU availability, running/queued jobs (yours and cluster-wide), estimated queue wait, GPU utilisation, and disk usage. Falls back to mock data if no active connections exist.
+Display an overview of each cluster: GPU availability, running/queued jobs, estimated queue wait, GPU utilisation, and disk usage. Falls back to mock data if no active connections exist.
 
 ```
 cluv status [<cluster> ...]

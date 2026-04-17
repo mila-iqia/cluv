@@ -10,7 +10,7 @@ from cluv.utils import console
 JOB_SCRIPT_PATH = "scripts/job.sh"
 DEFAULT_RESULTS_PATH = "logs"
 
-CLUV_DEFAUT_CONFIG = [
+CLUV_DEFAULT_CONFIG = [
     "[tool.cluv]",
     f'results_path = "{DEFAULT_RESULTS_PATH}"'
 ]
@@ -34,14 +34,9 @@ def init() -> None:
     console.print()
     console.rule("[bold cyan]cluv init[/bold cyan]")
     console.print()
-    # TODO : give path to create project
 
     # 1. Check if the current directory is under the home directory. If not, raise an error and exit.
-    if str(Path.cwd()).startswith(str(Path.home())):
-        console.print("[green]✅ Current directory is under home directory.[/green]")
-    else:
-        console.print("[red]❌ cluv init should be run in a directory under your home directory.[/red]")
-        raise RuntimeError("cluv init should be run in a directory under your home directory.")
+    check_home_dir()
 
     # 2. Try to run "uv init" to create a new project
     console.print()
@@ -57,18 +52,17 @@ def init() -> None:
     console.print("Reading pyproject.toml...")
     pyproject_path = find_pyproject()
 
-    ### If it doesn't exist, add a cluv config section with the default settings and clusters.
-    ### Get the results_path from the config to use for the next checks.
+    # If it doesn't exist, add a cluv config section with the default settings and clusters.
     results_path = check_cluv_config(pyproject_path)
 
     # 5. Check if project structure is correct
     console.print()
     console.print("Validating project structure...")
 
-    ### Check if the job script exists
+    # Check if the job script exists
     check_job_script(pyproject_path.parent, results_path)
 
-    ### Check if the results path is correctly symlinked to scratch
+    # Check if the results path is correctly symlinked to scratch
     check_symlink_to_scratch(pyproject_path.parent, results_path)
 
     # 6. Show what the user can do next after the project setup
@@ -79,6 +73,16 @@ def init() -> None:
     console.print("=> [bold] cluv login [/bold] : open a SSH connections to all configured clusters.")
     console.print("=> [bold] cluv sync [/bold]  : synchronize the project on all configured clusters.")
     console.print()
+
+def check_home_dir() -> None:
+    """
+    Check if the current directory is under the home directory. If not, raise an error and exit.
+    """
+    if Path.cwd().is_relative_to(Path.home()):
+        console.print("[green]✅ Current directory is under home directory.[/green]")
+    else:
+        console.print("[red]❌ cluv init should be run in a directory under your home directory.[/red]")
+        raise RuntimeError("cluv init should be run in a directory under your home directory.")
 
 def run_uv_init() -> None:
     uv_init = subprocess.run(["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"], capture_output=True, text=True)
@@ -94,7 +98,8 @@ def run_uv_init() -> None:
 
 def check_cluv_config(pyproject_path: Path) -> str:
     """
-    Check if the pyproject.toml file contains a cluv config. If not, add a default config section with the default clusters and settings.
+    Check if the pyproject.toml file contains a cluv config.
+    If not, add a default config section with the default clusters and settings.
     """
     if has_cluv_config(pyproject_path):
         console.print("[green]✅ Project already have a cluv config in pyproject.toml.[/green]")
@@ -105,7 +110,7 @@ def check_cluv_config(pyproject_path: Path) -> str:
     console.print("No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config...")
     console.print("Adding config for cluv tool :")
 
-    add_cluv_config_section(pyproject_path, CLUV_DEFAUT_CONFIG)
+    add_cluv_config_section(pyproject_path, CLUV_DEFAULT_CONFIG)
     add_cluv_config_section(pyproject_path, CLUV_SLURM_DEFAULT_CONFIG)
     add_cluv_cluster_config("mila", pyproject_path, CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
     for cluster in DRAC_CLUSTERS:
@@ -118,18 +123,18 @@ def add_cluv_config_section(pyproject_path: Path, section_lines: list[str]) -> N
     """
     Write the given lines to the pyproject.toml file.
     """
-    console.log(f'{"\n" + "\n".join(section_lines) + "\n"}'.replace("[", "\\["))
+    console.log(("\n" + "\n".join(section_lines) + "\n").replace("[", "\\["))
     with pyproject_path.open("a") as f:
         f.write("\n" + "\n".join(section_lines) + "\n")
 
 
-def add_cluv_cluster_config(cluster: str, pyproject_path: Path, vars: list[str] = []) -> None:
+def add_cluv_cluster_config(cluster: str, pyproject_path: Path, config_lines: list[str] = []) -> None:
     """
     Add a cluster config section for the given cluster to the pyproject.toml file, with the given variables.
     """
     console.print(f"Adding config for cluster [bold]{cluster}[/bold] :")
-    section_lines = [f"[tool.cluv.clusters.{cluster}]"] + vars
-    console.log(f'{"\n" + "\n".join(section_lines) + "\n"}'.replace("[", "\\["))
+    section_lines = [f"[tool.cluv.clusters.{cluster}]"] + config_lines
+    console.log(("\n" + "\n".join(section_lines) + "\n").replace("[", "\\["))
     with pyproject_path.open("a") as f:
         f.write("\n" + "\n".join(section_lines) + "\n")
 
@@ -158,6 +163,10 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
         console.print("[yellow]⚠️  Warning: Results path is not configured. Skipping symlink creation.[/yellow]")
         return
 
+    if "SCRATCH" not in os.environ:
+        console.print("[yellow]⚠️  Warning: $SCRATCH variable not set. Skipping symlink creation.[/yellow]")
+        return
+
     # Generate the expected scratch and symlink path
     scratch_dir = Path(os.path.expandvars(f"$SCRATCH/{results_path}/{project_root.name}"))
     results_dir = project_root / results_path
@@ -177,17 +186,20 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
 
 def check_job_script(project_root: Path, results_path: str | None) -> None:
     """
-    Check if the job script template to set and run the project on a cluster with SLURM exists. If not, create it.
+    Check if the job script template exists. If not, create it.
+    The job script is a template for users to submit jobs to Slurm with cluv.
     """
-    if os.path.exists(JOB_SCRIPT_PATH):
-        console.print(f"[green]✅ Job template script already exists at '{JOB_SCRIPT_PATH}'.[/green]")
+    job_script_path = project_root / JOB_SCRIPT_PATH
+
+    if job_script_path.exists():
+        console.print(f"[green]✅ Job template script already exists at '{job_script_path}'.[/green]")
         return
 
     if results_path is None:
         console.print("[yellow]⚠️  Warning: Results path is not configured. Skipping job template script generation.[/yellow]")
         return
 
-    console.print(f"Adding job template script at '{JOB_SCRIPT_PATH}'.")
+    console.print(f"Adding job template script at '{job_script_path}'.")
 
     project_name = project_root.name
     project_root = str(project_root.relative_to(Path.home()))
@@ -229,6 +241,7 @@ srun --gres-flags=allow-task-sharing uv --directory=$SLURM_TMPDIR/$project_name 
 echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path to $project_root/$results_path"
 srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_path $project_root/
 """
-    os.makedirs(Path(JOB_SCRIPT_PATH).parent, exist_ok=True)
-    with open(JOB_SCRIPT_PATH, 'w') as sh_file:
+
+    job_script_path.parent.mkdir(exist_ok=True)
+    with open(job_script_path, 'w') as sh_file:
         sh_file.write(script_content)

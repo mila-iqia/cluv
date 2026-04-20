@@ -190,7 +190,7 @@ async def clone_project(remote: Remote, project_path: PurePosixPath):
     ).returncode == 0
     if not _is_cloned_on_cluster:
         logger.debug(f"Project isn't cloned yet on {remote.hostname}.")
-    await remote.run(f"git clone {github_repo_url} {project_path}", hide=True)
+        await remote.run(f"git clone {github_repo_url} {project_path}", hide=True)
     await remote.run(f"git -C {project_path} fetch --all --prune", hide=True)
     await remote.run(f"git -C {project_path} checkout {current_git_branch}", hide=False)
     await remote.run(f"git -C {project_path} pull")

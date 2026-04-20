@@ -6,6 +6,7 @@ from milatools.cli.init_command import DRAC_CLUSTERS
 
 from cluv.config import find_pyproject, has_cluv_config, load_cluv_config
 from cluv.utils import console
+from cluv.ssh import get_ssh_hostnames
 
 JOB_SCRIPT_PATH = "scripts/job.sh"
 DEFAULT_RESULTS_PATH = "logs"
@@ -55,6 +56,7 @@ def init() -> None:
     # If it doesn't exist, add a cluv config section with the default settings and clusters.
     check_cluv_config(pyproject_path)
     config = load_cluv_config(pyproject_path)
+    check_ssh_hostnames(config.clusters)
 
     # Check if project structure is correct
     console.print()
@@ -182,6 +184,21 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
         console.print(f"Creating symlink from {symlink_path} to {scratch_path}")
         scratch_path.mkdir(parents=True, exist_ok=True)
         symlink_path.symlink_to(scratch_path, target_is_directory=True)
+
+
+def check_ssh_hostnames(clusters: list[str]) -> None:
+    """
+    Check if the names of the clusters in the cluv config are present in the SSH config file. If not, print a warning.
+    """
+    ssh_hostnames = get_ssh_hostnames()
+    missing_clusters = set(clusters).difference(ssh_hostnames)
+
+    if len(missing_clusters) > 0:
+        console.print(f"[yellow]⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. Try to run [bold]mila init[/bold] to add all available clusters.[/yellow]")
+        for cluster in missing_clusters:
+            console.print(f"[yellow]    - {cluster}[/yellow]")
+    else:
+        console.print("[green]✅ All clusters in the cluv config are present in your SSH config.[/green]")
 
 
 def check_job_script(project_root: Path, results_path: str | None) -> None:

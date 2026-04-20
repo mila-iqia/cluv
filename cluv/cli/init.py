@@ -53,17 +53,18 @@ def init() -> None:
     pyproject_path = find_pyproject()
 
     # If it doesn't exist, add a cluv config section with the default settings and clusters.
-    results_path = check_cluv_config(pyproject_path)
+    check_cluv_config(pyproject_path)
+    config = load_cluv_config(pyproject_path)
 
     # Check if project structure is correct
     console.print()
     console.print("Validating project structure...")
 
     # Check if the job script exists
-    check_job_script(pyproject_path.parent, results_path)
+    check_job_script(pyproject_path.parent, config.results_path)
 
     # Check if the results path is correctly symlinked to scratch
-    check_symlink_to_scratch(pyproject_path.parent, results_path)
+    check_symlink_to_scratch(pyproject_path.parent, config.results_path)
 
     # Show what the user can do next after the project setup
     console.print()
@@ -99,16 +100,14 @@ def run_uv_init() -> None:
         console.print("[green]✅ uv: project initialized.[/green]")
 
 
-def check_cluv_config(pyproject_path: Path) -> str | None:
+def check_cluv_config(pyproject_path: Path) -> None:
     """
     Check if the pyproject.toml file contains a cluv config.
     If not, add a default config section with the default clusters and settings.
     """
     if has_cluv_config(pyproject_path):
         console.print("[green]✅ Project already have a cluv config in pyproject.toml.[/green]")
-        config = load_cluv_config(pyproject_path)
-        console.print(config)
-        return config.results_path
+        return
 
     console.print("No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config...")
     console.print("Adding config for cluv tool :")
@@ -118,8 +117,6 @@ def check_cluv_config(pyproject_path: Path) -> str | None:
     add_cluv_cluster_config("mila", pyproject_path, CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
     for cluster in DRAC_CLUSTERS:
         add_cluv_cluster_config(cluster, pyproject_path)
-
-    return DEFAULT_RESULTS_PATH
 
 
 def add_cluv_config_section(pyproject_path: Path, section_lines: list[str]) -> None:

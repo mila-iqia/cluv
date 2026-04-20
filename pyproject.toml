@@ -42,6 +42,11 @@ markers = [
 [tool.uv]
 managed = true
 
+[tool.uv.workspace]
+members = [
+    "examples/jax-simple",
+]
+
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

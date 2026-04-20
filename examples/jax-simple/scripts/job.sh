@@ -1,0 +1,34 @@
+#!/bin/bash
+#SBATCH --output=logs/%j/slurm-%j.out
+#SBATCH --ntasks=1
+#SBATCH --mem=8G
+#SBATCH --time=0:05:00
+
+project_name="jax-simple"
+results_path="logs"
+project_root="Desktop/cluv/examples/jax-simple"
+
+# Minimal test job for cluv submit.
+echo "hostname: $(hostname)"
+echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
+
+# Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.
+echo "Preparing the repo and virtual environment in $SLURM_TMPDIR"
+srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES --input=all bash -e <<END
+cd $SLURM_TMPDIR
+git clone $project_root
+cd $SLURM_TMPDIR/$project_name
+git checkout --detach $GIT_COMMIT
+exec uv sync
+END
+
+# Run the actual job command passed as an argument ('python main.py' for example)
+echo "Running command: $@"
+# Note: This `--gres-flags=allow-task-sharing` is required to allow tasks on the same node to access
+# GPUs allocated to other tasks on that node. Without this flag, --gpus-per-task=1 would isolate
+# each task to only see its own GPU, which can cause some mysterious NCCL errors.
+srun --gres-flags=allow-task-sharing uv --directory=$SLURM_TMPDIR/$project_name run "$@"
+
+# Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
+echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path to $project_root/$results_path"
+srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_path $project_root/

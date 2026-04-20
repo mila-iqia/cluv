@@ -1,0 +1,48 @@
+[project]
+name = "jax-simple"
+version = "0.1.0"
+description = "A simple Jax example"
+readme = "README.md"
+authors = [
+    { name = "Hugo Vandenbroucke-Menu", email = "hugo.vandenbroucke-menu@mila.quebec" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.optional-dependencies]
+cpu = [
+    "jax>=0.10.0"
+]
+
+cuda = [
+    "jax[cuda13]"
+]
+
+[project.scripts]
+jax-simple = "jax_simple:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.cluv]
+results_path = "logs"
+
+[tool.cluv.slurm]
+# Environment variables applied when using Slurm commands on all clusters.
+UV_OFFLINE = 1
+WANDB_MODE = "offline"
+
+[tool.cluv.clusters.mila]
+UV_OFFLINE = 0
+WANDB_MODE = "online"
+
+[tool.cluv.clusters.rorqual]
+
+[tool.cluv.clusters.tamia]
+
+# [tool.cluv.clusters.fir]
+# [tool.cluv.clusters.nibi]
+# [tool.cluv.clusters.killarney]
+# [tool.cluv.clusters.vulcan]
+# [tool.cluv.clusters.trillium-gpu]

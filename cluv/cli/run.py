@@ -15,6 +15,7 @@ from cluv.remote import Remote
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
+__all__ = ["run"]
 
 
 async def run(command: str | list[str], cluster: str):

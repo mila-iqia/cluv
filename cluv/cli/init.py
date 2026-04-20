@@ -7,13 +7,12 @@ from milatools.cli.init_command import DRAC_CLUSTERS
 from cluv.config import find_pyproject, has_cluv_config, load_cluv_config
 from cluv.utils import console
 
+__all__ = ["init"]
+
 JOB_SCRIPT_PATH = "scripts/job.sh"
 DEFAULT_RESULTS_PATH = "logs"
 
-CLUV_DEFAULT_CONFIG = [
-    "[tool.cluv]",
-    f'results_path = "{DEFAULT_RESULTS_PATH}"'
-]
+CLUV_DEFAULT_CONFIG = ["[tool.cluv]", f'results_path = "{DEFAULT_RESULTS_PATH}"']
 
 CLUV_SLURM_DEFAULT_CONFIG = [
     "[tool.cluv.slurm]",
@@ -27,9 +26,15 @@ CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS = [
     'WANDB_MODE = "online"',
 ]
 
+
 def init() -> None:
-    """
-    Initialize a new project with cluv.
+    """Initialize a new project with cluv.
+
+    This does the following:
+
+    * Runs `uv init --package --build-backend hatch --python 3.13` to initialize a new uv project
+      in the current directory (if there isn't one already).
+    * Adds a default configuration for Cluv in the `[tool.cluv]` section of pyproject.toml.
     """
     console.print()
     console.rule("[bold cyan]cluv init[/bold cyan]")
@@ -70,8 +75,12 @@ def init() -> None:
     console.print(":tada: Your cluv config is ready to go !")
     console.print()
     console.print("Next steps :")
-    console.print("=> [bold] cluv login [/bold] : open a SSH connections to all configured clusters.")
-    console.print("=> [bold] cluv sync [/bold]  : synchronize the project on all configured clusters.")
+    console.print(
+        "=> [bold] cluv login [/bold] : open a SSH connections to all configured clusters."
+    )
+    console.print(
+        "=> [bold] cluv sync [/bold]  : synchronize the project on all configured clusters."
+    )
     console.print()
 
 
@@ -82,17 +91,25 @@ def check_home_dir() -> None:
     if Path.cwd().is_relative_to(Path.home()):
         console.print("[green]✅ Current directory is under home directory.[/green]")
     else:
-        console.print("[red]❌ cluv init should be run in a directory under your home directory.[/red]")
+        console.print(
+            "[red]❌ cluv init should be run in a directory under your home directory.[/red]"
+        )
         raise RuntimeError("cluv init should be run in a directory under your home directory.")
 
 
 def run_uv_init() -> None:
-    uv_init = subprocess.run(["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"], capture_output=True, text=True)
+    uv_init = subprocess.run(
+        ["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"],
+        capture_output=True,
+        text=True,
+    )
 
     # An expected error is that uv fails if a pyproject.toml file already exists
     if uv_init.returncode == 2:
         if uv_init.stderr.endswith("(`pyproject.toml` file exists)\n"):
-            console.print("[green]✅ uv: a project already exists (see pyproject.toml file). Skipping initialization.[/green]")
+            console.print(
+                "[green]✅ uv: a project already exists (see pyproject.toml file). Skipping initialization.[/green]"
+            )
         else:
             raise RuntimeError("Error occurred while initializing uv project: ", uv_init.stderr)
     else:
@@ -110,7 +127,9 @@ def check_cluv_config(pyproject_path: Path) -> str | None:
         console.print(config)
         return config.results_path
 
-    console.print("No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config...")
+    console.print(
+        "No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config..."
+    )
     console.print("Adding config for cluv tool :")
 
     add_cluv_config_section(pyproject_path, CLUV_DEFAULT_CONFIG)
@@ -131,7 +150,9 @@ def add_cluv_config_section(pyproject_path: Path, section_lines: list[str]) -> N
         f.write("\n" + "\n".join(section_lines) + "\n")
 
 
-def add_cluv_cluster_config(cluster: str, pyproject_path: Path, config_lines: list[str] = []) -> None:
+def add_cluv_cluster_config(
+    cluster: str, pyproject_path: Path, config_lines: list[str] = []
+) -> None:
     """
     Add a cluster config section for the given cluster to the pyproject.toml file, with the given variables.
     """
@@ -149,9 +170,13 @@ def check_git() -> None:
     git_remote = subprocess.run(["git", "remote"], capture_output=True, text=True)
     if git_remote.returncode == 0:
         if git_remote.stdout.strip() == "":
-            console.print("[yellow]⚠️  Warning: No git remote found. You won't be able to use some features (like syncing or submitting jobs). Consider adding a remote repository to your git config.[/yellow]")
+            console.print(
+                "[yellow]⚠️  Warning: No git remote found. You won't be able to use some features (like syncing or submitting jobs). Consider adding a remote repository to your git config.[/yellow]"
+            )
         else:
-            console.print(f"[green]✅ Git remote repository found: {git_remote.stdout.strip()}[/green]")
+            console.print(
+                f"[green]✅ Git remote repository found: {git_remote.stdout.strip()}[/green]"
+            )
     else:
         console.print("[red]❌ Invalid git repository found.[/red]")
         raise RuntimeError("Error when checking git remote: ", git_remote.stderr)
@@ -163,11 +188,15 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
     The symlink should be like : $HOME/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>
     """
     if results_path is None:
-        console.print("[yellow]⚠️  Warning: Results path is not configured. Skipping symlink creation.[/yellow]")
+        console.print(
+            "[yellow]⚠️  Warning: Results path is not configured. Skipping symlink creation.[/yellow]"
+        )
         return
 
     if "SCRATCH" not in os.environ:
-        console.print("[yellow]⚠️  Warning: $SCRATCH variable not set. Skipping symlink creation.[/yellow]")
+        console.print(
+            "[yellow]⚠️  Warning: $SCRATCH variable not set. Skipping symlink creation.[/yellow]"
+        )
         return
 
     # Generate the expected scratch and symlink path
@@ -176,10 +205,14 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
 
     if symlink_path.is_symlink():
         if symlink_path.resolve() == scratch_path.resolve():
-            console.print("[green]✅ Symlink from $HOME results_path to $SCRATCH already exists.[/green]")
+            console.print(
+                "[green]✅ Symlink from $HOME results_path to $SCRATCH already exists.[/green]"
+            )
             return
         else:
-            console.print(f"[yellow]⚠️  Warning: Symlink from {symlink_path} points to an other path ({symlink_path.resolve()}) than the expected scratch path.[/yellow]")
+            console.print(
+                f"[yellow]⚠️  Warning: Symlink from {symlink_path} points to an other path ({symlink_path.resolve()}) than the expected scratch path.[/yellow]"
+            )
             return
     else:
         console.print(f"Creating symlink from {symlink_path} to {scratch_path}")
@@ -195,11 +228,15 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
     job_script_path = project_root / JOB_SCRIPT_PATH
 
     if job_script_path.exists():
-        console.print(f"[green]✅ Job template script already exists at '{job_script_path}'.[/green]")
+        console.print(
+            f"[green]✅ Job template script already exists at '{job_script_path}'.[/green]"
+        )
         return
 
     if results_path is None:
-        console.print("[yellow]⚠️  Warning: Results path is not configured. Skipping job template script generation.[/yellow]")
+        console.print(
+            "[yellow]⚠️  Warning: Results path is not configured. Skipping job template script generation.[/yellow]"
+        )
         return
 
     console.print(f"Adding job template script at '{job_script_path}'.")
@@ -218,7 +255,7 @@ results_path="{results_path}"
 project_root="{project_root}"
 """
 
-    script_content +=  """
+    script_content += """
 # Minimal test job for cluv submit.
 echo "hostname: $(hostname)"
 echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
@@ -246,5 +283,5 @@ srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/$project_name/
 """
 
     job_script_path.parent.mkdir(exist_ok=True)
-    with open(job_script_path, 'w') as sh_file:
+    with open(job_script_path, "w") as sh_file:
         sh_file.write(script_content)

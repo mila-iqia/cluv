@@ -11,6 +11,8 @@ markdown_extensions:
   - pymdownx.snippets
   - pymdownx.superfences
   - pymdownx.magiclink
+  - admonition
+  - pymdownx.details
 
 plugins:
   - search
@@ -32,3 +34,4 @@ plugins:
             signature_crossrefs: true
             show_signature_annotations: true
             allow_inspection: true
+            backlinks: true

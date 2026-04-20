@@ -9,6 +9,8 @@ from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
 from cluv.utils import console
 
+__all__ = ["submit"]
+
 
 async def submit(
     cluster: str,

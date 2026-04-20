@@ -44,3 +44,4 @@ plugins:
             show_signature_annotations: true
             allow_inspection: true
             backlinks: true
+            show_labels: false

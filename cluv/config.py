@@ -8,10 +8,6 @@ Ideally, should also contain:
 
 Stretch goal (might be useful):
 - Documentation links for each cluster (for LLMs to look at?)
-
-
-!!! note
-    On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/logs/<project_name>`.
 """
 
 from __future__ import annotations
@@ -32,12 +28,19 @@ class CluvConfig:
     results_path: str | None = None
     """Path to the results directory, relative to the project root. If not set, defaults to "logs".
 
-    !!! note
+    !!! info
         On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/logs/<project_name>`.
     """
 
     slurm: dict[str, str] = dataclasses.field(default_factory=dict)
+    """Environment variables set on all clusters when running Slurm commands."""
+
     cluster_configs: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
+    """Configuration options for each cluster, as a dict of dicts.
+
+    The keys of the outer are cluster names, and the inner dict contains environment variables to
+    set when running Slurm commands on that cluster.
+    """
 
     @property
     def clusters(self) -> list[str]:
@@ -85,7 +88,7 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     # clusters: list (backward compat) or table (new format with per-cluster settings)
     clusters_section = cluv.get("clusters", {})
     if isinstance(clusters_section, list):
-        cluster_configs: dict[str, dict[str, str]] = {}
+        cluster_configs: dict[str, dict[str, str]] = {k: {} for k in clusters_section}
     else:
         cluster_configs = {k: dict(v) for k, v in clusters_section.items()}
 

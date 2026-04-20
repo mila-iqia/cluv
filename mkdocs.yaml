@@ -1,7 +1,16 @@
 site_name: cluv Documentation
+repo_name: mila-iqia/cluv
+repo_url: https://github.com/mila-iqia/cluv
+docs_dir: docs
+edit_uri: edit/master/docs/
+
+
 theme:
   name: material
-
+  features:
+    - content.action.edit
+    - content.action.view
+    - navigation.expand
 markdown_extensions:
   - pymdownx.highlight: # https://squidfunk.github.io/mkdocs-material/reference/code-blocks/#configuration
       anchor_linenums: true
@@ -23,7 +32,7 @@ plugins:
             - https://docs.pytest.org/en/stable/objects.inv
             - https://docs.python.org/3/objects.inv
           options:
-            docstring_style: numpy
+            docstring_style: google
             members_order: source
             annotations_path: brief
             show_docstring_attributes: true

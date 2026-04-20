@@ -12,14 +12,12 @@ logger = logging.getLogger(__name__)
 async def login(clusters: list[str]) -> list[Remote]:
     """Create an SSH connection with the given clusters, reusing existing connections when possible.
 
-    Parameters
-    ----------
-    clusters
-        List of cluster hostnames to connect to. If empty, will attempt to connect to all
-        clusters in the config that we don't already have an active connection to.
+    Parameters:
+        clusters: List of cluster hostnames to connect to. If empty, will attempt to connect to all
+            clusters in the config that we don't already have an active connection to.
 
     Returns:
-        a `Remote` object for each cluster.
+        A list of `Remote` objects, one for each cluster.
     """
     clusters = clusters or get_config().clusters
     if (this_cluster := current_cluster()) and this_cluster in clusters:

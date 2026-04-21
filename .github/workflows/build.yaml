@@ -88,6 +88,8 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6
+        with:
+          path: repos
       - name: Install the latest version of uv
         uses: astral-sh/setup-uv@v7
         with:

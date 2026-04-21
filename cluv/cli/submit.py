@@ -14,6 +14,29 @@ from cluv.config import find_pyproject, get_config
 from cluv.utils import console
 
 
+async def submit_chain(
+    cluster: str,
+    job_script: str,
+    sbatch_args: list[str],
+    program_args: list[str],
+    num_jobs_in_chain: int = 10,
+):
+    job_id = await submit_job(
+        cluster=cluster,
+        job_script=job_script,
+        sbatch_args=sbatch_args,
+        program_args=program_args,
+    )
+    for n in range(num_jobs_in_chain - 1):
+        job_id = await submit_job(
+            cluster=cluster,
+            job_script=job_script,
+            sbatch_args=sbatch_args
+            + ["--kill-on-invalid-dep=yes", f"--dependency=afterok:{job_id}"],
+            program_args=program_args,
+        )
+
+
 async def submit(
     cluster: str,
     job_script: str,
@@ -29,6 +52,8 @@ async def submit(
             )
         )
         print(dict(zip([c.hostname for c in clusters], job_ids_and_estimated_starttimes)))
+        # TODO:
+        raise NotImplementedError()
     else:
         await submit_job(cluster, job_script, sbatch_args, program_args, test_only=False)
 

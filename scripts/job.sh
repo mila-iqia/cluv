@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=cluv-test
-#SBATCH --output=logs/slurm-%j.out
+#SBATCH --output=logs/%j/slurm-%j.out
 #SBATCH --ntasks=1
 #SBATCH --time=0:05:00
 
@@ -23,7 +23,7 @@ END
 
 # Run the actual job command passed as an argument ('python main.py' for example)
 echo "Running command: $@"
-srun uv --directory=$SLURM_TMPDIR/cluv run "$@"
+srun uv --directory=$SLURM_TMPDIR/cluv run "$@" --output-dir=$SLURM_TMPDIR/logs/$SLURM_JOB_ID
 
 # IDEA: Display a warning if there are files in $SLURM_TMPDIR that would be lost.
 

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import datetime
+import re
 import shlex
 import subprocess
 import sys
 from pathlib import Path
 
+from cluv.cli.login import login
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
 from cluv.utils import console
@@ -15,7 +19,28 @@ async def submit(
     job_script: str,
     sbatch_args: list[str],
     program_args: list[str],
+    test_only: bool = False,
 ):
+    if cluster == "first":
+        clusters = await login([])
+        job_ids_and_estimated_starttimes = await asyncio.gather(
+            *(
+                submit_job(c.hostname, job_script, sbatch_args, program_args, test_only)
+                for c in clusters
+            )
+        )
+        print(dict(zip([c.hostname for c in clusters], job_ids_and_estimated_starttimes)))
+    else:
+        await submit_job(cluster, job_script, sbatch_args, program_args, test_only)
+
+
+async def submit_job(
+    cluster: str,
+    job_script: str,
+    sbatch_args: list[str],
+    program_args: list[str],
+    test_only: bool = False,
+) -> tuple[int, datetime.datetime | None]:
     """Submit a SLURM job on a remote cluster.
 
     Enforces a clean git state, syncs the project, sets GIT_COMMIT and any
@@ -61,20 +86,49 @@ async def submit(
     program_args_str = shlex.join(program_args)
 
     # 6. Submit.
-    remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable --chdir={project_path} {sbatch_args_str} {remote_job_script} {program_args_str}'"
-    console.print(
-        f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
-        + (f" {sbatch_args_str}" if sbatch_args_str else "")
-        + (f" -- {program_args_str}" if program_args_str else "")
-    )
-    completed_process = await remote.run(remote_cmd)
-    assert False, completed_process
-    job_id = int(completed_process.output.strip())
+    if test_only:
+        remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable --test-only --chdir={project_path} {sbatch_args_str} {remote_job_script} {program_args_str}'"
+        console.print(
+            f"Testing a job submission on [bold]{cluster}[/bold]: {job_script}"
+            + (f" {sbatch_args_str}" if sbatch_args_str else "")
+            + (f" -- {program_args_str}" if program_args_str else "")
+        )
+        completed_process = await remote.run(remote_cmd)
+        job_id = _get_job_id_from_stderr(completed_process.stderr)
+        job_starttime_estimate = _get_job_start_estimate_from_stderr(completed_process.stderr)
+        return job_id, job_starttime_estimate
+    else:
+        remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable --chdir={project_path} {sbatch_args_str} {remote_job_script} {program_args_str}'"
+        console.print(
+            f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
+            + (f" {sbatch_args_str}" if sbatch_args_str else "")
+            + (f" -- {program_args_str}" if program_args_str else "")
+        )
+        job_id = int(await remote.get_output(remote_cmd))
+        console.log(
+            f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
+            f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
+        )
+        return job_id, None
 
-    console.log(
-        f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
-        f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
-    )
 
-    return job_id
-    # return the job id?
+def _get_job_id_from_stderr(stderr: str) -> int:
+    """
+    >>> _get_job_id_from_stderr("sbatch: Job 10759317 to start at 2026-04-21T16:55:36 using 1 processors on nodes rc32407 in partition cpubase_bycore_b1\n")
+    10759317
+    """
+    match = re.search(r"sbatch: Job (\d+) to start at", stderr)
+    if not match:
+        raise ValueError(f"Could not parse job ID from sbatch output: {stderr}")
+    return int(match.group(1))
+
+
+def _get_job_start_estimate_from_stderr(stderr: str) -> datetime.datetime:
+    """
+    >>> _get_job_id_from_stderr("sbatch: Job 10759317 to start at 2026-04-21T16:55:36 using 1 processors on nodes rc32407 in partition cpubase_bycore_b1\n")
+    10759317
+    """
+    # sbatch --parsable returns the job id in stderr, followed by a newline.
+    return datetime.datetime.strptime(
+        stderr.strip(), "sbatch: Job %*d to start at %Y-%m-%dT%H:%M:%S"
+    )

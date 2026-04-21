@@ -119,8 +119,17 @@ def get_job_id_and_starttime_from_stderr(stderr: str) -> tuple[int, datetime.dat
     if not match:
         raise ValueError(f"Could not parse job ID from sbatch output: {stderr}")
     job_id = int(match.group(1))
+
+    # Remove the rest of the message (that we don't need).
+    if "a using" in stderr:
+        # Weird output on the Mila cluster:
+        stderr = stderr[: stderr.index("a using")]
+    else:
+        # Remove the rest of the message (that we don't need).
+        stderr = stderr[: stderr.index(" using")]
+
     starttime_estimate = datetime.datetime.strptime(
-        stderr[: stderr.index(" using")],  # Remove the rest of the message (that we don't need).
+        stderr,
         f"sbatch: Job {job_id} to start at %Y-%m-%dT%H:%M:%S",
     )
     return job_id, starttime_estimate

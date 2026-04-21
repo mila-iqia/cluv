@@ -112,7 +112,7 @@ async def sync_task_function(
     await install_uv(remote)
 
     _update_progress(1, "Setting up project", num_tasks)
-    await clone_project(remote, project_path)
+    await clone_project(remote)
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
     await remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
@@ -158,13 +158,12 @@ async def install_uv(remote: Remote):
         await remote.run(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
 
 
-async def clone_project(remote: Remote, project_path: PurePosixPath):
+async def clone_project(remote: Remote):
     """Setup the project repo on all the remote clusters.
 
     New idea:
     - Assume GitHub. Push to GitHub if needed. Clone from github on the remotes.
     - Worry about authentication later, just raise an error if need be for now.
-
     """
     # TODO: This git info is shared, but currently repeatedly executed for each cluster.
     # Could be done only once.
@@ -179,10 +178,13 @@ async def clone_project(remote: Remote, project_path: PurePosixPath):
     # TODO: Scp the ~/.git-credentials file if needed?
     # Or configure the config credential-helper to store first?
 
+    # Get the path to the root of the git repository
+    git_root_path = PurePosixPath(subprocess.getoutput("git rev-parse --show-toplevel").strip()).relative_to(Path.home())
+
     # If the project isn't cloned yet, clone it.
     _is_cloned_on_cluster = (
         await remote.run(
-            f"test -d {project_path}",
+            f"test -d {git_root_path}",
             warn=True,
             hide=True,
             display=False,
@@ -190,10 +192,10 @@ async def clone_project(remote: Remote, project_path: PurePosixPath):
     ).returncode == 0
     if not _is_cloned_on_cluster:
         logger.debug(f"Project isn't cloned yet on {remote.hostname}.")
-        await remote.run(f"git clone {github_repo_url} {project_path}", hide=True)
-    await remote.run(f"git -C {project_path} fetch --all --prune", hide=True)
-    await remote.run(f"git -C {project_path} checkout {current_git_branch}", hide=False)
-    await remote.run(f"git -C {project_path} pull")
+        await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True)
+    await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True)
+    await remote.run(f"git -C {git_root_path} checkout {current_git_branch}", hide=False)
+    await remote.run(f"git -C {git_root_path} pull")
 
 
 async def fetch_results(remote: Remote, results_path: Path | str):

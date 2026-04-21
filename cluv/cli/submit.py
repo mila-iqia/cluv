@@ -67,8 +67,9 @@ async def submit(
         + (f" {sbatch_args_str}" if sbatch_args_str else "")
         + (f" -- {program_args_str}" if program_args_str else "")
     )
-    output = await remote.get_output(remote_cmd)
-    job_id = int(output.strip())
+    completed_process = await remote.run(remote_cmd)
+    assert False, completed_process
+    job_id = int(completed_process.output.strip())
 
     console.log(
         f"Successfully submitted job {job_id} on the {cluster} cluster.\n"

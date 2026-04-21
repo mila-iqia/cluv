@@ -19,19 +19,18 @@ async def submit(
     job_script: str,
     sbatch_args: list[str],
     program_args: list[str],
-    test_only: bool = False,
 ):
-    if cluster == "first":
+    if cluster == "auto":
         clusters = await login([])
         job_ids_and_estimated_starttimes = await asyncio.gather(
             *(
-                submit_job(c.hostname, job_script, sbatch_args, program_args, test_only)
+                submit_job(c.hostname, job_script, sbatch_args, program_args, test_only=True)
                 for c in clusters
             )
         )
         print(dict(zip([c.hostname for c in clusters], job_ids_and_estimated_starttimes)))
     else:
-        await submit_job(cluster, job_script, sbatch_args, program_args, test_only)
+        await submit_job(cluster, job_script, sbatch_args, program_args, test_only=False)
 
 
 async def submit_job(
@@ -94,41 +93,34 @@ async def submit_job(
             + (f" -- {program_args_str}" if program_args_str else "")
         )
         completed_process = await remote.run(remote_cmd)
-        job_id = _get_job_id_from_stderr(completed_process.stderr)
-        job_starttime_estimate = _get_job_start_estimate_from_stderr(completed_process.stderr)
-        return job_id, job_starttime_estimate
-    else:
-        remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable --chdir={project_path} {sbatch_args_str} {remote_job_script} {program_args_str}'"
-        console.print(
-            f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
-            + (f" {sbatch_args_str}" if sbatch_args_str else "")
-            + (f" -- {program_args_str}" if program_args_str else "")
-        )
-        job_id = int(await remote.get_output(remote_cmd))
-        console.log(
-            f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
-            f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
-        )
-        return job_id, None
+        return get_job_id_and_starttime_from_stderr(completed_process.stderr)
+
+    remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable --chdir={project_path} {sbatch_args_str} {remote_job_script} {program_args_str}'"
+    console.print(
+        f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
+        + (f" {sbatch_args_str}" if sbatch_args_str else "")
+        + (f" -- {program_args_str}" if program_args_str else "")
+    )
+    job_id = int(await remote.get_output(remote_cmd))
+    console.log(
+        f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
+        f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
+    )
+    return job_id, None
 
 
-def _get_job_id_from_stderr(stderr: str) -> int:
-    """
-    >>> _get_job_id_from_stderr("sbatch: Job 10759317 to start at 2026-04-21T16:55:36 using 1 processors on nodes rc32407 in partition cpubase_bycore_b1\n")
-    10759317
+def get_job_id_and_starttime_from_stderr(stderr: str) -> tuple[int, datetime.datetime]:
+    r"""Gets the job ID from the stderr output of sbatch --test-only, which looks like:
+
+    >>> get_job_id_and_starttime_from_stderr("sbatch: Job 10759317 to start at 2026-04-21T16:55:36 using 1 processors on nodes rc32407 in partition cpubase_bycore_b1\n")
+    (10759317, datetime.datetime(2026, 4, 21, 16, 55, 36))
     """
     match = re.search(r"sbatch: Job (\d+) to start at", stderr)
     if not match:
         raise ValueError(f"Could not parse job ID from sbatch output: {stderr}")
-    return int(match.group(1))
-
-
-def _get_job_start_estimate_from_stderr(stderr: str) -> datetime.datetime:
-    """
-    >>> _get_job_id_from_stderr("sbatch: Job 10759317 to start at 2026-04-21T16:55:36 using 1 processors on nodes rc32407 in partition cpubase_bycore_b1\n")
-    10759317
-    """
-    # sbatch --parsable returns the job id in stderr, followed by a newline.
-    return datetime.datetime.strptime(
-        stderr.strip(), "sbatch: Job %*d to start at %Y-%m-%dT%H:%M:%S"
+    job_id = int(match.group(1))
+    starttime_estimate = datetime.datetime.strptime(
+        stderr[: stderr.index(" using")],  # Remove the rest of the message (that we don't need).
+        f"sbatch: Job {job_id} to start at %Y-%m-%dT%H:%M:%S",
     )
+    return job_id, starttime_estimate

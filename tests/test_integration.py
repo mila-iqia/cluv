@@ -7,7 +7,6 @@ efficient, since at some point there might be like 10 different clusters, and 10
 """
 
 import os
-import socket
 import stat
 import subprocess
 from pathlib import Path
@@ -25,7 +24,9 @@ from cluv.remote import Remote, control_socket_is_running
 
 # Some useful constants used to turn tests on and off depending on where we are.
 IN_GITHUB_CI = "GITHUB_ACTIONS" in os.environ
-IN_SELF_HOSTED_GITHUB_CI = IN_GITHUB_CI and (os.environ.get("RUNNER_ENVIRONMENT", "") == "self-hosted")
+IN_SELF_HOSTED_GITHUB_CI = IN_GITHUB_CI and (
+    os.environ.get("RUNNER_ENVIRONMENT", "") == "self-hosted"
+)
 IN_GITHUB_CLOUD_CI = IN_GITHUB_CI and (os.environ.get("RUNNER_ENVIRONMENT", "") == "github-hosted")
 ON_DEV_MACHINE = not IN_GITHUB_CI
 
@@ -58,6 +59,8 @@ def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
 
     <some_path>/action-runners/some_name/_work/cluv/cluv
     """
+    # NOTE: The second part of this condition is used to debug the self-hosted tests by opening
+    # the _work folder and running tests there.
     if IN_SELF_HOSTED_GITHUB_CI or "_work" in Path.cwd().parts:
         work_folder = (
             Path.cwd().parent.parent

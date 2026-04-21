@@ -71,18 +71,19 @@ source = ["cluv"]
 show_missing = true
 
 [tool.cluv]
-# IDEA: either the job script is set here, or passed as a positional argument (after the cluster)
-# OR, leave it as a required positional argument. More explicit.
-job_script = "scripts/job.sh"
 results_path = "logs"
 
 [tool.cluv.slurm]
 # Environment variables applied when using Slurm commands on all clusters.
 SBATCH_TIME = "3:00:00"
 SBATCH_REQUE = true
+UV_OFFLINE = 1
+WANDB_MODE = "offline"
 
 [tool.cluv.clusters.mila]
 SBATCH_PARTITION = "long"
+UV_OFFLINE = 0
+WANDB_MODE = "online"
 
 [tool.cluv.clusters.rorqual]
 UV_OFFLINE = 1

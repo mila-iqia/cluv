@@ -25,8 +25,8 @@ from cluv.remote import Remote, control_socket_is_running
 
 # Some useful constants used to turn tests on and off depending on where we are.
 IN_GITHUB_CI = "GITHUB_ACTIONS" in os.environ
-IN_SELF_HOSTED_GITHUB_CI = IN_GITHUB_CI and ("self-hosted" in os.environ.get("RUNNER_LABELS", ""))
-IN_GITHUB_CLOUD_CI = IN_GITHUB_CI and not IN_SELF_HOSTED_GITHUB_CI
+IN_SELF_HOSTED_GITHUB_CI = IN_GITHUB_CI and (os.environ.get("RUNNER_ENVIRONMENT", "") == "self-hosted")
+IN_GITHUB_CLOUD_CI = IN_GITHUB_CI and (os.environ.get("RUNNER_ENVIRONMENT", "") == "github-hosted")
 ON_DEV_MACHINE = not IN_GITHUB_CI
 
 # We should either be on a dev machine (not in GitHub CI), on a self-hosted runner, or on a cloud runner.
@@ -41,14 +41,6 @@ pytestmark = [
     pytest.mark.integration,
     pytest.mark.timeout(20),
 ]
-
-if socket.getfqdn() == "dw-a002":
-    assert IN_SELF_HOSTED_GITHUB_CI or ON_DEV_MACHINE, (
-        IN_SELF_HOSTED_GITHUB_CI,
-        ON_DEV_MACHINE,
-        IN_GITHUB_CLOUD_CI,
-        os.environ,
-    )
 
 REQUIRED_CLUSTERS = ("mila", "rorqual", "tamia")
 ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)
@@ -70,7 +62,6 @@ def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
         work_folder = (
             Path.cwd().parent.parent
         )  # This should be the _work folder in the self-hosted runner
-        assert False, Path.cwd()
         monkeypatch.setattr(Path, "home", work_folder)
 
 

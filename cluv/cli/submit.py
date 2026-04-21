@@ -123,7 +123,7 @@ def get_job_id_and_starttime_from_stderr(stderr: str) -> tuple[int, datetime.dat
     # Remove the rest of the message (that we don't need).
     if "a using" in stderr:
         # Weird output on the Mila cluster:
-        stderr = stderr[: stderr.index("a using")]
+        stderr = stderr[: stderr.index(" a using")]
     else:
         # Remove the rest of the message (that we don't need).
         stderr = stderr[: stderr.index(" using")]

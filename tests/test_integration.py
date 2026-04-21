@@ -7,21 +7,20 @@ efficient, since at some point there might be like 10 different clusters, and 10
 """
 
 import os
-
-import milatools.cli.init_command
 import stat
 import subprocess
 from pathlib import Path
 
+import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
-from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.init import DEFAULT_RESULTS_PATH, DRAC_CLUSTERS, init
+from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
-from cluv.remote import Remote, control_socket_is_running
 from cluv.config import load_cluv_config
+from cluv.remote import Remote, control_socket_is_running
 
 # Some useful constants used to turn tests on and off depending on where we are.
 IN_GITHUB_CI = "GITHUB_ACTIONS" in os.environ
@@ -48,6 +47,23 @@ ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)
 # Mark all the tests here as 'slow', so they are only run when the --slow flag is passed to pytest,
 # specifically in the integration-tests CI step, which happens on a self-hosted runner that has
 # reusable SSH connections to those clusters.
+
+
+@pytest.fixture(autouse=True)
+def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
+    """Mock the $HOME directory in a self-hosted runner, so that it is able to sync the project
+    in its _work folder with the actual project path on the cluster.
+
+    The folder structure goes like this:
+
+    <some_path>/action-runners/some_name/_work/cluv/cluv
+    """
+    if IN_SELF_HOSTED_GITHUB_CI or "_work" in Path.cwd().parts:
+        work_folder = (
+            Path.cwd().parent.parent
+        )  # This should be the _work folder in the self-hosted runner
+        assert False, Path.cwd()
+        monkeypatch.setattr(Path, "home", work_folder)
 
 
 @pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)

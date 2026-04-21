@@ -7,6 +7,7 @@ efficient, since at some point there might be like 10 different clusters, and 10
 """
 
 import os
+import socket
 import stat
 import subprocess
 from pathlib import Path
@@ -41,6 +42,13 @@ pytestmark = [
     pytest.mark.timeout(20),
 ]
 
+if socket.getfqdn() == "dw-a002":
+    assert IN_SELF_HOSTED_GITHUB_CI or ON_DEV_MACHINE, (
+        IN_SELF_HOSTED_GITHUB_CI,
+        ON_DEV_MACHINE,
+        IN_GITHUB_CLOUD_CI,
+        os.environ,
+    )
 
 REQUIRED_CLUSTERS = ("mila", "rorqual", "tamia")
 ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)

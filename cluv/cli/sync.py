@@ -47,6 +47,13 @@ async def sync(
     - Does `uv sync` that cluster as well
         - (Important so that jobs can be run in OFFLINE mode)
 
+    Parameters:
+        clusters: List of SSH hostnames of the target clusters. If empty, will attempt to sync 
+            with all clusters in the config that we have an active SSH connection to.
+
+    Returns:
+        A list of Remote objects corresponding to the clusters that were synced with.
+
     How it could work (proof-of-concept)
     - Checks git state
     - Push to github

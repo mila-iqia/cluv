@@ -29,7 +29,7 @@ class CluvConfig:
     """Path to the results directory, relative to the project root. If not set, defaults to "logs".
 
     !!! info
-        On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/logs/<project_name>`.
+        On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.
     """
 
     slurm: dict[str, str] = dataclasses.field(default_factory=dict)

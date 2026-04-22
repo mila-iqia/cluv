@@ -42,6 +42,11 @@ markers = [
 [tool.uv]
 managed = true
 
+[tool.uv.workspace]
+members = [
+    "examples/simple-checkpoint",
+]
+
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

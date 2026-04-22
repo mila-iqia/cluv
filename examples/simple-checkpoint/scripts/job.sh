@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --output=Desktop/cluv/examples/simple-checkpoint/logs/slurm-%j.out
+#SBATCH --output=$HOME/Desktop/cluv/examples/simple-checkpoint/logs/slurm-%j.out
 #SBATCH --ntasks=1
 #SBATCH --mem=8G
 #SBATCH --time=0:05:00

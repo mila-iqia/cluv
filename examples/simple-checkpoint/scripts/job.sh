@@ -14,13 +14,13 @@ echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submi
 
 # Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.
 echo "Preparing the repo and virtual environment in $SLURM_TMPDIR"
-srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES --input=all bash -e <<END
+# srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES --input=all bash -e <<END
 cd $SLURM_TMPDIR
 git clone $project_root
 cd $SLURM_TMPDIR/$project_name
 git checkout --detach $GIT_COMMIT
 exec uv sync
-END
+# END
 
 # Run the actual job command passed as an argument ('python main.py' for example)
 echo "Running command: $@"

@@ -16,8 +16,8 @@ echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submi
 echo "Preparing the repo and virtual environment in $SLURM_TMPDIR"
 srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES --input=all bash -e <<END
 cd $SLURM_TMPDIR
-git clone $project_root
-cd $SLURM_TMPDIR/$project_name
+git clone $HOME/Desktop/cluv
+cd $SLURM_TMPDIR/cluv/examples/simple-checkpoint
 git checkout --detach $GIT_COMMIT
 exec uv sync
 END
@@ -31,4 +31,4 @@ srun --gres-flags=allow-task-sharing uv --directory=$SLURM_TMPDIR/$project_name 
 
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
 echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path to $project_root/$results_path"
-srun --ntasks-per-node=1 rsync --update --recursive --mkpath $SLURM_TMPDIR/$project_name/$results_path/ $project_root/$results_path/%j/
+srun --ntasks-per-node=1 rsync --update --recursive --mkpath $SLURM_TMPDIR/cluv/examples/simple-checkpoint/$results_path/ $project_root/$results_path/$SLURM_JOB_ID/

@@ -49,3 +49,6 @@ def main() -> None:
     for i in range(N_STEPS):
         print(f"Step {i+1}/{N_STEPS}")
         counter = foo(counter)
+
+if __name__ == "__main__":
+    main()

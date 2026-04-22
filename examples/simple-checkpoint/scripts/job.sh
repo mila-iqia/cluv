@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --output=logs/%j/slurm-%j.out
+#SBATCH --output=Desktop/cluv/examples/simple-checkpoint/logs/%j/slurm-%j.out
 #SBATCH --ntasks=1
 #SBATCH --mem=8G
 #SBATCH --time=0:05:00
@@ -31,4 +31,4 @@ srun --gres-flags=allow-task-sharing uv --directory=$SLURM_TMPDIR/$project_name 
 
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
 echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path to $project_root/$results_path"
-srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_path $project_root/$results_path/%j
+srun --ntasks-per-node=1 rsync --update --recursive --mkpath $SLURM_TMPDIR/$project_name/$results_path/ $project_root/$results_path/%j/

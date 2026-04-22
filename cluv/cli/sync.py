@@ -23,7 +23,7 @@ from milatools.utils.parallel_progress import (
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import find_pyproject, get_config
 from cluv.remote import Remote, get_ssh_options_for_host, run
-from cluv.utils import console, current_cluster
+from cluv.utils import console, current_cluster, is_list_of
 
 milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 async def sync(
-    clusters: list[str] | None = None, uv_sync_args: list[str] | None = None
+    clusters: list[str] | list[Remote] | None = None, uv_sync_args: list[str] | None = None
 ) -> list[Remote]:
     """Synchronizes the current project across clusters.
 
@@ -70,6 +70,9 @@ async def sync(
             )
             return []
         clusters = [remote.hostname for remote in remotes]
+    elif is_list_of(clusters, Remote):
+        remotes = clusters
+        clusters = [r.hostname for r in remotes]
     else:
         remotes = await login(clusters)
 
@@ -179,7 +182,9 @@ async def clone_project(remote: Remote):
     # Or configure the config credential-helper to store first?
 
     # Get the path to the root of the git repository
-    git_root_path = PurePosixPath(subprocess.getoutput("git rev-parse --show-toplevel").strip()).relative_to(Path.home())
+    git_root_path = PurePosixPath(
+        subprocess.getoutput("git rev-parse --show-toplevel").strip()
+    ).relative_to(Path.home())
 
     # If the project isn't cloned yet, clone it.
     _is_cloned_on_cluster = (

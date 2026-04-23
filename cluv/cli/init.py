@@ -229,7 +229,7 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
 
         # Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.
         echo "Preparing the repo and virtual environment in $SLURM_TMPDIR"
-        srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES --input=all bash -e <<END
+        srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES bash -e <<END
         cd $SLURM_TMPDIR
         git clone $project_root
         cd $SLURM_TMPDIR/$project_name

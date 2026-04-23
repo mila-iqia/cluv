@@ -225,6 +225,7 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
     script_content += textwrap.dedent(
         """
         # Minimal job for cluv submit.
+        echo "Date:     $(date)"
         echo "hostname: $(hostname)"
         echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
 

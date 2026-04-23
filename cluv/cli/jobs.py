@@ -12,6 +12,14 @@ from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import find_pyproject
 from cluv.utils import console
 
+
+def _format_duration(total_seconds: int) -> str:
+    if total_seconds < 0:
+        return "0:00:00"
+    h, rem = divmod(total_seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}"
+
 _STATE_STYLE: dict[str, str] = {
     "RUNNING": "green",
     "COMPLETED": "blue",
@@ -46,25 +54,38 @@ def _load_records() -> list[dict]:
     return records
 
 
-async def _query_sacct(cluster: str, job_ids: list[int]) -> dict[int, tuple[str, str]]:
-    """Return {job_id: (state, elapsed)} for the given cluster, or {} if not connected."""
+async def _query_sacct(cluster: str, job_ids: list[int]) -> dict[int, tuple[str, str, str]]:
+    """Return {job_id: (state, elapsed, wait)} for the given cluster, or {} if not connected."""
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None:
         return {}
     ids_str = ",".join(str(j) for j in job_ids)
     output = await remote.get_output(
-        f"sacct -j {ids_str} --format=JobID,State,Elapsed --noheader --parsable2"
+        f"sacct -j {ids_str} --format=JobID,State,Elapsed,Submit,Start --noheader --parsable2"
     )
-    result: dict[int, tuple[str, str]] = {}
+    result: dict[int, tuple[str, str, str]] = {}
+    now = datetime.now()
     for line in output.splitlines():
         parts = line.split("|")
-        if len(parts) < 3 or "." in parts[0]:  # skip .batch/.extern sub-jobs
+        if len(parts) < 5 or "." in parts[0]:  # skip .batch/.extern sub-jobs
             continue
         try:
             jid = int(parts[0])
             # "CANCELLED by 12345" → "CANCELLED"
             state = parts[1].split()[0]
-            result[jid] = (state, parts[2])
+            elapsed = parts[2]
+            wait = "?"
+            try:
+                submit_dt = datetime.fromisoformat(parts[3])
+                start_str = parts[4]
+                if start_str and start_str not in ("Unknown", "None", ""):
+                    wait_secs = int((datetime.fromisoformat(start_str) - submit_dt).total_seconds())
+                else:
+                    wait_secs = int((now - submit_dt).total_seconds())
+                wait = _format_duration(wait_secs)
+            except (ValueError, TypeError):
+                pass
+            result[jid] = (state, elapsed, wait)
         except (ValueError, IndexError):
             pass
     return result
@@ -88,7 +109,7 @@ async def jobs(cluster: str | None = None, limit: int = 20) -> None:
     results = await asyncio.gather(
         *(_query_sacct(c, ids) for c, ids in by_cluster.items())
     )
-    status_map: dict[int, tuple[str, str]] = {}
+    status_map: dict[int, tuple[str, str, str]] = {}
     for partial in results:
         status_map.update(partial)
 
@@ -97,13 +118,14 @@ async def jobs(cluster: str | None = None, limit: int = 20) -> None:
     table.add_column("Cluster")
     table.add_column("Status")
     table.add_column("Elapsed")
+    table.add_column("Wait")
     table.add_column("Commit", style="dim")
     table.add_column("Script")
     table.add_column("Submitted")
 
     for r in records:
         jid = r["job_id"]
-        state, elapsed = status_map.get(jid, ("?", "?"))
+        state, elapsed, wait = status_map.get(jid, ("?", "?", "?"))
         style = _STATE_STYLE.get(state, "")
         styled_state = f"[{style}]{state}[/{style}]" if style else state
 
@@ -118,6 +140,7 @@ async def jobs(cluster: str | None = None, limit: int = 20) -> None:
             r.get("cluster", "?"),
             styled_state,
             elapsed,
+            wait,
             r.get("git_commit", "?")[:7],
             r.get("job_script", "?"),
             submitted,

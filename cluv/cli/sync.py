@@ -48,7 +48,7 @@ async def sync(
         - (Important so that jobs can be run in OFFLINE mode)
 
     Parameters:
-        clusters: List of SSH hostnames of the target clusters. If empty, will attempt to sync 
+        clusters: List of SSH hostnames of the target clusters. If empty, will attempt to sync
             with all clusters in the config that we have an active SSH connection to.
 
     Returns:

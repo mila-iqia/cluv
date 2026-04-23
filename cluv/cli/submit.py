@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import datetime
 import os
 import re
@@ -15,155 +14,12 @@ from cluv.remote import Remote
 from cluv.utils import console
 
 
-async def submit_chain(
-    cluster: str,
-    job_script: str,
-    sbatch_args: list[str],
-    program_args: list[str],
-    num_jobs_in_chain: int = 10,
-):
-    job_id = await submit_job_to_cluster(
-        cluster=cluster,
-        job_script=job_script,
-        sbatch_args=sbatch_args,
-        program_args=program_args,
-    )
-    for n in range(num_jobs_in_chain - 1):
-        job_id = await submit_job_to_cluster(
-            cluster=cluster,
-            job_script=job_script,
-            sbatch_args=sbatch_args
-            + ["--kill-on-invalid-dep=yes", f"--dependency=afterok:{job_id}"],
-            program_args=program_args,
-        )
-
-
 async def submit(
     cluster: str,
-    job_script: str,
+    job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
 ):
-    """Submit a SLURM job on a remote cluster.
-
-    Enforces a clean git state, syncs the project, sets GIT_COMMIT and any
-    SBATCH_* env vars configured in [tool.cluv.slurm] / [tool.cluv.clusters.<name>],
-    then calls sbatch on the remote.
-
-    sbatch_args are forwarded as flags to sbatch; program_args are passed to
-    the job script. main() extracts program_args from argv before argparse runs,
-    since argparse strips '--' before REMAINDER sees it.
-    """
-    if cluster == "auto":
-        return await submit_auto(job_script, sbatch_args, program_args)
-    if cluster == "first":
-        return await submit_auto(job_script, sbatch_args, program_args)
-
-    else:
-        job_id = await submit_job_to_cluster(
-            cluster,
-            job_script,
-            sbatch_args,
-            program_args,
-        )
-        console.log(
-            f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
-            f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
-        )
-
-
-async def submit_auto(
-    job_script: str,
-    sbatch_args: list[str],
-    program_args: list[str],
-):
-    """Use the --test-only flag of sbatch to find the cluster with the earliest estimated start time,
-    then submit the job there.
-    """
-    # Check git is clean locally (untracked files are fine).
-    git_commit = ensure_clean_git_state()
-    # Sync with all clusters with an existing connections.
-    remotes = await sync()
-    clusters = [r.hostname for r in remotes]
-
-    job_ids_and_estimated_starttimes = await asyncio.gather(
-        *(
-            run_sbatch_command(
-                remote,
-                job_script,
-                sbatch_args + ["--test-only"],
-                program_args,
-                git_commit=git_commit,
-            )
-            for remote in remotes
-        ),
-        return_exceptions=True,
-    )
-    cluster_to_jobid_and_starttime: dict[str, tuple[int, datetime.datetime]] = {
-        cluster: (result[0], starttime)
-        for cluster, result in zip(clusters, job_ids_and_estimated_starttimes)
-        if isinstance(result, tuple) and (starttime := result[1]) is not None
-    }
-    console.log("Estimated start times for each cluster:")
-    for cluster, (job_id, starttime) in cluster_to_jobid_and_starttime.items():
-        console.log(
-            f"- {cluster}: job {job_id} to start at {starttime} ({starttime - datetime.datetime.now()} from now.)"
-        )
-
-    cluster_with_earliest_startime = min(
-        cluster_to_jobid_and_starttime, key=lambda c: cluster_to_jobid_and_starttime[c][1]
-    )
-    remote = next(r for r in remotes if r.hostname == cluster_with_earliest_startime)
-    return await run_sbatch_command(
-        remote, job_script, sbatch_args, program_args, git_commit=git_commit
-    )
-
-
-async def submit_first(
-    job_script: str,
-    sbatch_args: list[str],
-    program_args: list[str],
-):
-    """TODO: submit the job on all clusters, and wait until one of them starts.
-    Once one starts, cancel the others.
-    """
-    # Check git is clean locally (untracked files are fine).
-    git_commit = ensure_clean_git_state()
-    # Sync with all clusters with an existing connections.
-    remotes = await sync()
-    clusters = [r.hostname for r in remotes]
-
-    job_ids_and_Nones = await asyncio.gather(
-        *(
-            run_sbatch_command(
-                remote,
-                job_script,
-                sbatch_args,
-                program_args,
-                git_commit=git_commit,
-            )
-            for remote in remotes
-        ),
-        return_exceptions=True,
-    )
-    cluster_to_jobid: dict[str, int] = {
-        cluster: result[0]
-        for cluster, result in zip(clusters, job_ids_and_Nones)
-        if isinstance(result, tuple)
-    }
-    console.log("Submitted jobs to the following clusters:")
-    for cluster, job_id in cluster_to_jobid.items():
-        console.log(f"- {cluster}: job {job_id}")
-
-    raise NotImplementedError("Wait until one of the jobs starts, then cancel the others.")
-
-
-async def submit_job_to_cluster(
-    cluster: str,
-    job_script: str,
-    sbatch_args: list[str],
-    program_args: list[str],
-) -> tuple[int, datetime.datetime | None]:
     """Submit a SLURM job on a remote cluster.
 
     Enforces a clean git state, syncs the project, sets GIT_COMMIT and any
@@ -179,18 +35,37 @@ async def submit_job_to_cluster(
 
     # Sync.
     remote = (await sync(clusters=[cluster]))[0]
-    return await run_sbatch_command(
+    # TODO: Idea, could also run with --test-only to get the time estimate, then without it to get
+    # the job id.
+    _, start_time_estimate = await sbatch(
         remote,
         job_script=job_script,
+        sbatch_args=sbatch_args + ["--test-only"],
+        program_args=program_args,
+        git_commit=git_commit,
+    )
+    job_id, _ = await sbatch(
+        remote,
+        job_script,
         sbatch_args=sbatch_args,
         program_args=program_args,
         git_commit=git_commit,
     )
+    console.log(
+        f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
+        + (
+            f"It is expected to start at {start_time_estimate} (in {start_time_estimate - datetime.datetime.now()}).\n"
+            if start_time_estimate is not None
+            else ""
+        )
+        + f"Use `ssh {cluster} sacct -j {job_id}` to view its status.",
+    )
+    return job_id
 
 
-async def run_sbatch_command(
+async def sbatch(
     remote: Remote,
-    job_script: str,
+    job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,

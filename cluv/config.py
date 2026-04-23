@@ -28,6 +28,10 @@ class CluvConfig:
     slurm: dict[str, str] = dataclasses.field(default_factory=dict)
     cluster_configs: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
 
+    def get_env_vars(self, cluster: str) -> dict[str, str]:
+        """Get the env vars that will be set when running commands on a cluster."""
+        return self.slurm.copy() | self.cluster_configs.get(cluster, {})
+
 
 @functools.cache
 def get_config() -> CluvConfig:

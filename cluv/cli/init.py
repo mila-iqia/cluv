@@ -205,6 +205,7 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
 
     console.print(f"Adding job template script at '{job_script_path}'.")
 
+    # Get the relative path to home since the home path can be different between clusters
     project_root = project_root.relative_to(Path.home())
 
     script_content = textwrap.dedent(
@@ -217,7 +218,7 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
 
         project_name="{project_root.name}"
         results_path="{results_path}"
-        project_root="{project_root}"
+        project_root="$HOME/{project_root}"
         """
     )
 

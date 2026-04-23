@@ -246,8 +246,8 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
         srun --gres-flags=allow-task-sharing uv --directory=$SLURM_TMPDIR/$project_name run "$@"
 
         # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH).
-        echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path to $project_root/$results_path"
-        srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_path $project_root/$results_path
+        echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path/ to $project_root/$results_path/$SLURM_JOB_ID/"
+        srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_path/ $project_root/$results_path/$SLURM_JOB_ID/
         """
     )
 

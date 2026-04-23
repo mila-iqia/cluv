@@ -10,13 +10,12 @@ from cluv.ssh import get_ssh_hostnames
 
 JOB_SCRIPT_PATH = "scripts/job.sh"
 DEFAULT_RESULTS_PATH = "logs"
+CONFIG_SEPARATOR = [""]
 
 CLUV_DEFAULT_CONFIG = [
     "[tool.cluv]",
-    f'results_path = "{DEFAULT_RESULTS_PATH}"'
-]
-
-CLUV_SLURM_DEFAULT_CONFIG = [
+    f'results_path = "{DEFAULT_RESULTS_PATH}"',
+    "",
     "[tool.cluv.slurm]",
     "# Environment variables applied when using Slurm commands on all clusters.",
     "UV_OFFLINE = 1",
@@ -114,11 +113,11 @@ def check_cluv_config(pyproject_path: Path) -> None:
     console.print("No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config...")
     console.print("Adding config for cluv tool :")
 
-    add_cluv_config_section(pyproject_path, CLUV_DEFAULT_CONFIG)
-    add_cluv_config_section(pyproject_path, CLUV_SLURM_DEFAULT_CONFIG)
-    add_cluv_cluster_config("mila", pyproject_path, CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
+    cluv_config = CLUV_DEFAULT_CONFIG
+    cluv_config += CONFIG_SEPARATOR + generate_cluster_config("mila", CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
     for cluster in DRAC_CLUSTERS:
-        add_cluv_cluster_config(cluster, pyproject_path)
+        cluv_config += CONFIG_SEPARATOR + generate_cluster_config(cluster)
+    add_cluv_config_section(pyproject_path, cluv_config)
 
 
 def add_cluv_config_section(pyproject_path: Path, section_lines: list[str]) -> None:
@@ -130,15 +129,11 @@ def add_cluv_config_section(pyproject_path: Path, section_lines: list[str]) -> N
         f.write("\n" + "\n".join(section_lines) + "\n")
 
 
-def add_cluv_cluster_config(cluster: str, pyproject_path: Path, config_lines: list[str] = []) -> None:
+def generate_cluster_config(cluster: str, config_lines: list[str] = []) -> list[str]:
     """
-    Add a cluster config section for the given cluster to the pyproject.toml file, with the given variables.
+    Generate a cluster config section for the given cluster, with the given variables.
     """
-    console.print(f"Adding config for cluster [bold]{cluster}[/bold] :")
-    section_lines = [f"[tool.cluv.clusters.{cluster}]"] + config_lines
-    console.log(("\n" + "\n".join(section_lines) + "\n").replace("[", "\\["))
-    with pyproject_path.open("a") as f:
-        f.write("\n" + "\n".join(section_lines) + "\n")
+    return[f"[tool.cluv.clusters.{cluster}]"] + config_lines
 
 
 def check_git() -> None:

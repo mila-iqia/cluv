@@ -20,6 +20,7 @@ import rich_argparse
 import simple_parsing
 
 from .cli.init import init
+from .cli.jobs import jobs
 from .cli.login import login
 from .cli.run import run
 from .cli.status import status
@@ -74,6 +75,9 @@ def main(argv: list[str] | None = None) -> None:
 
     status_parser = add_status_args(subparsers)
     _add_v_arg(status_parser)
+
+    jobs_parser = add_jobs_args(subparsers)
+    _add_v_arg(jobs_parser)
 
     args = parser.parse_args(argv)
     args_dict = vars(args)
@@ -238,6 +242,29 @@ def add_run_args(
     )
     run_parser.set_defaults(func=run)
     return run_parser
+
+
+def add_jobs_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+    jobs_parser = subparsers.add_parser(
+        "jobs",
+        help="List submitted jobs for this project.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    jobs_parser.add_argument(
+        "--cluster",
+        metavar="<cluster>",
+        default=None,
+        help="Filter by cluster.",
+    )
+    jobs_parser.add_argument(
+        "--limit",
+        type=int,
+        default=20,
+        metavar="N",
+        help="Maximum number of jobs to show (default: 20).",
+    )
+    jobs_parser.set_defaults(func=jobs)
+    return jobs_parser
 
 
 def setup_logging(verbose: int | None, force: bool = False) -> None:

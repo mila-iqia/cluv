@@ -3,8 +3,10 @@ from __future__ import annotations
 import shlex
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
+from cluv.cli.jobs import append_record
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
 from cluv.utils import console
@@ -70,10 +72,15 @@ async def submit(
     output = await remote.get_output(remote_cmd)
     job_id = int(output.strip())
 
-    console.log(
-        f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
-        f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
-    )
+    append_record({
+        "job_id": job_id,
+        "cluster": cluster,
+        "job_script": job_script,
+        "job_name": env_vars["SBATCH_JOB_NAME"],
+        "git_commit": git_commit,
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    console.log(f"Successfully submitted job {job_id} on the {cluster} cluster.")
 
     return job_id
-    # return the job id?

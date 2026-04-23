@@ -31,7 +31,7 @@ def init() -> int:
 
 def foo(n: int) -> int:
     n += 1
-    print(f"Counter value: {n} \n")
+    print(f"New counter value: {n} \n")
     sleep(5)
 
     return n
@@ -48,13 +48,15 @@ def main() -> None:
 
     # Initialize counter from checkpoint if it exists, otherwise start from 0
     counter = init()
+    remain_steps = N_STEPS - counter
+    print(f"Remaining steps to run: {remain_steps}\n")
 
     # Loop with our task and intermediate checkpointing
-    for i in range(N_STEPS):
-        print(f"Step {i+1}/{N_STEPS}")
+    for i in range(remain_steps):
+        print(f"Step {counter}/{N_STEPS}")
         counter = foo(counter)
 
-        if i % 5 == 0:  # Checkpoint every 5 steps
+        if counter % 5 == 0:  # Checkpoint every 5 steps
             checkpoint(counter)
 
     # Final checkpoint at the end of the loop

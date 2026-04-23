@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --output=/home/mila/v/vandenbh/Desktop/cluv/examples/simple-checkpoint/logs/%j/slurm-%j.out
+#SBATCH --open-mode=append
 #SBATCH --ntasks=1
 #SBATCH --mem=8G
 #SBATCH --time=0:05:00
@@ -11,6 +12,7 @@ example_path="examples/simple-checkpoint"
 
 # Minimal test job for cluv submit.
 echo "hostname: $(hostname)"
+echo "Date:     $(date)"
 echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
 
 # Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.
@@ -28,6 +30,7 @@ END
 if [ -d "$git_root/$example_path/$results_path/$SLURM_JOB_ID/" ]; then
     echo "Copying previous results from $git_root/$example_path/$results_path/$SLURM_JOB_ID/ to $SLURM_TMPDIR/$project_name/$example_path/$results_path"
     srun --ntasks-per-node=1 rsync --update --recursive --mkpath $git_root/$example_path/$results_path/$SLURM_JOB_ID/ $SLURM_TMPDIR/$project_name/$example_path/$results_path
+    tree $SLURM_TMPDIR/$project_name/$example_path/$results_path
 else
     echo "No previous results found at $git_root/$example_path/$results_path/$SLURM_JOB_ID/."
 fi

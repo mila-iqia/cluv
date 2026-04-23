@@ -12,7 +12,7 @@ import random
 # Get JOB_ID from environment variable, or generate a random one if not found (e.g., when running locally)
 rand = str(random.randint(1000, 9999))
 JOB_ID = os.environ.get("SLURM_JOB_ID", rand)
-FILE_PATH = Path("logs") / JOB_ID / "counter.txt"
+FILE_PATH = Path("logs") / "counter.txt"
 
 N_STEPS = 100
 
@@ -33,7 +33,6 @@ def foo(n: int) -> int:
     n += 1
     print(f"New counter value: {n} \n")
     sleep(5)
-
     return n
 
 

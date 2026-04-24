@@ -13,4 +13,4 @@ uv sync
 
 # Run the command passed as an argument.
 echo "Running command: $@"
-uv run "$@"
+srun uv run "$@"

@@ -16,6 +16,9 @@ pytorch-setup = "pytorch_setup:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.uv]
+torch-backend = "cu128"
+
 [tool.cluv]
 results_path = "logs"
 

@@ -16,7 +16,7 @@ from cluv.cli.init import (
     DEFAULT_RESULTS_PATH,
     JOB_SCRIPT_PATH
 )
-from .utils import write_pyproject
+from .utils import write_file
 
 
 class TestCheckHomeDir:
@@ -41,7 +41,7 @@ class TestGitCheck:
 class TestCheckCluvConfig:
     def test_add_missing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should add a cluv config section if the toml doesn't have it"""
-        p = write_pyproject(tmp_path, "")
+        p = write_file(tmp_path, "", "pyproject.toml")
 
         check_cluv_config(p)
         config = load_cluv_config(p)
@@ -53,7 +53,7 @@ class TestCheckCluvConfig:
 
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
-        p = write_pyproject(
+        p = write_file(
             tmp_path,
             textwrap.dedent(
                 """\
@@ -62,6 +62,7 @@ class TestCheckCluvConfig:
             results_path = "results"
             """
             ),
+            "pyproject.toml"
         )
 
         check_cluv_config(p)

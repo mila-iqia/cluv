@@ -14,7 +14,7 @@ class TestGetHostnames:
     def test_returns_empty_set_when_no_file(self):
         assert cluv_ssh.get_ssh_hostnames() == set()
 
-    def test_returns_empty_set_for_empty_file(self, tmp_path):
+    def test_returns_default_wildcard_for_empty_file(self, tmp_path):
         write_file(tmp_path, "", "config")
         assert cluv_ssh.get_ssh_hostnames() == set("*")
 

@@ -1,6 +1,7 @@
 import os
 import subprocess
 from pathlib import Path
+import textwrap
 
 from milatools.cli.init_command import DRAC_CLUSTERS
 
@@ -10,17 +11,17 @@ from cluv.ssh import get_ssh_hostnames
 
 JOB_SCRIPT_PATH = "scripts/job.sh"
 DEFAULT_RESULTS_PATH = "logs"
-CONFIG_SEPARATOR = [""]
 
-CLUV_DEFAULT_CONFIG = [
-    "[tool.cluv]",
-    f'results_path = "{DEFAULT_RESULTS_PATH}"',
-    "",
-    "[tool.cluv.slurm]",
-    "# Environment variables applied when using Slurm commands on all clusters.",
-    "UV_OFFLINE = 1",
-    'WANDB_MODE = "offline"',
-]
+CLUV_DEFAULT_CONFIG = textwrap.dedent(f"""\
+    [tool.cluv]
+    results_path = "{DEFAULT_RESULTS_PATH}"
+
+    [tool.cluv.slurm]
+    # Environment variables applied when using Slurm commands on all clusters.
+    UV_OFFLINE = 1
+    WANDB_MODE = "offline"
+    """
+)
 
 CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS = [
     "UV_OFFLINE = 0",
@@ -55,6 +56,8 @@ def init() -> None:
     # If it doesn't exist, add a cluv config section with the default settings and clusters.
     check_cluv_config(pyproject_path)
     config = load_cluv_config(pyproject_path)
+
+    # Compare the cluster names in the config to the SSH hostnames.
     check_ssh_hostnames(config.clusters)
 
     # Check if project structure is correct
@@ -114,26 +117,26 @@ def check_cluv_config(pyproject_path: Path) -> None:
     console.print("Adding config for cluv tool :")
 
     cluv_config = CLUV_DEFAULT_CONFIG
-    cluv_config += CONFIG_SEPARATOR + generate_cluster_config("mila", CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
+    cluv_config += generate_cluster_config("mila", CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
     for cluster in DRAC_CLUSTERS:
-        cluv_config += CONFIG_SEPARATOR + generate_cluster_config(cluster)
+        cluv_config += generate_cluster_config(cluster)
     add_cluv_config_section(pyproject_path, cluv_config)
 
 
-def add_cluv_config_section(pyproject_path: Path, section_lines: list[str]) -> None:
+def add_cluv_config_section(pyproject_path: Path, section_lines: str) -> None:
     """
     Write the given lines to the pyproject.toml file.
     """
-    console.log(("\n" + "\n".join(section_lines) + "\n").replace("[", "\\["))
+    console.log("\n" + section_lines.replace("[", "\\["))
     with pyproject_path.open("a") as f:
-        f.write("\n" + "\n".join(section_lines) + "\n")
+        f.write("\n" + section_lines)
 
 
-def generate_cluster_config(cluster: str, config_lines: list[str] = []) -> list[str]:
+def generate_cluster_config(cluster: str, config_lines: list[str] = []) -> str:
     """
     Generate a cluster config section for the given cluster, with the given variables.
     """
-    return[f"[tool.cluv.clusters.{cluster}]"] + config_lines
+    return f"\n[tool.cluv.clusters.{cluster}]\n" + "\n".join(config_lines) + ("\n" if len(config_lines) > 0 else "")
 
 
 def check_git() -> None:

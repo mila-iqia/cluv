@@ -172,3 +172,7 @@ cluv run <cluster> <command> [<args> ...]
 ## DRAC Clusters
 
 DRAC clusters are detected automatically via the `$CC_CLUSTER` environment variable.
+
+## Examples
+
+See the [examples](examples) folder for sample projects using cluv. Each example includes a README with instructions specific to that project.

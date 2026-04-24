@@ -6,11 +6,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "numpy>=2.4.4",
-    "torch==2.10.0",
+    "torch>=2.7.0,<2.11.0",
 ]
-
-[project.scripts]
-pytorch-setup = "pytorch_setup:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -32,10 +29,16 @@ WANDB_MODE = "online"
 
 [tool.cluv.clusters.rorqual]
 
-# [tool.cluv.clusters.nibi]
-# [tool.cluv.clusters.narval]
-# [tool.cluv.clusters.fir]
-# [tool.cluv.clusters.trillium]
-# [tool.cluv.clusters.trillium-gpu]
-# [tool.cluv.clusters.killarney]
-# [tool.cluv.clusters.vulcan]
+[tool.cluv.clusters.nibi]
+
+[tool.cluv.clusters.narval]
+
+[tool.cluv.clusters.fir]
+
+[tool.cluv.clusters.trillium]
+
+[tool.cluv.clusters.trillium-gpu]
+
+[tool.cluv.clusters.killarney]
+
+[tool.cluv.clusters.vulcan]

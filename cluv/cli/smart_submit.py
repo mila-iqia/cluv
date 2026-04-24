@@ -34,12 +34,12 @@ async def smart_submit(
 
     **Your job *must* implement checkpointing to use this feature!**
     """
+    ensure_clean_git_state()
 
-    # if wait_for_job_start:
     if wait_for_job_start:
         return await submit_first(job_script, sbatch_args, program_args)
 
-    # return await submit_auto(job_script, sbatch_args, program_args)
+    return await submit_auto(job_script, sbatch_args, program_args)
 
 
 async def submit_autochunk(
@@ -186,7 +186,7 @@ def _get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
 
 
 async def submit_auto(
-    job_script: str,
+    job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
 ):

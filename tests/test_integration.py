@@ -159,11 +159,6 @@ async def test_status_storage(cluster_status: ClusterStatus):
     assert cluster_status.storage.scratch_used >= 0
 
 
-@pytest.mark.xfail(
-    IN_SELF_HOSTED_GITHUB_CI,
-    reason="TODO: Running `cluv sync` does a git push / git pull from the runner's work folder, this causes issues.",
-    strict=True,
-)
 @pytest.mark.slow
 @pytest.mark.timeout(60)
 async def test_submit(remote: Remote):

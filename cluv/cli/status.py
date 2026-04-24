@@ -16,6 +16,7 @@ from cluv.config import get_config
 from cluv.remote import Remote
 
 logger = logging.getLogger(__name__)
+__all__ = ["status"]
 
 # ---------------------------------------------------------------------------
 # Data layer – replace these with real implementations later
@@ -146,7 +147,7 @@ async def get_real_cluster_status(remote: Remote) -> ClusterStatus:
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
     """
-    from cluv.cli.slurm import (
+    from cluv.slurm import (
         parse_disk_quota,
         parse_diskusage_report,
         parse_partition_stats,

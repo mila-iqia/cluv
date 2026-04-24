@@ -9,24 +9,46 @@ from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
 from cluv.utils import console
 
+__all__ = ["submit"]
+
 
 async def submit(
     cluster: str,
     job_script: str,
     sbatch_args: list[str],
     program_args: list[str],
-):
+) -> int:
     """Submit a SLURM job on a remote cluster.
 
-    Enforces a clean git state, syncs the project, sets GIT_COMMIT and any
-    SBATCH_* env vars configured in [tool.cluv.slurm] / [tool.cluv.clusters.<name>],
-    then calls sbatch on the remote.
+    Enforces a clean git state, syncs the project, sets `GIT_COMMIT` and any
+    environment variables configured in `[tool.cluv.slurm]` / `[tool.cluv.clusters.<name>]`,
+    then calls `sbatch` on the remote.
 
-    sbatch_args are forwarded as flags to sbatch; program_args are passed to
-    the job script. main() extracts program_args from argv before argparse runs,
-    since argparse strips '--' before REMAINDER sees it.
+    `sbatch_args` are forwarded as flags to `sbatch`; `program_args` are passed to
+    the job script.
+
+
+    Parameters:
+        cluster: SSH hostname of the target cluster.
+        job_script: Path to the job script to submit, relative to the project root.
+        sbatch_args: List of additional flags to pass to `sbatch`.
+        program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
+
+    Returns:
+        The job ID of the submitted job.
+
+    Examples:
+
+    ```python
+    submit(
+        "mila",
+        "scripts/job.sh",
+        sbatch_args=["--time=00:00:10"],
+        program_args=["python", "--version"],
+    )
+    ```
     """
-    # 1. Check git is clean locally (untracked files are fine).
+    # 1. Check git is clean locally (untracked files are fine?).
     git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
     dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
     if dirty_lines:

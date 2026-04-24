@@ -23,10 +23,28 @@ logger = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class CluvConfig:
-    clusters: list[str]
+    """Configuration options for Cluv, loaded from the pyproject.toml file."""
+
     results_path: str | None = None
+    """Path to the results directory, relative to the project root. If not set, defaults to "logs".
+
+    !!! info
+        On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.
+    """
+
     slurm: dict[str, str] = dataclasses.field(default_factory=dict)
+    """Environment variables set on all clusters when running Slurm commands."""
+
     cluster_configs: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
+    """Configuration options for each cluster, as a dict of dicts.
+
+    The keys of the outer are cluster names, and the inner dict contains environment variables to
+    set when running Slurm commands on that cluster.
+    """
+
+    @property
+    def clusters(self) -> list[str]:
+        return list(self.cluster_configs.keys())
 
 
 @functools.cache
@@ -65,21 +83,18 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
                 f"[red]No [tool.cluv] section found in {pyproject_path}, using defaults.[/red]"
             )
         )
-        return CluvConfig(clusters=[])
+        return CluvConfig()
 
     # clusters: list (backward compat) or table (new format with per-cluster settings)
     clusters_section = cluv.get("clusters", {})
     if isinstance(clusters_section, list):
-        clusters = clusters_section
-        cluster_configs: dict[str, dict[str, str]] = {}
+        cluster_configs: dict[str, dict[str, str]] = {k: {} for k in clusters_section}
     else:
-        clusters = list(clusters_section.keys())
-        cluster_configs = {k: dict(v) for k, v in clusters_section.items() if v}
+        cluster_configs = {k: dict(v) for k, v in clusters_section.items()}
 
     slurm: dict[str, str] = cluv.get("slurm", {})
 
     return CluvConfig(
-        clusters=clusters,
         results_path=cluv.get("results_path"),
         slurm=slurm,
         cluster_configs=cluster_configs,

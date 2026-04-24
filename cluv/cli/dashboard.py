@@ -1,6 +1,9 @@
 def dashboard():
     """Launches a dashboard to monitor the status of available clusters and jobs across them.
 
+    !!! warning
+        This function is not implemented yet!
+
     - Similar to `cluv status`, but launches a dashboard that continuously updates with the status of available clusters and jobs across them.
     - Could be implemented as a simple TUI (text-based user interface) using something like Rich or Textual.
 

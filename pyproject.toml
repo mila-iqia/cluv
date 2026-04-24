@@ -42,6 +42,11 @@ markers = [
 [tool.uv]
 managed = true
 
+[tool.uv.workspace]
+members = [
+    "examples/pytorch-setup",
+]
+
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

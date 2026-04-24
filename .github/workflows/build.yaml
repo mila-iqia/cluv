@@ -34,7 +34,7 @@ jobs:
       - run: pre-commit run --all-files --show-diff-on-failure
 
   check_docs:
-    needs: [linting]
+    needs: [ linting ]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,13 +52,13 @@ jobs:
         run: uv run mkdocs build --strict
 
   unit_tests:
-    needs: [linting]
+    needs: [ linting ]
     runs-on: ${{ matrix.platform }}
     strategy:
       max-parallel: 4
       matrix:
-        platform: ["ubuntu-latest", "macos-latest"]
-        python-version: ["3.13"]
+        platform: [ "ubuntu-latest", "macos-latest" ]
+        python-version: [ "3.13" ]
     steps:
       - uses: actions/checkout@v4
       - name: Install the latest version of uv
@@ -78,10 +78,11 @@ jobs:
       - name: Store coverage report as an artifact
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-reports-unit-tests-${{ matrix.platform }}-${{ matrix.python-version }}
+          name: coverage-reports-unit-tests-${{ matrix.platform }}-${{
+            matrix.python-version }}
           path: ./coverage.xml
   integration_tests:
-    needs: [unit_tests]
+    needs: [ unit_tests ]
     runs-on: self-hosted
     # TODO: remove this once we have a decently solid setup, not too reliant on the dev machine
     # having active SSH connections to the Slurm clusters.
@@ -107,7 +108,7 @@ jobs:
 
   # https://about.codecov.io/blog/uploading-code-coverage-in-a-separate-job-on-github-actions/
   upload-coverage-codecov:
-    needs: [unit_tests, integration_tests]
+    needs: [ unit_tests, integration_tests ]
     runs-on: ubuntu-latest
     name: Upload coverage reports to Codecov
     timeout-minutes: 5

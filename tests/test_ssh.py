@@ -15,13 +15,13 @@ class TestGetHostnames:
         assert cluv_ssh.get_ssh_hostnames() == set()
 
     def test_returns_default_wildcard_for_empty_file(self, tmp_path):
-        write_file(tmp_path, "", "config")
+        write_file(tmp_path / "config", "")
         assert cluv_ssh.get_ssh_hostnames() == set("*")
 
     def test_get_all_hosts(self, tmp_path):
-        write_file(tmp_path, "Host mila\nHost narval\nHost rorqual\n", "config")
+        write_file(tmp_path / "config", "Host mila\nHost narval\nHost rorqual\n")
         assert cluv_ssh.get_ssh_hostnames() == {"*", "mila", "narval", "rorqual"}
 
     def test_returns_no_duplicates(self, tmp_path):
-        write_file(tmp_path, "Host mila\nHost mila\n", "config")
+        write_file(tmp_path / "config", "Host mila\nHost mila\n")
         assert cluv_ssh.get_ssh_hostnames() == {"*", "mila"}

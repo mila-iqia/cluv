@@ -92,7 +92,7 @@ async def submit_first(
     wait_for_starting_job = True
     start_cluster: str | None = None
     start_job_id: int | None = None
-    with console.status("Waiting for a job to start...", spinner="bouncingBar"):
+    with console.status("Waiting for a job to start..."):
         while wait_for_starting_job:
             # TODO : Replace by asyncio.gather to check clusters in parallel
             for cluster, remote in clusters_to_remote.items():
@@ -200,7 +200,7 @@ async def cancel_job(
     remote: Remote,
     job_id: int
 ) -> str:
-    scancel_command = f"scancel -j {job_id}"
+    scancel_command = f"scancel {job_id}"
     output = await remote.get_output(scancel_command)
     console.log(f"Cancelled job {job_id} on cluster {remote.hostname}.")
     return output

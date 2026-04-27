@@ -1,7 +1,9 @@
 #!/bin/bash
 #SBATCH --output=logs/%j/slurm-%j.out
+#SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
-#SBATCH --mem=8G
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=16G
 #SBATCH --time=0:05:00
 
 # Minimal test job for cluv submit.

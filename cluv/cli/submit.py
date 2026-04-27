@@ -94,30 +94,32 @@ async def submit_first(
     start_job_id: int | None = None
     with console.status("Waiting for a job to start...", spinner="bouncingBar"):
         while wait_for_starting_job:
+            # TODO : Replace by asyncio.gather to check clusters in parallel
             for cluster, remote in clusters_to_remote.items():
                 job_id = cluster_to_jobid.get(cluster)
                 if job_id is None:
                     continue
                 job_status = await get_job_status(remote, job_id)
 
-                if job_status == "RUNNING":
+                if job_status in ["RUNNING", "COMPLETED"]:
                     wait_for_starting_job = False
                     start_cluster = cluster
                     start_job_id = job_id
             sleep(20)
 
     console.log(f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs...")
+    # TODO : Replace by asyncio.gather to delete jobs in parallel
     for cluster, job_id in cluster_to_jobid.items():
         if cluster == start_cluster:
             continue
         remote = clusters_to_remote[cluster]
         await cancel_job(remote, job_id)
+
     return start_job_id
 
     # Loop and check current jobs status until one job stats. Then cancel the others
         # What if all jobs fails ?
         # What if I stop the connections before the end of the loop ?
-    # raise NotImplementedError("Wait until one of the jobs starts, then cancel the others.")
 
 
 def ensure_clean_git_state() -> str:

@@ -7,12 +7,13 @@ from pathlib import Path
 
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
+from cluv.remote import Remote
 from cluv.utils import console
 
 
 async def submit(
     cluster: str,
-    job_script: str,
+    job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
 ):
@@ -31,35 +32,10 @@ async def submit(
 
     # Sync.
     remotes = await sync(clusters=[cluster])
+
+    # Submit the sbatch command.
     remote = remotes[0]
-
-    config = get_config()
-
-    # Resolve remote job script path.
-    project_path = find_pyproject().parent.relative_to(Path.home())
-    remote_job_script = f"~/{project_path}/{job_script}"
-
-    # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
-    env_vars: dict[str, str] = {**config.slurm}
-    env_vars.update(config.cluster_configs.get(cluster, {}))
-    # Prefix the job name with "cluv-" so admins can identify cluv-submitted jobs in sacct.
-    base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
-    env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
-    env_vars["GIT_COMMIT"] = git_commit
-
-    env_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    sbatch_args_str = " ".join(shlex.quote(f) for f in sbatch_args)
-    program_args_str = shlex.join(program_args)
-
-    # Submit.
-    remote_cmd = f"bash -l -c '{env_prefix} sbatch --parsable --chdir={project_path} {sbatch_args_str} {remote_job_script} {program_args_str}'"
-    console.print(
-        f"Submitting job on [bold]{cluster}[/bold]: {job_script}"
-        + (f" {sbatch_args_str}" if sbatch_args_str else "")
-        + (f" -- {program_args_str}" if program_args_str else "")
-    )
-    output = await remote.get_output(remote_cmd)
-    job_id = int(output.strip())
+    job_id = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
 
     console.log(
         f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
@@ -84,3 +60,56 @@ def ensure_clean_git_state() -> str:
 
     # Capture current commit hash.
     return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+
+
+def get_sbatch_command(
+    cluster: str,
+    job_script: Path,
+    sbatch_args: list[str],
+    program_args: list[str],
+    git_commit: str,
+) -> str:
+    """
+    Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
+    """
+
+    # Resolve remote job script path.
+    project_path = find_pyproject().parent.relative_to(Path.home())
+    remote_job_script = f"~/{project_path}/{job_script}"
+
+    # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
+    config = get_config()
+    env_vars: dict[str, str] = {**config.slurm}
+    env_vars.update(config.cluster_configs.get(cluster, {}))
+
+    # Prefix the job name with "cluv-" so it is easy to identify cluv-submitted jobs in sacct.
+    base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
+    env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
+    env_vars["GIT_COMMIT"] = git_commit
+
+    env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
+    sbatch_args_str = " ".join(shlex.quote(f) for f in sbatch_args)
+    program_args_str = shlex.join(program_args)
+
+    return (
+        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={project_path} "
+        f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
+    )
+
+
+async def sbatch(
+    remote: Remote,
+    job_script: Path,
+    sbatch_args: list[str],
+    program_args: list[str],
+    git_commit: str,
+) -> int:
+    cluster = remote.hostname
+
+    remote_cmd = get_sbatch_command(
+        cluster, Path(job_script), sbatch_args, program_args, git_commit
+    )
+
+    console.print(f"Submitting job on [bold]{cluster}[/bold].")
+
+    return int(await remote.get_output(remote_cmd))

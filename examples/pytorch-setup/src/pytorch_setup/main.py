@@ -3,11 +3,15 @@
 import torch
 import torch.backends
 
+from cluv.utils import current_cluster
+
 def main():
+    cluster = current_cluster()
     cuda_built = torch.backends.cuda.is_built()
     cuda_avail = torch.cuda.is_available()
     device_count = torch.cuda.device_count()
 
+    print(f"Pytorch called on cluster:       {cluster}")
     print(f"PyTorch built with CUDA:         {cuda_built}")
     print(f"PyTorch detects CUDA available:  {cuda_avail}")
     print(f"PyTorch-detected #GPUs:          {device_count}")

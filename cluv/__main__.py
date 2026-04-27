@@ -110,21 +110,17 @@ def add_submit_args(
         "submit",
         help="Submit a SLURM job on a remote cluster.",
         formatter_class=rich_argparse.RichHelpFormatter,
-        usage="cluv submit [--first] <cluster> <job_script> [sbatch_args...] -- [program_args...]",
-    )
-    submit_parser.add_argument(
-        "--first",
-        action="store_true",
-        help=(
-            "Submit the job on all clusters, and wait until one of them starts. "
-            "Once one starts, cancel the others. "
-        )
+        usage="cluv submit <cluster> <job_script> [sbatch_args...] -- [program_args...]",
     )
     submit_parser.add_argument(
         "cluster",
         metavar="<cluster>",
         default=None,
-        help="The cluster to submit the job on.",
+        help=(
+            "The cluster to submit the job on. "
+            "Set at 'first' to submit the job on all clusters, and wait until one of them starts. "
+            "Once one starts, cancel the others."
+        ),
     )
     submit_parser.add_argument(
         "job_script",

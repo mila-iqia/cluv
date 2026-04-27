@@ -14,7 +14,6 @@ from cluv.utils import console
 
 
 async def submit(
-    first: bool,
     cluster: str,
     job_script: Path,
     sbatch_args: list[str],
@@ -33,7 +32,7 @@ async def submit(
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state()
 
-    if first:
+    if cluster == "first":
         return await submit_first(job_script, sbatch_args, program_args, git_commit)
 
     # Sync.

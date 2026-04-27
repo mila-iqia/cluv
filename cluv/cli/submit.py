@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import shlex
 import subprocess
 import sys
 from pathlib import Path
+from time import sleep
 
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
@@ -12,6 +14,7 @@ from cluv.utils import console
 
 
 async def submit(
+    first: bool,
     cluster: str,
     job_script: Path,
     sbatch_args: list[str],
@@ -30,6 +33,9 @@ async def submit(
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state()
 
+    if first:
+        return await submit_first(job_script, sbatch_args, program_args, git_commit)
+
     # Sync.
     remotes = await sync(clusters=[cluster])
 
@@ -44,6 +50,74 @@ async def submit(
 
     return job_id
     # return the job id?
+
+
+async def submit_first(
+    job_script: Path,
+    sbatch_args: list[str],
+    program_args: list[str],
+    git_commit: str,
+):
+    """TODO: submit the job on all clusters, and wait until one of them starts.
+    Once one starts, cancel the others.
+    """
+    # Sync with all clusters with an existing connections.
+    remotes = await sync()
+    clusters_to_remote = {remote.hostname: remote for remote in remotes}
+
+    job_ids = await asyncio.gather(
+        *(
+            sbatch(
+                remote,
+                job_script,
+                sbatch_args,
+                program_args,
+                git_commit,
+            )
+            for remote in remotes
+        ),
+        return_exceptions=True,
+    )
+    # What if a sbatch fail on a cluster ?
+    cluster_to_jobid: dict[str, int] = {
+        cluster: result
+        for cluster, result in zip(clusters_to_remote.keys(), job_ids)
+        if isinstance(result, int)
+    }
+
+    console.log("Submitted jobs to the following clusters:")
+    for cluster, job_id in cluster_to_jobid.items():
+        console.log(f"- {cluster}: job {job_id}")
+
+    wait_for_starting_job = True
+    start_cluster: str | None = None
+    start_job_id: int | None = None
+    with console.status("Waiting for a job to start...", spinner="bouncingBar"):
+        while wait_for_starting_job:
+            for cluster, remote in clusters_to_remote.items():
+                job_id = cluster_to_jobid.get(cluster)
+                if job_id is None:
+                    continue
+                job_status = await get_job_status(remote, job_id)
+
+                if job_status == "RUNNING":
+                    wait_for_starting_job = False
+                    start_cluster = cluster
+                    start_job_id = job_id
+            sleep(20)
+
+    console.log(f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs...")
+    for cluster, job_id in cluster_to_jobid.items():
+        if cluster == start_cluster:
+            continue
+        remote = clusters_to_remote[cluster]
+        await cancel_job(remote, job_id)
+    return start_job_id
+
+    # Loop and check current jobs status until one job stats. Then cancel the others
+        # What if all jobs fails ?
+        # What if I stop the connections before the end of the loop ?
+    # raise NotImplementedError("Wait until one of the jobs starts, then cancel the others.")
 
 
 def ensure_clean_git_state() -> str:
@@ -72,7 +146,6 @@ def get_sbatch_command(
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
     """
-
     # Resolve remote job script path.
     project_path = find_pyproject().parent.relative_to(Path.home())
     remote_job_script = f"~/{project_path}/{job_script}"
@@ -113,3 +186,19 @@ async def sbatch(
     console.print(f"Submitting job on [bold]{cluster}[/bold].")
 
     return int(await remote.get_output(remote_cmd))
+
+async def get_job_status(
+   remote: Remote,
+    job_id: int
+) -> str:
+    sacct_command = f"sacct -j {job_id} --format=State --noheader --parsable2 | head -1"
+    return await remote.get_output(sacct_command)
+
+async def cancel_job(
+    remote: Remote,
+    job_id: int
+) -> str:
+    scancel_command = f"scancel -j {job_id}"
+    output = await remote.get_output(scancel_command)
+    console.log(f"Cancelled job {job_id} on cluster {remote.hostname}.")
+    return output

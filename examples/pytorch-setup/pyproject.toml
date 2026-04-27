@@ -1,0 +1,44 @@
+[project]
+name = "pytorch-setup"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.4.4",
+    "torch>=2.7.0,<2.11.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.cluv]
+results_path = "logs"
+
+[tool.cluv.slurm]
+# Environment variables applied when using Slurm commands on all clusters.
+UV_OFFLINE = 1
+WANDB_MODE = "offline"
+
+[tool.cluv.clusters.mila]
+UV_OFFLINE = 0
+WANDB_MODE = "online"
+
+[tool.cluv.clusters.tamia]
+
+[tool.cluv.clusters.rorqual]
+
+[tool.cluv.clusters.nibi]
+
+[tool.cluv.clusters.narval]
+
+[tool.cluv.clusters.fir]
+
+[tool.cluv.clusters.trillium]
+
+[tool.cluv.clusters.trillium-gpu]
+
+[tool.cluv.clusters.killarney]
+
+[tool.cluv.clusters.vulcan]

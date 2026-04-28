@@ -17,9 +17,6 @@ from cluv.cli.init import (
 )
 from cluv.config import load_cluv_config
 
-from .utils import write_pyproject
-
-
 class TestCheckHomeDir:
     def test_not_under_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """check_home_dir() should raise an error if the current directory is not under the user's home directory"""
@@ -48,12 +45,12 @@ class TestGitCheck:
 class TestCheckCluvConfig:
     def test_add_missing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should add a cluv config section if the toml doesn't have it"""
-        p = write_pyproject(tmp_path, "")
+        p = tmp_path / "pyproject.toml"
+        p.touch()
 
-        results_path = check_cluv_config(p)
+        check_cluv_config(p)
         config = load_cluv_config(p)
 
-        assert results_path == DEFAULT_RESULTS_PATH
         assert config.clusters == ["mila"] + DRAC_CLUSTERS
         assert config.results_path == DEFAULT_RESULTS_PATH
         assert config.slurm == {"UV_OFFLINE": 1, "WANDB_MODE": "offline"}
@@ -64,21 +61,18 @@ class TestCheckCluvConfig:
 
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
-        p = write_pyproject(
-            tmp_path,
-            textwrap.dedent(
-                """\
+        p = tmp_path / "pyproject.toml"
+        p.write_text(textwrap.dedent(
+            """\
             [tool.cluv]
             clusters = ["mila"]
             results_path = "results"
             """
-            ),
-        )
+        ))
 
-        results_path = check_cluv_config(p)
+        check_cluv_config(p)
         config = load_cluv_config(p)
 
-        assert results_path == "results"
         assert config.clusters == ["mila"]
         assert config.results_path == "results"
 
@@ -112,6 +106,7 @@ class TestSymlinkCheck:
         assert expected_results_path.is_symlink()
         assert expected_results_scratch_path.exists()
         assert expected_results_path.resolve() == expected_results_scratch_path.resolve()
+
 
     def test_keep_existing_symlink(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """check_symlink_to_scratch() should not overwrite an existing symlink not pointing to scratch"""

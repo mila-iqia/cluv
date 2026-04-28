@@ -1,25 +1,29 @@
 import os
 import subprocess
 from pathlib import Path
+import textwrap
 
 from milatools.cli.init_command import DRAC_CLUSTERS
 
 from cluv.config import find_pyproject, has_cluv_config, load_cluv_config
 from cluv.utils import console
+from cluv.ssh import get_ssh_hostnames
 
 __all__ = ["init"]
 
 JOB_SCRIPT_PATH = "scripts/job.sh"
 DEFAULT_RESULTS_PATH = "logs"
 
-CLUV_DEFAULT_CONFIG = ["[tool.cluv]", f'results_path = "{DEFAULT_RESULTS_PATH}"']
+CLUV_DEFAULT_CONFIG = textwrap.dedent(f"""\
+    [tool.cluv]
+    results_path = "{DEFAULT_RESULTS_PATH}"
 
-CLUV_SLURM_DEFAULT_CONFIG = [
-    "[tool.cluv.slurm]",
-    "# Environment variables applied when using Slurm commands on all clusters.",
-    "UV_OFFLINE = 1",
-    'WANDB_MODE = "offline"',
-]
+    [tool.cluv.slurm]
+    # Environment variables applied when using Slurm commands on all clusters.
+    UV_OFFLINE = 1
+    WANDB_MODE = "offline"
+    """
+)
 
 CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS = [
     "UV_OFFLINE = 0",
@@ -58,17 +62,21 @@ def init() -> None:
     pyproject_path = find_pyproject()
 
     # If it doesn't exist, add a cluv config section with the default settings and clusters.
-    results_path = check_cluv_config(pyproject_path)
+    check_cluv_config(pyproject_path)
+    config = load_cluv_config(pyproject_path)
+
+    # Compare the cluster names in the config to the SSH hostnames.
+    check_ssh_hostnames(config.clusters)
 
     # Check if project structure is correct
     console.print()
     console.print("Validating project structure...")
 
     # Check if the job script exists
-    check_job_script(pyproject_path.parent, results_path)
+    check_job_script(pyproject_path.parent, config.results_path)
 
     # Check if the results path is correctly symlinked to scratch
-    check_symlink_to_scratch(pyproject_path.parent, results_path)
+    check_symlink_to_scratch(pyproject_path.parent, config.results_path)
 
     # Show what the user can do next after the project setup
     console.print()
@@ -116,51 +124,41 @@ def run_uv_init() -> None:
         console.print("[green]✅ uv: project initialized.[/green]")
 
 
-def check_cluv_config(pyproject_path: Path) -> str | None:
+def check_cluv_config(pyproject_path: Path) -> None:
     """
     Check if the pyproject.toml file contains a cluv config.
     If not, add a default config section with the default clusters and settings.
     """
     if has_cluv_config(pyproject_path):
         console.print("[green]✅ Project already have a cluv config in pyproject.toml.[/green]")
-        config = load_cluv_config(pyproject_path)
-        console.print(config)
-        return config.results_path
+        return
 
     console.print(
         "No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config..."
     )
     console.print("Adding config for cluv tool :")
 
-    add_cluv_config_section(pyproject_path, CLUV_DEFAULT_CONFIG)
-    add_cluv_config_section(pyproject_path, CLUV_SLURM_DEFAULT_CONFIG)
-    add_cluv_cluster_config("mila", pyproject_path, CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
+    cluv_config = CLUV_DEFAULT_CONFIG
+    cluv_config += generate_cluster_config("mila", CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
     for cluster in DRAC_CLUSTERS:
-        add_cluv_cluster_config(cluster, pyproject_path)
+        cluv_config += generate_cluster_config(cluster)
+    add_cluv_config_section(pyproject_path, cluv_config)
 
-    return DEFAULT_RESULTS_PATH
 
-
-def add_cluv_config_section(pyproject_path: Path, section_lines: list[str]) -> None:
+def add_cluv_config_section(pyproject_path: Path, section_lines: str) -> None:
     """
     Write the given lines to the pyproject.toml file.
     """
-    console.log(("\n" + "\n".join(section_lines) + "\n").replace("[", "\\["))
+    console.log("\n" + section_lines.replace("[", "\\["))
     with pyproject_path.open("a") as f:
-        f.write("\n" + "\n".join(section_lines) + "\n")
+        f.write("\n" + section_lines)
 
 
-def add_cluv_cluster_config(
-    cluster: str, pyproject_path: Path, config_lines: list[str] = []
-) -> None:
+def generate_cluster_config(cluster: str, config_lines: list[str] = []) -> str:
     """
-    Add a cluster config section for the given cluster to the pyproject.toml file, with the given variables.
+    Generate a cluster config section for the given cluster, with the given variables.
     """
-    console.print(f"Adding config for cluster [bold]{cluster}[/bold] :")
-    section_lines = [f"[tool.cluv.clusters.{cluster}]"] + config_lines
-    console.log(("\n" + "\n".join(section_lines) + "\n").replace("[", "\\["))
-    with pyproject_path.open("a") as f:
-        f.write("\n" + "\n".join(section_lines) + "\n")
+    return f"\n[tool.cluv.clusters.{cluster}]\n" + "\n".join(config_lines) + ("\n" if len(config_lines) > 0 else "")
 
 
 def check_git() -> None:
@@ -218,6 +216,21 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
         console.print(f"Creating symlink from {symlink_path} to {scratch_path}")
         scratch_path.mkdir(parents=True, exist_ok=True)
         symlink_path.symlink_to(scratch_path, target_is_directory=True)
+
+
+def check_ssh_hostnames(clusters: list[str]) -> None:
+    """
+    Check if the names of the clusters in the cluv config are present in the SSH config file. If not, print a warning.
+    """
+    ssh_hostnames = get_ssh_hostnames()
+    missing_clusters = set(clusters).difference(ssh_hostnames)
+
+    if len(missing_clusters) > 0:
+        console.print(f"[yellow]⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. Try to run [bold]mila init[/bold] to add all available clusters.[/yellow]")
+        for cluster in missing_clusters:
+            console.print(f"[yellow]    - {cluster}[/yellow]")
+    else:
+        console.print("[green]✅ All clusters in the cluv config are present in your SSH config.[/green]")
 
 
 def check_job_script(project_root: Path, results_path: str | None) -> None:

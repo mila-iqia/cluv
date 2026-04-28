@@ -68,6 +68,8 @@ def signal_handler(signum: int, frame: FrameType | None):
     """
     signal_enum = signal.Signals(signum)
     logger.error(f"Job received a {signal_enum.name} signal!")
+    exit(0)  # Exit with code 0 to avoid SLURM marking the job as failed.
+
     # Perform quick actions that will help the job resume later.
     # If you use Weights & Biases: https://docs.wandb.ai/guides/runs/resuming#preemptible-sweeps
     # if wandb.run:

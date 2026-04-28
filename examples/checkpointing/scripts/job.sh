@@ -44,5 +44,4 @@ cp /network/datasets/cifar10/cifar-10-python.tar.gz $SLURM_TMPDIR/data/
 # Use the `--offline` option of `uv run` on clusters without internet access on compute nodes.
 # Using the `--locked` option can help make your experiments easier to reproduce (it forces
 # your uv.lock file to be up to date with the dependencies declared in pyproject.toml).
-# Here we use `exec` to ensure that the signals are received and handled in the Python process.
-exec srun uv run python src/checkpointing/main.py
+srun uv run python src/checkpointing/main.py

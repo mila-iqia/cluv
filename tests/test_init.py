@@ -16,6 +16,7 @@ from cluv.cli.init import (
     DEFAULT_RESULTS_PATH,
     JOB_SCRIPT_PATH
 )
+from .utils import write_pyproject
 
 
 class TestCheckHomeDir:
@@ -40,12 +41,12 @@ class TestGitCheck:
 class TestCheckCluvConfig:
     def test_add_missing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should add a cluv config section if the toml doesn't have it"""
-        p = tmp_path / "pyproject.toml"
-        p.touch()
+        p = write_pyproject(tmp_path, "")
 
-        check_cluv_config(p)
+        results_path = check_cluv_config(p)
         config = load_cluv_config(p)
 
+        assert results_path == DEFAULT_RESULTS_PATH
         assert config.clusters == ["mila"] + DRAC_CLUSTERS
         assert config.results_path == DEFAULT_RESULTS_PATH
         assert config.slurm == {'UV_OFFLINE': 1, 'WANDB_MODE': 'offline'}
@@ -53,18 +54,21 @@ class TestCheckCluvConfig:
 
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
-        p = tmp_path / "pyproject.toml"
-        p.write_text(textwrap.dedent(
-            """\
+        p = write_pyproject(
+            tmp_path,
+            textwrap.dedent(
+                """\
             [tool.cluv]
             clusters = ["mila"]
             results_path = "results"
             """
-        ))
+            ),
+        )
 
-        check_cluv_config(p)
+        results_path = check_cluv_config(p)
         config = load_cluv_config(p)
 
+        assert results_path == "results"
         assert config.clusters == ["mila"]
         assert config.results_path == "results"
 
@@ -99,7 +103,6 @@ class TestSymlinkCheck():
         assert expected_results_path.is_symlink()
         assert expected_results_scratch_path.exists()
         assert expected_results_path.resolve() == expected_results_scratch_path.resolve()
-
 
     def test_keep_existing_symlink(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """check_symlink_to_scratch() should not overwrite an existing symlink not pointing to scratch"""

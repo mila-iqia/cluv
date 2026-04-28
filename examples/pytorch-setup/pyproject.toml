@@ -28,6 +28,7 @@ WANDB_MODE = "online"
 [tool.cluv.clusters.tamia]
 
 [tool.cluv.clusters.rorqual]
+SBATCH_ACCOUNT="rrg-bengioy-ad"
 
 [tool.cluv.clusters.nibi]
 

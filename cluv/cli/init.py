@@ -18,7 +18,7 @@ CLUV_DEFAULT_CONFIG = textwrap.dedent(f"""\
     [tool.cluv]
     results_path = "{DEFAULT_RESULTS_PATH}"
 
-    [tool.cluv.slurm]
+    [tool.cluv.env]
     # Environment variables applied when using Slurm commands on all clusters.
     UV_OFFLINE = 1
     WANDB_MODE = "offline"
@@ -158,7 +158,9 @@ def generate_cluster_config(cluster: str, config_lines: list[str] = []) -> str:
     """
     Generate a cluster config section for the given cluster, with the given variables.
     """
-    return f"\n[tool.cluv.clusters.{cluster}]\n" + "\n".join(config_lines) + ("\n" if len(config_lines) > 0 else "")
+    if config_lines:
+        return f"\n[tool.cluv.clusters.{cluster}.env]\n" + "\n".join(config_lines) + "\n"
+    return f"\n[tool.cluv.clusters.{cluster}]\n"
 
 
 def check_git() -> None:

@@ -81,15 +81,15 @@ show_missing = true
 job_script = "scripts/job.sh"
 results_path = "logs"
 
-[tool.cluv.slurm]
+[tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
 SBATCH_TIME = "3:00:00"
 SBATCH_REQUE = true
 
-[tool.cluv.clusters.mila]
+[tool.cluv.clusters.mila.env]
 SBATCH_PARTITION = "long"
 
-[tool.cluv.clusters.rorqual]
+[tool.cluv.clusters.rorqual.env]
 UV_OFFLINE = 1
 
 [tool.cluv.clusters.tamia]

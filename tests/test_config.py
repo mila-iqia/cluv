@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from cluv.config import load_cluv_config
+from cluv.config import ClusterConfig, load_cluv_config
 
 
 def write_pyproject(tmp_path: Path, content: str) -> Path:
@@ -37,7 +37,7 @@ clusters = ["mila"]
 """,
         )
         cfg = load_cluv_config(p)
-        assert cfg.cluster_configs == {"mila": {}}
+        assert cfg.cluster_configs == {"mila": ClusterConfig()}
 
     def test_results_path_preserved(self, tmp_path: Path) -> None:
         p = write_pyproject(
@@ -63,7 +63,7 @@ class TestClustersTableFormat:
             tmp_path,
             """
 [tool.cluv.clusters.mila]
-[tool.cluv.clusters.rorqual]
+[tool.cluv.clusters.rorqual.env]
 SBATCH_ACCOUNT = "def-me"
 """,
         )
@@ -79,9 +79,24 @@ SBATCH_ACCOUNT = "def-me"
         )
         cfg = load_cluv_config(p)
         assert "mila" in cfg.clusters
-        assert cfg.cluster_configs.get("mila", {}) == {}
+        assert cfg.cluster_configs.get("mila", None) is not None
+        assert cfg.cluster_configs["mila"].env == {}
 
-    def test_per_cluster_sbatch_vars(self, tmp_path: Path) -> None:
+    def test_per_cluster_sbatch_vars_new_format(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv.clusters.rorqual.env]
+SBATCH_ACCOUNT = "def-bengioy"
+SBATCH_PARTITION = "main"
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.cluster_configs["rorqual"].env["SBATCH_ACCOUNT"] == "def-bengioy"
+        assert cfg.cluster_configs["rorqual"].env["SBATCH_PARTITION"] == "main"
+
+    def test_per_cluster_sbatch_vars_old_format(self, tmp_path: Path) -> None:
+        """Backward compat: env vars directly in [tool.cluv.clusters.<name>] still work."""
         p = write_pyproject(
             tmp_path,
             """
@@ -91,29 +106,46 @@ SBATCH_PARTITION = "main"
 """,
         )
         cfg = load_cluv_config(p)
-        assert cfg.cluster_configs["rorqual"]["SBATCH_ACCOUNT"] == "def-bengioy"
-        assert cfg.cluster_configs["rorqual"]["SBATCH_PARTITION"] == "main"
+        assert cfg.cluster_configs["rorqual"].env["SBATCH_ACCOUNT"] == "def-bengioy"
+        assert cfg.cluster_configs["rorqual"].env["SBATCH_PARTITION"] == "main"
 
-    def test_cluster_with_no_vars_not_in_cluster_configs(self, tmp_path):
+    def test_cluster_with_no_vars(self, tmp_path):
         p = write_pyproject(
             tmp_path,
             """
 [tool.cluv.clusters.mila]
-[tool.cluv.clusters.rorqual]
+[tool.cluv.clusters.rorqual.env]
 SBATCH_ACCOUNT = "def-bengioy"
 """,
         )
         cfg = load_cluv_config(p)
-        assert cfg.cluster_configs == {"mila": {}, "rorqual": {"SBATCH_ACCOUNT": "def-bengioy"}}
+        assert cfg.cluster_configs["mila"].env == {}
+        assert cfg.cluster_configs["rorqual"].env == {"SBATCH_ACCOUNT": "def-bengioy"}
 
 
 # ---------------------------------------------------------------------------
-# [tool.cluv.slurm] — global SBATCH_* defaults
+# [tool.cluv.env] — global SBATCH_* defaults
 # ---------------------------------------------------------------------------
 
 
-class TestGlobalSlurm:
-    def test_global_slurm_vars_parsed(self, tmp_path: Path) -> None:
+class TestGlobalEnv:
+    def test_global_env_vars_parsed(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv.env]
+SBATCH_TIME = "1:00:00"
+SBATCH_GPUS = "1"
+
+[tool.cluv.clusters.mila]
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.env["SBATCH_TIME"] == "1:00:00"
+        assert cfg.env["SBATCH_GPUS"] == "1"
+
+    def test_global_slurm_vars_backward_compat(self, tmp_path: Path) -> None:
+        """Backward compat: [tool.cluv.slurm] still works."""
         p = write_pyproject(
             tmp_path,
             """
@@ -125,10 +157,10 @@ SBATCH_GPUS = "1"
 """,
         )
         cfg = load_cluv_config(p)
-        assert cfg.slurm["SBATCH_TIME"] == "1:00:00"
-        assert cfg.slurm["SBATCH_GPUS"] == "1"
+        assert cfg.env["SBATCH_TIME"] == "1:00:00"
+        assert cfg.env["SBATCH_GPUS"] == "1"
 
-    def test_missing_slurm_section_defaults_to_empty(self, tmp_path: Path) -> None:
+    def test_missing_env_section_defaults_to_empty(self, tmp_path: Path) -> None:
         p = write_pyproject(
             tmp_path,
             """
@@ -136,7 +168,7 @@ SBATCH_GPUS = "1"
 """,
         )
         cfg = load_cluv_config(p)
-        assert cfg.slurm == {}
+        assert cfg.env == {}
 
 
 # ---------------------------------------------------------------------------
@@ -160,22 +192,22 @@ name = "foo"
         p = write_pyproject(
             tmp_path,
             """
-[tool.cluv.slurm]
+[tool.cluv.env]
 SBATCH_TIME = "3:00:00"
 
-[tool.cluv.clusters.mila]
+[tool.cluv.clusters.mila.env]
 SBATCH_PARTITION = "long"
 
-[tool.cluv.clusters.rorqual]
+[tool.cluv.clusters.rorqual.env]
 SBATCH_ACCOUNT = "def-bengioy"
 SBATCH_PARTITION = "main"
 """,
         )
         cfg = load_cluv_config(p)
         assert set(cfg.clusters) == {"mila", "rorqual"}
-        assert cfg.slurm == {"SBATCH_TIME": "3:00:00"}
-        assert cfg.cluster_configs["mila"] == {"SBATCH_PARTITION": "long"}
-        assert cfg.cluster_configs["rorqual"] == {
+        assert cfg.env == {"SBATCH_TIME": "3:00:00"}
+        assert cfg.cluster_configs["mila"].env == {"SBATCH_PARTITION": "long"}
+        assert cfg.cluster_configs["rorqual"].env == {
             "SBATCH_ACCOUNT": "def-bengioy",
             "SBATCH_PARTITION": "main",
         }

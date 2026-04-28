@@ -15,7 +15,7 @@ from cluv.cli.init import (
     check_job_script,
     check_symlink_to_scratch,
 )
-from cluv.config import load_cluv_config
+from cluv.config import load_cluv_config, ClusterConfig
 
 class TestCheckHomeDir:
     def test_not_under_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,10 +53,10 @@ class TestCheckCluvConfig:
 
         assert config.clusters == ["mila"] + DRAC_CLUSTERS
         assert config.results_path == DEFAULT_RESULTS_PATH
-        assert config.slurm == {"UV_OFFLINE": 1, "WANDB_MODE": "offline"}
+        assert config.env == {"UV_OFFLINE": 1, "WANDB_MODE": "offline"}
         assert config.cluster_configs == {
-            "mila": {"UV_OFFLINE": 0, "WANDB_MODE": "online"},
-            **{cluster: {} for cluster in DRAC_CLUSTERS},
+            "mila": ClusterConfig(env={"UV_OFFLINE": 0, "WANDB_MODE": "online"}),
+            **{cluster: ClusterConfig() for cluster in DRAC_CLUSTERS},
         }
 
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:

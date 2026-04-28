@@ -22,6 +22,14 @@ logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
+class ClusterConfig:
+    """Per-cluster configuration options."""
+
+    env: dict[str, str] = dataclasses.field(default_factory=dict)
+    """Environment variables to set when running Slurm commands on this cluster."""
+
+
+@dataclasses.dataclass
 class CluvConfig:
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
@@ -32,14 +40,14 @@ class CluvConfig:
         On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.
     """
 
-    slurm: dict[str, str] = dataclasses.field(default_factory=dict)
-    """Environment variables set on all clusters when running Slurm commands."""
+    env: dict[str, str] = dataclasses.field(default_factory=dict)
+    """Global environment variables set on all clusters when running Slurm commands."""
 
-    cluster_configs: dict[str, dict[str, str]] = dataclasses.field(default_factory=dict)
-    """Configuration options for each cluster, as a dict of dicts.
+    cluster_configs: dict[str, ClusterConfig] = dataclasses.field(default_factory=dict)
+    """Configuration options for each cluster.
 
-    The keys of the outer are cluster names, and the inner dict contains environment variables to
-    set when running Slurm commands on that cluster.
+    The keys are cluster names; each value is a `ClusterConfig` whose `env` dict contains
+    environment variables to set when running Slurm commands on that cluster.
     """
 
     @property
@@ -88,15 +96,23 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     # clusters: list (backward compat) or table (new format with per-cluster settings)
     clusters_section = cluv.get("clusters", {})
     if isinstance(clusters_section, list):
-        cluster_configs: dict[str, dict[str, str]] = {k: {} for k in clusters_section}
+        cluster_configs: dict[str, ClusterConfig] = {k: ClusterConfig() for k in clusters_section}
     else:
-        cluster_configs = {k: dict(v) for k, v in clusters_section.items()}
+        cluster_configs = {}
+        for name, raw in clusters_section.items():
+            if "env" in raw:
+                # New format: [tool.cluv.clusters.<name>.env]
+                cluster_configs[name] = ClusterConfig(env=dict(raw["env"]))
+            else:
+                # Old flat format: env vars directly in [tool.cluv.clusters.<name>]
+                cluster_configs[name] = ClusterConfig(env=dict(raw))
 
-    slurm: dict[str, str] = cluv.get("slurm", {})
+    # global env: new [tool.cluv.env] key, with backward compat for old [tool.cluv.slurm]
+    env: dict[str, str] = cluv.get("env", cluv.get("slurm", {}))
 
     return CluvConfig(
         results_path=cluv.get("results_path"),
-        slurm=slurm,
+        env=env,
         cluster_configs=cluster_configs,
     )
 

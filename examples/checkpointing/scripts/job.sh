@@ -7,7 +7,6 @@
 ## Or --gpus-per-task=1            for any GPU model
 #SBATCH --mem-per-gpu=16G
 #SBATCH --time=00:15:00
-#SBATCH --requeue
 #SBATCH --signal=B:TERM@300 # tells the controller to send SIGTERM to the job 5
                             # min before its time ends to give it a chance for
                             # better cleanup. If you cancel the job manually,

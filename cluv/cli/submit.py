@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from cluv.cli.sync import sync
-from cluv.config import find_pyproject, get_config
+from cluv.config import ClusterConfig, find_pyproject, get_config
 from cluv.utils import console
 
 __all__ = ["submit"]
@@ -21,7 +21,7 @@ async def submit(
     """Submit a SLURM job on a remote cluster.
 
     Enforces a clean git state, syncs the project, sets `GIT_COMMIT` and any
-    environment variables configured in `[tool.cluv.slurm]` / `[tool.cluv.clusters.<name>]`,
+    environment variables configured in `[tool.cluv.env]` / `[tool.cluv.clusters.<name>.env]`,
     then calls `sbatch` on the remote.
 
     `sbatch_args` are forwarded as flags to `sbatch`; `program_args` are passed to
@@ -71,8 +71,8 @@ async def submit(
     remote_job_script = f"~/{project_path}/{job_script}"
 
     # 5. Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
-    env_vars: dict[str, str] = {**config.slurm}
-    env_vars.update(config.cluster_configs.get(cluster, {}))
+    env_vars: dict[str, str] = {**config.env}
+    env_vars.update(config.cluster_configs.get(cluster, ClusterConfig()).env)
     # Prefix the job name with "cluv-" so admins can identify cluv-submitted jobs in sacct.
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"

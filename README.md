@@ -45,6 +45,11 @@ cluv submit mila job.sh
    cluv sync
    ```
 
+## Examples
+
+See the [examples](examples) folder for sample projects using cluv. Each example includes a README with instructions specific to that project.
+
+
 ## Configuration
 
 Add a `[tool.cluv]` section to the `pyproject.toml` of your project. `cluv init` generates a default config, or you can write it by hand.
@@ -112,10 +117,6 @@ Open SSH ControlMaster connections to all configured clusters. Run this before a
 cluv login [<cluster> ...]
 ```
 
-| Argument | Description |
-|----------|-------------|
-| `<cluster> ...` | One or more SSH hostnames. Defaults to all clusters in `[tool.cluv]`. |
-
 ### `cluv sync`
 
 Push local git changes, then on each cluster: clone or fetch the repo, check out the current branch, and run `uv sync`. Optionally rsyncs results back if `results_path` is set in the config.
@@ -123,10 +124,6 @@ Push local git changes, then on each cluster: clone or fetch the repo, check out
 ```
 cluv sync [<cluster> ...]
 ```
-
-| Argument | Description |
-|----------|-------------|
-| `<cluster> ...` | Clusters to sync. Defaults to all configured clusters. Pass explicit names to connect to specific clusters. |
 
 
 ### `cluv status`
@@ -137,10 +134,6 @@ Display an overview of each cluster: GPU availability, running/queued jobs, esti
 cluv status [<cluster> ...]
 ```
 
-| Argument | Description |
-|----------|-------------|
-| `<cluster> ...` | Clusters to query. Defaults to all configured clusters with an active SSH connection. |
-
 ### `cluv submit`
 
 Submit a SLURM job on a remote cluster.
@@ -149,12 +142,11 @@ Submit a SLURM job on a remote cluster.
 cluv submit <cluster> <job.sh> [<sbatch-flags> ...] [-- <program-args> ...]
 ```
 
-| Argument | Description |
-|----------|-------------|
-| `<cluster>` | SSH hostname of the target cluster. |
-| `<job.sh>` | Path to the job script. |
-| `<sbatch-flags>` | Any extra flags to pass to `sbatch`. |
-| `-- <program-args>` | Arguments passed to the job script itself (after `--`). |
+For example:
+
+```bash
+cluv submit rorqual script/job.sh --time=00:10:00 -- python main.py
+```
 
 ### `cluv run`
 
@@ -163,16 +155,3 @@ Sync the project to a cluster, then run a command there with `uv run`.
 ```
 cluv run <cluster> <command> [<args> ...]
 ```
-
-| Argument | Description |
-|----------|-------------|
-| `<cluster>` | SSH hostname of the target cluster. |
-| `<command>` | Command to run (passed to `uv run --directory=<project>`). |
-
-## DRAC Clusters
-
-DRAC clusters are detected automatically via the `$CC_CLUSTER` environment variable.
-
-## Examples
-
-See the [examples](examples) folder for sample projects using cluv. Each example includes a README with instructions specific to that project.

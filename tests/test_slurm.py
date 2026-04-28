@@ -6,7 +6,7 @@ cluster output captured during development.
 
 import pytest
 
-from cluv.cli.slurm import (
+from cluv.slurm import (
     parse_disk_quota,
     parse_diskusage_report,
     parse_partition_stats,

@@ -1,4 +1,5 @@
 #!/bin/bash
+#SBATCH --output=logs/%j/slurm-%j.out
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4

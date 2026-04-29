@@ -81,21 +81,19 @@ async def submit_first(
         return_exceptions=True,
     )
 
-    print(job_ids)
-
     # Get the results of the sbatch command. We expect an int (the job id) or the exception
     # if the command failed on the remote cluster.
-    console.log("Try to submit jobs to the following clusters:")
+    console.print("Try to submit jobs to the following clusters:")
     cluster_to_jobid: dict[str, int] = {}
     for cluster, result in zip(clusters_to_remote.keys(), job_ids):
         if isinstance(result, int):
             cluster_to_jobid[cluster] = result
-            console.log(f"  - {cluster}: job {result}")
-        elif isinstance(result, Exception):
-            console.log(f"[red]  - {cluster}: error, {result}/[red]")
+            console.print(f"  - [bold]{cluster}[/bold]: job {result}")
+        else:
+            console.print(f"[red]  - [bold]{cluster}[/bold]: invalid output, {result}/[red]")
 
     if len(cluster_to_jobid) == 0:
-        console.log("No job submitted on clusters. See errors above.")
+        console.print("[red]No job submitted on clusters. See errors above./[red]")
         return None
 
     # Wait for a job to start on a cluster.
@@ -193,8 +191,6 @@ async def sbatch(
     remote_cmd = get_sbatch_command(
         cluster, Path(job_script), sbatch_args, program_args, git_commit
     )
-
-    console.print(f"Submitting job on [bold]{cluster}[/bold].")
 
     return int(await remote.get_output(remote_cmd))
 

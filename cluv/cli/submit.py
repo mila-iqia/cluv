@@ -83,24 +83,20 @@ async def submit_first(
 
     print(job_ids)
 
-    # Get the results of the sbatch command. We expect an int (the job id) or
-    # a BaseException/str (?) if the command failed on the remote cluster.
-    # TODO : What if a sbatch fail on a cluster ?
-    cluster_to_jobid: dict[str, int] = {
-        cluster: result
-        for cluster, result in zip(clusters_to_remote.keys(), job_ids)
-        if isinstance(result, int)
-    }
+    # Get the results of the sbatch command. We expect an int (the job id) or the exception
+    # if the command failed on the remote cluster.
+    console.log("Try to submit jobs to the following clusters:")
+    cluster_to_jobid: dict[str, int] = {}
+    for cluster, result in zip(clusters_to_remote.keys(), job_ids):
+        if isinstance(result, int):
+            cluster_to_jobid[cluster] = result
+            console.log(f"  - {cluster}: job {result}")
+        elif isinstance(result, Exception):
+            console.log(f"[red]  - {cluster}: error, {result}/[red]")
 
     if len(cluster_to_jobid) == 0:
-        console.log("No job submitted.")
+        console.log("No job submitted on clusters. See errors above.")
         return None
-
-    # Show the status on each cluster.
-    console.log("Submitted jobs to the following clusters:")
-    for cluster, job_id in cluster_to_jobid.items():
-        console.log(f"- {cluster}: job {job_id}")
-    # TODO : show failed clusters (and the error)
 
     # Wait for a job to start on a cluster.
     # If the wait is interrupted, cancel all jobs.

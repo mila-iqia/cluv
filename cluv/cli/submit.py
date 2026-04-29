@@ -68,7 +68,7 @@ async def submit_first(
 
     # Submit the job on all the clusters
     job_ids = await asyncio.gather(
-        *(
+        *[
             sbatch(
                 remote,
                 job_script,
@@ -77,7 +77,7 @@ async def submit_first(
                 git_commit,
             )
             for remote in remotes
-        ),
+        ],
         return_exceptions=True,
     )
 
@@ -90,10 +90,10 @@ async def submit_first(
             cluster_to_jobid[cluster] = result
             console.print(f"  - [bold]{cluster}[/bold]: job {result}")
         else:
-            console.print(f"[red]  - [bold]{cluster}[/bold]: invalid output, {result}/[red]")
+            console.print(f"[red]  - [bold]{cluster}[/bold]: invalid output, {result}[/red]")
 
     if len(cluster_to_jobid) == 0:
-        console.print("[red]No job submitted on clusters. See errors above./[red]")
+        console.print("No job submitted on clusters. See errors above.")
         return None
 
     # Wait for a job to start on a cluster.

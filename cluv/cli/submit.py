@@ -92,6 +92,10 @@ async def submit_first(
         if isinstance(result, int)
     }
 
+    if len(cluster_to_jobid) == 0:
+        console.log("No job submitted.")
+        return None
+
     # Show the status on each cluster.
     console.log("Submitted jobs to the following clusters:")
     for cluster, job_id in cluster_to_jobid.items():

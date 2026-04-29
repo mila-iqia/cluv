@@ -12,13 +12,15 @@ from cluv.config import find_pyproject, get_config
 from cluv.remote import Remote
 from cluv.utils import console
 
+# TODO : Logger
+
 
 async def submit(
     cluster: str,
     job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
-):
+) -> int | None:
     """Submit a SLURM job on a remote cluster.
 
     Enforces a clean git state, syncs the project, sets GIT_COMMIT and any
@@ -56,14 +58,15 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-):
-    """TODO: submit the job on all clusters, and wait until one of them starts.
+) -> int | None:
+    """Submit the job on all clusters, and wait until one of them starts.
     Once one starts, cancel the others.
     """
     # Sync with all clusters with an existing connections.
     remotes = await sync()
     clusters_to_remote = {remote.hostname: remote for remote in remotes}
 
+    # Submit the job on all the clusters
     job_ids = await asyncio.gather(
         *(
             sbatch(
@@ -77,48 +80,54 @@ async def submit_first(
         ),
         return_exceptions=True,
     )
-    # What if a sbatch fail on a cluster ?
+
+    print(job_ids)
+
+    # Get the results of the sbatch command. We expect an int (the job id) or
+    # a BaseException/str (?) if the command failed on the remote cluster.
+    # TODO : What if a sbatch fail on a cluster ?
     cluster_to_jobid: dict[str, int] = {
         cluster: result
         for cluster, result in zip(clusters_to_remote.keys(), job_ids)
         if isinstance(result, int)
     }
 
+    # Show the status on each cluster.
     console.log("Submitted jobs to the following clusters:")
     for cluster, job_id in cluster_to_jobid.items():
         console.log(f"- {cluster}: job {job_id}")
+    # TODO : show failed clusters (and the error)
 
-    wait_for_starting_job = True
+    # Wait for a job to start on a cluster.
+    # If the wait is interrupted, cancel all jobs.
     start_cluster: str | None = None
     start_job_id: int | None = None
-    with console.status("Waiting for a job to start..."):
-        while wait_for_starting_job:
-            # TODO : Replace by asyncio.gather to check clusters in parallel
-            for cluster, remote in clusters_to_remote.items():
-                job_id = cluster_to_jobid.get(cluster)
-                if job_id is None:
-                    continue
-                job_status = await get_job_status(remote, job_id)
+    try:
+        with console.status("Waiting for a job to start..."):
+            while start_cluster is None:
+                # TODO : Replace by asyncio.gather to check clusters in parallel
+                for cluster, remote in clusters_to_remote.items():
+                    job_id = cluster_to_jobid.get(cluster)
+                    if job_id is None:
+                        continue
+                    job_status = await get_job_status(remote, job_id)
 
-                if job_status in ["RUNNING", "COMPLETED"]:
-                    wait_for_starting_job = False
-                    start_cluster = cluster
-                    start_job_id = job_id
-            sleep(20)
+                    # TODO : What if jobs failed ? Need to remember the status of each cluster ?
+                    if job_status in ["RUNNING", "COMPLETED"]:
+                        start_cluster = cluster
+                        start_job_id = job_id
+                # TODO : make the waiting time gradually increase to avoid making the user wait too long when the jobs are short
+                sleep(20)
+        console.log(
+            f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs..."
+        )
+    except KeyboardInterrupt:
+        console.log("Interrupted by user. Cancelling all jobs...")
+        await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, None)
 
-    console.log(f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs...")
-    # TODO : Replace by asyncio.gather to delete jobs in parallel
-    for cluster, job_id in cluster_to_jobid.items():
-        if cluster == start_cluster:
-            continue
-        remote = clusters_to_remote[cluster]
-        await cancel_job(remote, job_id)
+    await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)
 
     return start_job_id
-
-    # Loop and check current jobs status until one job stats. Then cancel the others
-        # What if all jobs fails ?
-        # What if I stop the connections before the end of the loop ?
 
 
 def ensure_clean_git_state() -> str:
@@ -178,6 +187,7 @@ async def sbatch(
     program_args: list[str],
     git_commit: str,
 ) -> int:
+    """Submit the job via sbatch on the remote cluster, and return the job id."""
     cluster = remote.hostname
 
     remote_cmd = get_sbatch_command(
@@ -188,18 +198,28 @@ async def sbatch(
 
     return int(await remote.get_output(remote_cmd))
 
-async def get_job_status(
-   remote: Remote,
-    job_id: int
-) -> str:
+
+async def get_job_status(remote: Remote, job_id: int) -> str:
+    """Get the status of the job with the given id on the remote cluster."""
     sacct_command = f"sacct -j {job_id} --format=State --noheader --parsable2 | head -1"
     return await remote.get_output(sacct_command)
 
-async def cancel_job(
-    remote: Remote,
-    job_id: int
-) -> str:
+
+async def cancel_job(remote: Remote, job_id: int) -> str:
+    """Cancel the job with the given id on the remote cluster."""
     scancel_command = f"scancel {job_id}"
     output = await remote.get_output(scancel_command)
     console.log(f"Cancelled job {job_id} on cluster {remote.hostname}.")
     return output
+
+
+async def cancel_all_jobs(
+    remotes: dict[str, Remote], cluster_to_jobid: dict[str, int], keep_cluster: str | None
+) -> None:
+    """Cancel all jobs in cluster_to_jobid on their respective remotes."""
+    # TODO : Replace by asyncio.gather to delete jobs in parallel
+    for cluster, job_id in cluster_to_jobid.items():
+        if cluster == keep_cluster:
+            continue
+        remote = remotes[cluster]
+        await cancel_job(remote, job_id)

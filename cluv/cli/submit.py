@@ -76,7 +76,7 @@ async def submit_first(
             )
             for remote in remotes
         ],
-        return_exceptions=True,
+        # return_exceptions=True,
     )
 
     # Get the results of the sbatch command. We expect an int (the job id) or the exception

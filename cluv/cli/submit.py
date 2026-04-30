@@ -192,14 +192,8 @@ async def sbatch(
         cluster, Path(job_script), sbatch_args, program_args, git_commit
     )
     output = await remote.get_output(remote_cmd)
-    try:
-        job_id = int(output.strip())
-        return job_id
-    except ValueError:
-        console.print(
-            f"[red]Failed to submit job on cluster {cluster}. sbatch output: {output}[/red]"
-        )
-
+    print(output)
+    return int(output)
 
 async def get_job_status(remote: Remote, job_id: int) -> str:
     """Get the status of the job with the given id on the remote cluster."""

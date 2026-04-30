@@ -7,9 +7,9 @@
 ## Or --gpus-per-task=rtx8000:1    to request a different GPU model
 ## Or --gpus-per-task=1            for any GPU model
 #SBATCH --mem-per-gpu=16G
-#SBATCH --time=00:5:00
+#SBATCH --time=00:10:00
 #SBATCH --requeue           # allows the job to be requeued if preempted
-#SBATCH --signal=B:TERM@60  # tells the controller to send SIGTERM to the job 1
+#SBATCH --signal=B:TERM@180  # tells the controller to send SIGTERM to the job 1
                             # min before its time ends to give it a chance for
                             # better cleanup. If you cancel the job manually,
                             # make sure that you specify the signal as TERM like

@@ -45,12 +45,7 @@ CHECKPOINT_FILE_NAME = "checkpoint.pth"
 
 
 class RunState(TypedDict):
-    """Typed dictionary containing the state of the training run which is saved at each epoch.
-
-    Using type hints helps prevent bugs and makes your code easier to read for both humans and
-    machines (e.g. Copilot). This leads to less time spent debugging and better code suggestions.
-    """
-
+    """Typed dictionary containing the state of the training run which is saved at each epoch."""
     epoch: int
     best_acc: float
     model_state: dict[str, Tensor]
@@ -61,19 +56,23 @@ class RunState(TypedDict):
     torch_random_state: Tensor
     torch_cuda_random_state: list[Tensor]
 
+
 def signal_handler(signum: int, frame: FrameType | None):
+    # TODO : split the signal handler by signal ?
     """Called before the job gets pre-empted or reaches the time-limit.
 
     This should run quickly. Performing a full checkpoint here mid-epoch is not recommended.
     """
     signal_enum = signal.Signals(signum)
     logger.error(f"Job received a {signal_enum.name} signal!")
-    exit(0)  # Exit with code 0 to avoid SLURM marking the job as failed.
+    # TODO : requeue the job ? subprocess "scontrol requeue SLURM_JOBID"
+    # TODO : Exit with code 0 to avoid SLURM marking the job as failed ? exit(0)
 
     # Perform quick actions that will help the job resume later.
     # If you use Weights & Biases: https://docs.wandb.ai/guides/runs/resuming#preemptible-sweeps
     # if wandb.run:
     #     wandb.mark_preempting()
+
 
 def main():
     # Use an argument parser so we can pass hyperparameters from the command line.
@@ -185,6 +184,7 @@ def main():
     signal.signal(
         signal.SIGUSR1, signal_handler
     )  # Before reaching the end of the time limit.
+    # TODO : Do we need SIGUSR1 ? Doesn't SIGTERM already cover this case ?
 
     for epoch in range(start_epoch, epochs):
         logger.debug(f"Starting epoch {epoch}/{epochs}")
@@ -202,7 +202,7 @@ def main():
         # Training loop
         for batch in train_dataloader:
             # Move the batch to the GPU before we pass it to the model
-            batch: tuple[Tensor, ...] = tuple(item.to(device) for item in batch)
+            batch = tuple(item.to(device) for item in batch)
             x, y = batch
 
             # Forward pass
@@ -222,7 +222,7 @@ def main():
             logger.debug(f"Accuracy: {accuracy.item():.2%}")
             logger.debug(f"Average Loss: {loss.item()}")
 
-            # Advance the progress bar one step, and update the text displayed in the progress bar.
+            # Advance the progress bar one step and update the progress bar text.
             progress_bar.update(1)
             progress_bar.set_postfix(loss=loss.item(), accuracy=accuracy.item())
         progress_bar.close()
@@ -252,7 +252,7 @@ def main():
                 ),
             )
         
-        time.sleep(10)
+        time.sleep(10)  # TODO : test only
 
     print("Done!")
 
@@ -320,8 +320,6 @@ def get_num_workers() -> int:
 
 def load_checkpoint(checkpoint_dir: Path, **torch_load_kwargs) -> RunState | None:
     """Loads the latest checkpoint if possible, otherwise returns `None`."""
-    logger = logging.getLogger(__name__)
-
     checkpoint_file = checkpoint_dir / CHECKPOINT_FILE_NAME
     restart_count = int(os.environ.get("SLURM_RESTART_COUNT", 0))
     if restart_count:
@@ -373,6 +371,7 @@ def save_checkpoint(checkpoint_dir: Path, is_best: bool, state: RunState):
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_file = checkpoint_dir / CHECKPOINT_FILE_NAME
 
+    # TODO : why do we need to avoid potentiel collisions ?
     # Use a unique ID to avoid any potential collisions.
     unique_id = uuid.uuid1()
     temp_checkpoint_file = checkpoint_file.with_suffix(f".temp{unique_id}")

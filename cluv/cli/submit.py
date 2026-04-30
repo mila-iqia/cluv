@@ -12,8 +12,6 @@ from cluv.config import find_pyproject, get_config
 from cluv.remote import Remote
 from cluv.utils import console
 
-# TODO : Logger
-
 
 async def submit(
     cluster: str,
@@ -100,6 +98,7 @@ async def submit_first(
     # If the wait is interrupted, cancel all jobs.
     start_cluster: str | None = None
     start_job_id: int | None = None
+    wait_time = 2  # in seconds, will be updated with _update_waiting_time to gradually increase the waiting time between checks, up to a maximum of 20 seconds
     try:
         with console.status("Waiting for a job to start..."):
             while start_cluster is None:
@@ -114,16 +113,17 @@ async def submit_first(
                     if job_status in ["RUNNING", "COMPLETED"]:
                         start_cluster = cluster
                         start_job_id = job_id
+                        break
                 # TODO : make the waiting time gradually increase to avoid making the user wait too long when the jobs are short
-                sleep(20)
+                sleep(wait_time)
+                _update_waiting_time(wait_time)
         console.log(
             f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs..."
         )
     except KeyboardInterrupt:
         console.log("Interrupted by user. Cancelling all jobs...")
+    finally:
         await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, None)
-
-    await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)
 
     return start_job_id
 
@@ -191,8 +191,14 @@ async def sbatch(
     remote_cmd = get_sbatch_command(
         cluster, Path(job_script), sbatch_args, program_args, git_commit
     )
-
-    return int(await remote.get_output(remote_cmd))
+    output = await remote.get_output(remote_cmd)
+    try:
+        job_id = int(output.strip())
+        return job_id
+    except ValueError:
+        console.print(
+            f"[red]Failed to submit job on cluster {cluster}. sbatch output: {output}[/red]"
+        )
 
 
 async def get_job_status(remote: Remote, job_id: int) -> str:
@@ -213,9 +219,25 @@ async def cancel_all_jobs(
     remotes: dict[str, Remote], cluster_to_jobid: dict[str, int], keep_cluster: str | None
 ) -> None:
     """Cancel all jobs in cluster_to_jobid on their respective remotes."""
-    # TODO : Replace by asyncio.gather to delete jobs in parallel
+    # asyncio.gather(
+    #     *[
+    #         cancel_job(remote, job_id)
+    #         for cluster, job_id in cluster_to_jobid.items()
+    #         if cluster != keep_cluster
+    #         for remote in [remotes[cluster]]
+    #     ]
+    # )
+
     for cluster, job_id in cluster_to_jobid.items():
         if cluster == keep_cluster:
             continue
         remote = remotes[cluster]
         await cancel_job(remote, job_id)
+
+
+def _update_waiting_time(
+    current_waiting_time: int, max_waiting_time: int = 20, factor: int = 2
+) -> int:
+    """Update the waiting time by multiplying it by a factor, up to a maximum."""
+    new_waiting_time = current_waiting_time * factor
+    return min(new_waiting_time, max_waiting_time)

@@ -1,13 +1,26 @@
 # Example from : https://github.com/mila-iqia/mila-docs/tree/master/docs/examples/frameworks/pytorch_setup
 
+import os
+import socket
+
 import torch
 import torch.backends
 
+
+def current_cluster() -> str | None:
+    if socket.gethostname().endswith(".server.mila.quebec"):
+        return "mila"
+    if "CC_CLUSTER" in os.environ:
+        return os.environ["CC_CLUSTER"]
+    return None
+
 def main():
+    cluster = current_cluster()
     cuda_built = torch.backends.cuda.is_built()
     cuda_avail = torch.cuda.is_available()
     device_count = torch.cuda.device_count()
 
+    print(f"Pytorch called on cluster:       {cluster}")
     print(f"PyTorch built with CUDA:         {cuda_built}")
     print(f"PyTorch detects CUDA available:  {cuda_avail}")
     print(f"PyTorch-detected #GPUs:          {device_count}")

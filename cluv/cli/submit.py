@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 
 import asyncio
 import shlex
@@ -11,6 +12,9 @@ from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
 from cluv.remote import Remote
 from cluv.utils import console
+
+RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
+FAILED_JOB_STATES =  ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
 
 async def submit(
@@ -40,7 +44,13 @@ async def submit(
 
     # Submit the sbatch command.
     remote = remotes[0]
-    job_id = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
+    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
+
+    if result.returncode != 0:
+        console.print(f"[red] Invalid sbatch script : {result.stderr}[/red]")
+        return None
+
+    job_id = int(result.stdout.strip())
 
     console.log(
         f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
@@ -48,7 +58,6 @@ async def submit(
     )
 
     return job_id
-    # return the job id?
 
 
 async def submit_first(
@@ -65,7 +74,7 @@ async def submit_first(
     clusters_to_remote = {remote.hostname: remote for remote in remotes}
 
     # Submit the job on all the clusters
-    job_ids = await asyncio.gather(
+    sbatch_results = await asyncio.gather(
         *[
             sbatch(
                 remote,
@@ -76,19 +85,23 @@ async def submit_first(
             )
             for remote in remotes
         ],
-        # return_exceptions=True,
+        return_exceptions=True,
     )
 
     # Get the results of the sbatch command. We expect an int (the job id) or the exception
     # if the command failed on the remote cluster.
     console.print("Try to submit jobs to the following clusters:")
     cluster_to_jobid: dict[str, int] = {}
-    for cluster, result in zip(clusters_to_remote.keys(), job_ids):
-        if isinstance(result, int):
-            cluster_to_jobid[cluster] = result
-            console.print(f"  - [bold]{cluster}[/bold]: job {result}")
+    for cluster, result in zip(clusters_to_remote.keys(), sbatch_results):
+        if isinstance(result, BaseException):
+            continue
         else:
-            console.print(f"[red]  - [bold]{cluster}[/bold]: invalid output, {result}[/red]")
+            if result.returncode == 0:
+                job_id = int(result.stdout.strip())
+                cluster_to_jobid[cluster] = job_id
+                console.print(f"  - [bold]{cluster}[/bold]: job {job_id}")
+            else:
+                console.print(f"[red]  - [bold]{cluster}[/bold]: {result.stderr}[/red]")
 
     if len(cluster_to_jobid) == 0:
         console.print("No job submitted on clusters. See errors above.")
@@ -98,32 +111,45 @@ async def submit_first(
     # If the wait is interrupted, cancel all jobs.
     start_cluster: str | None = None
     start_job_id: int | None = None
-    wait_time = 2  # in seconds, will be updated with _update_waiting_time to gradually increase the waiting time between checks, up to a maximum of 20 seconds
+    wait_time = 2  # seconds; grows up to 20s
     try:
         with console.status("Waiting for a job to start..."):
             while start_cluster is None:
-                # TODO : Replace by asyncio.gather to check clusters in parallel
+                failed_this_round: list[str] = []
                 for cluster, remote in clusters_to_remote.items():
                     job_id = cluster_to_jobid.get(cluster)
                     if job_id is None:
                         continue
                     job_status = await get_job_status(remote, job_id)
 
-                    # TODO : What if jobs failed ? Need to remember the status of each cluster ?
-                    if job_status in ["RUNNING", "COMPLETED"]:
+                    if job_status in RUNNING_JOB_STATES:
                         start_cluster = cluster
                         start_job_id = job_id
                         break
-                # TODO : make the waiting time gradually increase to avoid making the user wait too long when the jobs are short
+                    elif job_status in FAILED_JOB_STATES:
+                        console.print(f"Job {job_id} on cluster {cluster} ended with status {job_status}.")
+                        failed_this_round.append(cluster)
+
+                for cluster in failed_this_round:
+                    del cluster_to_jobid[cluster]
+
+                if not cluster_to_jobid:
+                    console.log("All submitted jobs have ended without starting. Exiting.")
+                    return None
+
+                if start_cluster is not None:
+                    break
+
                 sleep(wait_time)
-                _update_waiting_time(wait_time)
+                wait_time = _update_waiting_time(wait_time)
         console.log(
-            f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs..."
+            f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs...\n",
+            f"Use `ssh {start_cluster} sacct -j {start_job_id}` to view its status."
         )
     except KeyboardInterrupt:
         console.log("Interrupted by user. Cancelling all jobs...")
     finally:
-        await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, None)
+        await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)
 
     return start_job_id
 
@@ -134,7 +160,7 @@ def ensure_clean_git_state() -> str:
     """
     git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
     dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
-    if dirty_lines:
+    if dirty_lines and not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
         console.print(
             "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
         )
@@ -184,16 +210,15 @@ async def sbatch(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-) -> int:
+) -> subprocess.CompletedProcess[str]:
     """Submit the job via sbatch on the remote cluster, and return the job id."""
     cluster = remote.hostname
 
     remote_cmd = get_sbatch_command(
         cluster, Path(job_script), sbatch_args, program_args, git_commit
     )
-    output = await remote.get_output(remote_cmd)
-    print(output)
-    return int(output)
+    return await remote.run(remote_cmd, display=True, warn=True, hide=True)
+
 
 async def get_job_status(remote: Remote, job_id: int) -> str:
     """Get the status of the job with the given id on the remote cluster."""
@@ -205,7 +230,7 @@ async def cancel_job(remote: Remote, job_id: int) -> str:
     """Cancel the job with the given id on the remote cluster."""
     scancel_command = f"scancel {job_id}"
     output = await remote.get_output(scancel_command)
-    console.log(f"Cancelled job {job_id} on cluster {remote.hostname}.")
+    console.print(f"Cancelled job {job_id} on cluster {remote.hostname}.")
     return output
 
 
@@ -213,20 +238,13 @@ async def cancel_all_jobs(
     remotes: dict[str, Remote], cluster_to_jobid: dict[str, int], keep_cluster: str | None
 ) -> None:
     """Cancel all jobs in cluster_to_jobid on their respective remotes."""
-    # asyncio.gather(
-    #     *[
-    #         cancel_job(remote, job_id)
-    #         for cluster, job_id in cluster_to_jobid.items()
-    #         if cluster != keep_cluster
-    #         for remote in [remotes[cluster]]
-    #     ]
-    # )
-
-    for cluster, job_id in cluster_to_jobid.items():
-        if cluster == keep_cluster:
-            continue
-        remote = remotes[cluster]
-        await cancel_job(remote, job_id)
+    await asyncio.gather(
+        *[
+            cancel_job(remotes[cluster], job_id)
+            for cluster, job_id in cluster_to_jobid.items()
+            if cluster != keep_cluster
+        ]
+    )
 
 
 def _update_waiting_time(

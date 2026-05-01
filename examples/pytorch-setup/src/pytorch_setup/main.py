@@ -1,9 +1,18 @@
 # Example from : https://github.com/mila-iqia/mila-docs/tree/master/docs/examples/frameworks/pytorch_setup
 
+import os
+import socket
+
 import torch
 import torch.backends
 
-from cluv.utils import current_cluster
+
+def current_cluster() -> str | None:
+    if socket.gethostname().endswith(".server.mila.quebec"):
+        return "mila"
+    if "CC_CLUSTER" in os.environ:
+        return os.environ["CC_CLUSTER"]
+    return None
 
 def main():
     cluster = current_cluster()

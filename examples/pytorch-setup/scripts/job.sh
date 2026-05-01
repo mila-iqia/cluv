@@ -6,12 +6,9 @@
 #SBATCH --mem=16G
 #SBATCH --time=0:05:00
 
-# Minimal test job for cluv submit.
+# Minimal job script to validate the PyTorch setup.
 echo "hostname: $(hostname)"
 echo "Date:     $(date)"
-
-# Sync dependencies.
-uv sync
 
 # Run the command passed as an argument.
 echo "Running command: $@"

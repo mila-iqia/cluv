@@ -29,6 +29,8 @@ milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
 logger = logging.getLogger(__name__)
 
+__all__ = ["sync", "install_uv", "clone_project", "fetch_results"]
+
 
 # TODO: Control the 'hide' and 'display' / etc using the --verbose flag value, in addition to the loglevel.
 # TODO: Pipe the commands and their outputs / stderr to separate files for each cluster, so people can easily inspect
@@ -45,7 +47,14 @@ async def sync(
     - Does `uv sync` that cluster as well
         - (Important so that jobs can be run in OFFLINE mode)
 
-    ## How it could work (proof-of-concept)
+    Parameters:
+        clusters: List of SSH hostnames of the target clusters. If empty, will attempt to sync
+            with all clusters in the config that we have an active SSH connection to.
+
+    Returns:
+        A list of Remote objects corresponding to the clusters that were synced with.
+
+    How it could work (proof-of-concept)
     - Checks git state
     - Push to github
         - TODO: Check syncing without github.

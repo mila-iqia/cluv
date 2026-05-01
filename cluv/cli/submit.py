@@ -6,7 +6,6 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
-from time import sleep
 
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_config
@@ -140,13 +139,13 @@ async def submit_first(
                 if start_cluster is not None:
                     break
 
-                sleep(wait_time)
+                await asyncio.sleep(wait_time)
                 wait_time = _update_waiting_time(wait_time)
         console.log(
             f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs...\n",
             f"Use `ssh {start_cluster} sacct -j {start_job_id}` to view its status."
         )
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         console.log("Interrupted by user. Cancelling all jobs...")
     finally:
         await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)

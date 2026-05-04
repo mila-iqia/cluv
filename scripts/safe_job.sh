@@ -15,7 +15,7 @@ echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submi
 project_root_in_tmpdir="$SLURM_TMPDIR/$project_name"
 echo "Cloning the project and setting up the virtual environment in $project_root_in_tmpdir"
 
-srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES bash -e <<END
+srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES bash -e <<END
     cd $SLURM_TMPDIR
     git clone $project_root  # clone the project from $HOME to $SLURM_TMPDIR
     cd $SLURM_TMPDIR/$project_name
@@ -34,5 +34,5 @@ srun uv --directory=$project_root_in_tmpdir run "$@"
 
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
 echo "Copying logs from $project_root_in_tmpdir/$results_dir to $project_root/$results_dir"
-srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES \
+srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES \
     rsync --update --recursive $project_root_in_tmpdir/$results_dir/$SLURM_JOB_ID $project_root/$results_dir/

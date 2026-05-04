@@ -90,7 +90,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          # Trying to checkout the branch (not just a commit) so that the cluv command
+          # that do a git push work in the self-hosted CI.
           fetch-tags: true
+          fetch-depth: 0
       - name: Install the latest version of uv
         uses: astral-sh/setup-uv@v7
         with:

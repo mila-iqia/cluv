@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
 import shutil
 import subprocess
 import textwrap
@@ -82,8 +83,9 @@ async def sync(
     else:
         remotes = await login(clusters)
 
-    # Git push first?
-    await run(("git", "push"), hide=False)
+    if "GITHUB_ACTIONS" not in os.environ:
+        # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
+        await run(("git", "push"), hide=False)
 
     # TODO: Do we raise an error if we fail to connect to a given cluster?
     # TODO: Add an --ignore flag to ignore some clusters?

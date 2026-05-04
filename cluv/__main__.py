@@ -115,7 +115,11 @@ def add_submit_args(
     submit_parser.add_argument(
         "cluster",
         metavar="<cluster>",
-        help="The cluster to submit the job on.",
+        help=(
+            "The cluster to submit the job on. "
+            "Set at 'first' to submit a job on all clusters, and wait until one of them starts. "
+            "Once one starts, cancel the others."
+        ),
     )
     submit_parser.add_argument(
         "job_script",

@@ -7,6 +7,8 @@
 
 project_name="cluv"  # to be replaced with the user's project name.
 project_root="$HOME/repos/$project_name" # to be replaced with the path to the user's project in their $HOME.
+results_dir="logs" # to be replaced with the path to the results dir name. (--output flag above too)
+
 
 echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
 # Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.
@@ -20,16 +22,17 @@ srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES bash -e <<END
     git checkout --detach $GIT_COMMIT
     # Copy the virtualenv (seems necessary for some clusters in offline mode).
     cp -r $project_root/.venv $SLURM_TMPDIR/$project_name/.venv
-    exec uv sync
+    uv sync
+    # Copy any existing results from $SCRATCH to the project root.
+    mkdir -p $project_root_in_tmpdir/$results_dir
+    exec rsync --update --recursive $project_root/$results_dir/$SLURM_JOB_ID $project_root_in_tmpdir/$results_dir/
 END
-
 
 # Run the actual job command passed as an argument ('python main.py' for example)
 echo "Running command: 'uv run $@' in $project_root_in_tmpdir"
 srun uv --directory=$project_root_in_tmpdir run "$@"
 
-# IDEA: Display a warning if there are files in $SLURM_TMPDIR that would be lost.
-
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
-echo "Copying logs from $project_root_in_tmpdir/logs to $project_root/logs"
-srun --ntasks-per-node=1 rsync --update --recursive $project_root_in_tmpdir/logs $project_root/logs
+echo "Copying logs from $project_root_in_tmpdir/$results_dir to $project_root/$results_dir"
+srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES \
+    rsync --update --recursive $project_root_in_tmpdir/$results_dir/$SLURM_JOB_ID $project_root/$results_dir/

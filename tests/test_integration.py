@@ -65,7 +65,7 @@ def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
         work_folder = (
             Path.cwd().parent.parent
         )  # This should be the _work folder in the self-hosted runner
-        monkeypatch.setattr(Path, "home", work_folder)
+        monkeypatch.setattr(Path, "home", lambda: work_folder)
 
 
 @pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)

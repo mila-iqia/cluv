@@ -76,9 +76,6 @@ source = ["cluv"]
 show_missing = true
 
 [tool.cluv]
-# IDEA: either the job script is set here, or passed as a positional argument (after the cluster)
-# OR, leave it as a required positional argument. More explicit.
-job_script = "scripts/job.sh"
 results_path = "logs"
 
 [tool.cluv.env]
@@ -86,15 +83,37 @@ results_path = "logs"
 SBATCH_TIME = "3:00:00"
 SBATCH_REQUE = true
 
-[tool.cluv.clusters.mila.env]
-SBATCH_PARTITION = "long"
+[tool.cluv.clusters.mila]
+env = {SBATCH_PARTITION="long"}
 
-[tool.cluv.clusters.rorqual.env]
-UV_OFFLINE = 1
-
+# PAICE clusters.
 [tool.cluv.clusters.tamia]
-# [tool.cluv.clusters.fir]
-# [tool.cluv.clusters.nibi]
-# [tool.cluv.clusters.killarney]
-# [tool.cluv.clusters.vulcan]
-# [tool.cluv.clusters.trillium-gpu]
+env = {UV_OFFLINE=1}
+
+[tool.cluv.clusters.killarney]
+# submit_from_scratch = true # TODO: Need to do cd $SCRATCH sbatch --chdir $HOME/<project_path>
+env = {UV_OFFLINE=1}
+
+[tool.cluv.clusters.vulcan]
+env = {UV_OFFLINE=1}
+
+# DRAC clusters.
+[tool.cluv.clusters.rorqual]
+env = {UV_OFFLINE=1, SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.fir]
+env = {UV_OFFLINE=0, SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.nibi]
+env = {UV_OFFLINE=0, SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.trillium]
+env = {UV_OFFLINE=1, SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.trillium-gpu]
+env = {UV_OFFLINE=1, SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.narval]
+# Mila doesn't have an allocation on Narval anymore.
+# You can also use "def-yourusername" (the default partitions).
+env = {UV_OFFLINE=1, SBATCH_ACCOUNT="def-bengioy"}

@@ -4,6 +4,7 @@
 #SBATCH --ntasks=1
 #SBATCH --mem=8G
 #SBATCH --time=0:05:00
+#SBATCH --signal=TERM@60
 
 project_name="cluv"
 results_path="logs"

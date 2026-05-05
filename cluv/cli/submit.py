@@ -163,11 +163,11 @@ async def submit_first(
                 # Stop the wait if a job is running
                 if start_cluster is not None:
                     break
-                
+
                 # Remove clusters with failed jobs
                 for cluster in failed_clusters:
                     del cluster_to_jobid[cluster]
-                
+
                 # Stop the wait if all the jobs failed
                 if not cluster_to_jobid:
                     console.log("All submitted jobs have ended without starting. Exiting.")

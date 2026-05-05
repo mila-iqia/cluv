@@ -24,7 +24,7 @@ def signal_handler(signum, frame):
     """
     print(f"Signal {signum} received! Time limit approaching.")
     # TODO : restarting job
-    sys.exit(0)
+    sys.exit(100)
 
 def init() -> int:
     if FILE_PATH.exists():

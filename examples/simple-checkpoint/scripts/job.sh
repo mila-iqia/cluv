@@ -36,8 +36,6 @@ if [ -d "$git_root/$example_path/$results_path/$SLURM_JOB_ID/" ]; then
 else
     echo "No previous results found at $git_root/$example_path/$results_path/$SLURM_JOB_ID/."
 fi
-
-
 # echo "Copying previous results from $git_root/$example_path/$results_path/$SLURM_JOB_ID/ to $SLURM_TMPDIR/$project_name/$example_path/$results_path"
 # srun --ntasks-per-node=1 rsync --update --recursive --mkpath $git_root/$example_path/$results_path/$SLURM_JOB_ID/ $SLURM_TMPDIR/$project_name/$example_path/$results_path
 
@@ -48,7 +46,26 @@ echo "Running command: $@"
 # each task to only see its own GPU, which can cause some mysterious NCCL errors.
 project_example="$SLURM_TMPDIR/$project_name/$example_path"
 srun --gres-flags=allow-task-sharing uv --directory=$project_example run "$@"
+EXIT_CODE=$?
+
+echo "Program exited with code: $EXIT_CODE"
 
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
 echo "Copying logs from $SLURM_TMPDIR/$project_name/$example_path/$results_path/ to $git_root/$example_path/$results_path/$SLURM_JOB_ID/"
 srun --ntasks-per-node=1 rsync --update --recursive --mkpath $SLURM_TMPDIR/$project_name/$example_path/$results_path/ $git_root/$example_path/$results_path/$SLURM_JOB_ID/
+
+# Check exit codes to determine next steps
+if [ $EXIT_CODE -eq 0 ]; then
+    echo "Success: Job completed."
+
+    exit 0
+elif [ $EXIT_CODE -eq 100 ]; then
+    echo "Checkpoint triggered (Exit Code 100). Requeuing job..."
+    
+    # Requeue this specific job ID to run again
+    # The job retains its Job ID but increments its restart count
+    scontrol requeue $SLURM_JOB_ID
+else
+    echo "Failure: Job crashed with generic error."
+    exit $EXIT_CODE
+fi

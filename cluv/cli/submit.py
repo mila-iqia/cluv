@@ -118,7 +118,9 @@ async def submit_first(
     cluster_to_jobid: dict[str, int] = {}
     for cluster, result in zip(clusters_to_remote.keys(), sbatch_results):
         if isinstance(result, BaseException):
-            continue
+            console.print(
+                f"    - [bold]{cluster}[/bold]: error when trying to use remote, [red]{result}[/red]"
+            )
         else:
             if result.returncode == 0:
                 job_id = int(result.stdout.strip())

@@ -37,8 +37,7 @@ async def submit(
 
 
     Parameters:
-        cluster: SSH hostname of the target cluster. Can be set to "first" to launch the job
-        on all clusters and keep only the first one to starts.
+        cluster: SSH hostname of the target cluster. Can be set to "first" to launch the job on all clusters and keep only the first one to starts.
         job_script: Path to the job script to submit, relative to the project root.
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.

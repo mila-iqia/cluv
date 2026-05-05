@@ -9,6 +9,7 @@ from time import sleep
 import os
 import random
 import signal
+import sys
 
 # Get JOB_ID from environment variable, or generate a random one if not found (e.g., when running locally)
 rand = str(random.randint(1000, 9999))
@@ -23,6 +24,7 @@ def signal_handler(signum, frame):
     """
     print(f"Signal {signum} received! Time limit approaching.")
     # TODO : restarting job
+    sys.exit(0)
 
 def init() -> int:
     if FILE_PATH.exists():

@@ -64,10 +64,10 @@ def signal_handler(signum: int, _: FrameType | None):
 
     This should run quickly. Performing a full checkpoint here mid-epoch is not recommended.
     """
-    signal_enum = signal.Signals(signum)
-    logger.info(f"Job received a {signal_enum.name} signal!")
+    # signal_enum = signal.Signals(signum)
+    logger.info(f"Job received a {signum} signal! Stopping the training.")
     # subprocess.run(("scontrol", "requeue", SLURM_JOBID))
-    # sys.exit(0)
+    sys.exit(0)
 
     # Perform quick actions that will help the job resume later.
     # If you use Weights & Biases: https://docs.wandb.ai/guides/runs/resuming#preemptible-sweeps

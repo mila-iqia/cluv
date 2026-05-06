@@ -65,7 +65,7 @@ async def sync(
     this_cluster = current_cluster()
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     if not clusters:
-        clusters = get_config().clusters
+        clusters = get_config().clusters_names
         if this_cluster and this_cluster in clusters:
             clusters.remove(this_cluster)
         connections = await asyncio.gather(

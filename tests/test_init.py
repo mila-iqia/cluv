@@ -51,10 +51,10 @@ class TestCheckCluvConfig:
         check_cluv_config(p)
         config = load_cluv_config(p)
 
-        assert config.clusters == ["mila"] + DRAC_CLUSTERS
+        assert config.clusters_names == ["mila"] + DRAC_CLUSTERS
         assert config.results_path == DEFAULT_RESULTS_PATH
         assert config.env == {"UV_OFFLINE": "1", "WANDB_MODE": "offline"}
-        assert config.cluster_configs == {
+        assert config.clusters == {
             "mila": ClusterConfig(env={"UV_OFFLINE": "0", "WANDB_MODE": "online"}),
             **{cluster: ClusterConfig() for cluster in DRAC_CLUSTERS},
         }
@@ -65,7 +65,7 @@ class TestCheckCluvConfig:
         p.write_text(textwrap.dedent(
             """\
             [tool.cluv]
-            clusters = ["mila"]
+            clusters = {"mila" = {}}
             results_path = "results"
             """
         ))
@@ -73,7 +73,7 @@ class TestCheckCluvConfig:
         check_cluv_config(p)
         config = load_cluv_config(p)
 
-        assert config.clusters == ["mila"]
+        assert config.clusters_names == ["mila"]
         assert config.results_path == "results"
 
 

@@ -42,7 +42,7 @@ class CluvConfig(BaseModel):
     env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""
 
-    cluster_configs: dict[str, ClusterConfig] = {}
+    clusters: dict[str, ClusterConfig] = {}
     """Configuration options for each cluster.
 
     The keys are cluster names; each value is a `ClusterConfig` whose `env` dict contains
@@ -50,8 +50,8 @@ class CluvConfig(BaseModel):
     """
 
     @property
-    def clusters(self) -> list[str]:
-        return list(self.cluster_configs.keys())
+    def clusters_names(self) -> list[str]:
+        return list(self.clusters.keys())
 
 
 @functools.cache
@@ -85,37 +85,11 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
 
     cluv = data.get("tool", {}).get("cluv", {})
     if not cluv:
-        logger.warning(
-            UserWarning(
-                f"[red]No [tool.cluv] section found in {pyproject_path}, using defaults.[/red]"
-            )
-        )
-        return CluvConfig()
+        raise RuntimeError(f"No cluv config in {pyproject_path} file.")
 
-    # clusters: list (backward compat) or table (new format with per-cluster settings)
-    clusters_section = cluv.get("clusters", {})
-    if isinstance(clusters_section, list):
-        cluster_configs: dict[str, ClusterConfig] = {k: ClusterConfig() for k in clusters_section}
-    else:
-        cluster_configs = {}
-        for name, raw in clusters_section.items():
-            if "env" in raw:
-                # New format: [tool.cluv.clusters.<name>.env]
-                cluster_configs[name] = ClusterConfig(env=dict(raw["env"]))
-            else:
-                # Old flat format: env vars directly in [tool.cluv.clusters.<name>]
-                cluster_configs[name] = ClusterConfig(env=dict(raw))
-
-    # global env: new [tool.cluv.env] key, with backward compat for old [tool.cluv.slurm]
-    env: dict[str, str] = cluv.get("env", cluv.get("slurm", {}))
-
-    return CluvConfig(
-        results_path=cluv.get("results_path"),
-        env=env,
-        cluster_configs=cluster_configs,
-    )
+    return CluvConfig.model_validate(cluv)
 
 
 def get_cluster_choices() -> list[str]:
     """Return configured clusters or the defaults when config is missing/invalid."""
-    return get_config().clusters
+    return get_config().clusters_names

@@ -15,6 +15,7 @@ example_path="examples/simple-checkpoint"
 # Minimal test job for cluv submit.
 echo "hostname: $(hostname)"
 echo "Date:     $(date)"
+echo "Job has been restarted $SLURM_RESTART_COUNT times."
 echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
 
 # Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.
@@ -36,8 +37,6 @@ if [ -d "$git_root/$example_path/$results_path/$SLURM_JOB_ID/" ]; then
 else
     echo "No previous results found at $git_root/$example_path/$results_path/$SLURM_JOB_ID/."
 fi
-# echo "Copying previous results from $git_root/$example_path/$results_path/$SLURM_JOB_ID/ to $SLURM_TMPDIR/$project_name/$example_path/$results_path"
-# srun --ntasks-per-node=1 rsync --update --recursive --mkpath $git_root/$example_path/$results_path/$SLURM_JOB_ID/ $SLURM_TMPDIR/$project_name/$example_path/$results_path
 
 # Run the actual job command passed as an argument ('python main.py' for example)
 echo "Running command: $@"
@@ -57,13 +56,10 @@ srun --ntasks-per-node=1 rsync --update --recursive --mkpath $SLURM_TMPDIR/$proj
 # Check exit codes to determine next steps
 if [ $EXIT_CODE -eq 0 ]; then
     echo "Success: Job completed."
-
     exit 0
 elif [ $EXIT_CODE -eq 100 ]; then
     echo "Checkpoint triggered (Exit Code 100). Requeuing job..."
-    
-    # Requeue this specific job ID to run again
-    # The job retains its Job ID but increments its restart count
+    # Requeue the job with the same job id
     scontrol requeue $SLURM_JOB_ID
 else
     echo "Failure: Job crashed with generic error."

@@ -16,7 +16,6 @@ import functools
 import logging
 import tomllib
 from pathlib import Path
-
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
     results_path: str
-    """Path to the results directory, relative to the project root. If not set, defaults to "logs".
+    """Path to the results directory, relative to the project root.
 
     !!! info
         On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.

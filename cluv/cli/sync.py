@@ -126,7 +126,6 @@ async def sync_task_function(
     _update_progress(2, "Running 'uv sync'", num_tasks)
     await remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
 
-  
     _update_progress(3, "Fetching results", num_tasks)
     await fetch_results(remote, config.results_path)
 

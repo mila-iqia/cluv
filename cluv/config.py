@@ -12,25 +12,24 @@ Stretch goal (might be useful):
 
 from __future__ import annotations
 
-import dataclasses
 import functools
 import logging
 import tomllib
 from pathlib import Path
 
+from pydantic import BaseModel
+
 logger = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass
-class ClusterConfig:
+class ClusterConfig(BaseModel):
     """Per-cluster configuration options."""
 
-    env: dict[str, str] = dataclasses.field(default_factory=dict)
+    env: dict[str, str] = {}
     """Environment variables to set when running Slurm commands on this cluster."""
 
 
-@dataclasses.dataclass
-class CluvConfig:
+class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
     results_path: str | None = None
@@ -40,10 +39,10 @@ class CluvConfig:
         On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.
     """
 
-    env: dict[str, str] = dataclasses.field(default_factory=dict)
+    env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""
 
-    cluster_configs: dict[str, ClusterConfig] = dataclasses.field(default_factory=dict)
+    cluster_configs: dict[str, ClusterConfig] = {}
     """Configuration options for each cluster.
 
     The keys are cluster names; each value is a `ClusterConfig` whose `env` dict contains

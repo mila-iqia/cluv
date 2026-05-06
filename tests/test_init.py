@@ -53,9 +53,9 @@ class TestCheckCluvConfig:
 
         assert config.clusters == ["mila"] + DRAC_CLUSTERS
         assert config.results_path == DEFAULT_RESULTS_PATH
-        assert config.env == {"UV_OFFLINE": 1, "WANDB_MODE": "offline"}
+        assert config.env == {"UV_OFFLINE": "1", "WANDB_MODE": "offline"}
         assert config.cluster_configs == {
-            "mila": ClusterConfig(env={"UV_OFFLINE": 0, "WANDB_MODE": "online"}),
+            "mila": ClusterConfig(env={"UV_OFFLINE": "0", "WANDB_MODE": "online"}),
             **{cluster: ClusterConfig() for cluster in DRAC_CLUSTERS},
         }
 

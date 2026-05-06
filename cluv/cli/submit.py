@@ -173,7 +173,7 @@ async def submit_first(
                     return None
 
                 await asyncio.sleep(wait_time)
-                wait_time = _update_waiting_time(wait_time)
+                wait_time = min(wait_time*2, 20)
         console.log(
             f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs...\n",
             f"Use `ssh {start_cluster} sacct -j {start_job_id}` to view its status.",
@@ -277,11 +277,3 @@ async def cancel_all_jobs(
             if cluster != keep_cluster
         ]
     )
-
-
-def _update_waiting_time(
-    current_waiting_time: int, max_waiting_time: int = 20, factor: int = 2
-) -> int:
-    """Update the waiting time by multiplying it by a factor, up to a maximum."""
-    new_waiting_time = current_waiting_time * factor
-    return min(new_waiting_time, max_waiting_time)

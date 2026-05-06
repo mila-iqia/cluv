@@ -24,6 +24,7 @@ from torchvision.datasets import CIFAR10
 from torchvision.models import resnet18
 from tqdm import tqdm
 import time
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,7 @@ class RunState(TypedDict):
     torch_cuda_random_state: list[Tensor]
 
 
-def signal_handler(signum: int, frame: FrameType | None):
+def signal_handler_term(signum: int, frame: FrameType | None):
     # TODO : split the signal handler by signal ?
     """Called before the job gets pre-empted or reaches the time-limit.
 
@@ -67,6 +68,25 @@ def signal_handler(signum: int, frame: FrameType | None):
     logger.error(f"Job received a {signal_enum.name} signal!")
     # TODO : requeue the job ? subprocess "scontrol requeue SLURM_JOBID"
     # TODO : Exit with code 0 to avoid SLURM marking the job as failed ? exit(0)
+    subprocess.run(("scontrol", "requeue", SLURM_JOBID))
+    sys.exit(0)
+
+    # Perform quick actions that will help the job resume later.
+    # If you use Weights & Biases: https://docs.wandb.ai/guides/runs/resuming#preemptible-sweeps
+    # if wandb.run:
+    #     wandb.mark_preempting()
+
+def signal_handler_usr1(signum: int, frame: FrameType | None):
+    # TODO : split the signal handler by signal ?
+    """Called before the job gets pre-empted or reaches the time-limit.
+
+    This should run quickly. Performing a full checkpoint here mid-epoch is not recommended.
+    """
+    signal_enum = signal.Signals(signum)
+    logger.error(f"Job received a {signal_enum.name} signal!")
+    # TODO : requeue the job ? subprocess "scontrol requeue SLURM_JOBID"
+    # TODO : Exit with code 0 to avoid SLURM marking the job as failed ? exit(0)
+    sys.exit(100)
 
     # Perform quick actions that will help the job resume later.
     # If you use Weights & Biases: https://docs.wandb.ai/guides/runs/resuming#preemptible-sweeps
@@ -179,10 +199,10 @@ def main():
     )
 
     signal.signal(
-        signal.SIGTERM, signal_handler
+        signal.SIGTERM, signal_handler_term
     )  # Before getting pre-empted and requeued.
     signal.signal(
-        signal.SIGUSR1, signal_handler
+        signal.SIGUSR1, signal_handler_usr1
     )  # Before reaching the end of the time limit.
     # TODO : Do we need SIGUSR1 ? Doesn't SIGTERM already cover this case ?
 

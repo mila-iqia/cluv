@@ -58,32 +58,34 @@ Add a `[tool.cluv]` section to the `pyproject.toml` of your project. `cluv init`
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `clusters` | list of strings _or_ table | SSH hostnames from `~/.ssh/config`, or a table of per-cluster settings (see below). |
+| `clusters` | table | Per-cluster settings, keyed by SSH hostname from `~/.ssh/config`. |
 | `results_path` | string (optional) | Path relative to the project root. When set, `cluv sync` rsyncs that directory back from each remote cluster. |
 
-### `[tool.cluv.slurm]`
-Environment variables applied when using Slurm commands on all clusters. Use this for global Slurm defaults such as resource limits or for tool configuration like (uv or W&B).
+### `[tool.cluv.env]`
+Environment variables applied when using Slurm commands on all clusters. Use this for global Slurm defaults such as resource limits or tool configuration (uv, W&B, etc.).
 
-### `[tool.cluv.clusters.<name>]`
-Environment variables for a specific cluster. Values here are merged on top of `[tool.cluv.slurm]` when submitting.
+### `[tool.cluv.clusters.<name>.env]`
+Environment variables for a specific cluster. Values here are merged on top of `[tool.cluv.env]` when submitting.
 
 ### Example
 
 ```toml
 [tool.cluv]
-clusters = ["mila", "narval", "tamia"]
 results_path = "logs"
 
-[tool.cluv.slurm]
+[tool.cluv.env]
 # Applied to every cluster by default
-UV_OFFLINE = "1"
+SBATCH_TIME = "3:00:00"
 WANDB_MODE = "offline"
 
-[tool.cluv.clusters.mila]
+[tool.cluv.clusters.mila.env]
 # Overrides for the mila cluster only
-UV_OFFLINE = "0"
 WANDB_MODE = "online"
 SBATCH_PARTITION = "long"
+
+[tool.cluv.clusters.narval]
+
+[tool.cluv.clusters.tamia]
 ```
 
 ## Commands

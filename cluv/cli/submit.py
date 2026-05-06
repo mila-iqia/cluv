@@ -65,7 +65,7 @@ async def submit(
     # Sync.
     remotes = await sync(clusters=[cluster])
 
-    # Submit the sbatch command.
+    # Run the sbatch command over SSH.
     remote = remotes[0]
     result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
 

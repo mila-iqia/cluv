@@ -21,6 +21,8 @@ class TestClustersTableFormat:
         p = write_pyproject(
             tmp_path,
             """
+[tool.cluv]
+results_path = "logs"
 [tool.cluv.clusters.mila]
 [tool.cluv.clusters.rorqual.env]
 SBATCH_ACCOUNT = "def-me"
@@ -33,6 +35,8 @@ SBATCH_ACCOUNT = "def-me"
         p = write_pyproject(
             tmp_path,
             """
+[tool.cluv]
+results_path = "logs"
 [tool.cluv.clusters.mila]
 """,
         )
@@ -45,6 +49,8 @@ SBATCH_ACCOUNT = "def-me"
         p = write_pyproject(
             tmp_path,
             """
+[tool.cluv]
+results_path = "logs"
 [tool.cluv.clusters.rorqual.env]
 SBATCH_ACCOUNT = "def-bengioy"
 SBATCH_PARTITION = "main"
@@ -59,6 +65,8 @@ SBATCH_PARTITION = "main"
         p = write_pyproject(
             tmp_path,
             """
+[tool.cluv]
+results_path = "logs"
 [tool.cluv.clusters.mila]
 [tool.cluv.clusters.rorqual.env]
 SBATCH_ACCOUNT = "def-bengioy"
@@ -79,6 +87,8 @@ class TestGlobalEnv:
         p = write_pyproject(
             tmp_path,
             """
+[tool.cluv]
+results_path = "logs"
 [tool.cluv.env]
 SBATCH_TIME = "1:00:00"
 SBATCH_GPUS = "1"
@@ -95,6 +105,8 @@ SBATCH_GPUS = "1"
         p = write_pyproject(
             tmp_path,
             """
+[tool.cluv]
+results_path = "logs"
 [tool.cluv.clusters.mila]
 """,
         )
@@ -123,6 +135,8 @@ name = "foo"
         p = write_pyproject(
             tmp_path,
             """
+[tool.cluv]
+results_path = "logs"
 [tool.cluv.env]
 SBATCH_TIME = "3:00:00"
 

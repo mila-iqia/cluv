@@ -70,7 +70,7 @@ async def submit(
     result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
 
     if result.returncode != 0:
-        console.print(f"[red] Invalid sbatch : {result.stderr}[/red]")
+        console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
         return None
 
     job_id = int(result.stdout.strip())

@@ -247,7 +247,7 @@ async def sbatch(
     cluster = remote.hostname
 
     remote_cmd = get_sbatch_command(
-        cluster, Path(job_script), sbatch_args, program_args, git_commit
+        cluster, job_script, sbatch_args, program_args, git_commit
     )
     return await remote.run(remote_cmd, display=True, warn=True, hide=True)
 

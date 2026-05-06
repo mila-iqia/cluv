@@ -59,7 +59,7 @@ Add a `[tool.cluv]` section to the `pyproject.toml` of your project. `cluv init`
 | Field | Type | Description |
 |-------|------|-------------|
 | `clusters` | table | Per-cluster settings, keyed by SSH hostname from `~/.ssh/config`. |
-| `results_path` | string (optional) | Path relative to the project root. When set, `cluv sync` rsyncs that directory back from each remote cluster. |
+| `results_path` | string | Path relative to the project root for storing results. `cluv sync` rsyncs that directory back from each remote cluster. |
 
 ### `[tool.cluv.env]`
 Environment variables applied when using Slurm commands on all clusters. Use this for global Slurm defaults such as resource limits or tool configuration (uv, W&B, etc.).

@@ -32,7 +32,7 @@ class ClusterConfig(BaseModel):
 class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
-    results_path: str | None = None
+    results_path: str
     """Path to the results directory, relative to the project root. If not set, defaults to "logs".
 
     !!! info

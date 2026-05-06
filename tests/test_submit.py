@@ -26,11 +26,11 @@ class TestGetSbatchCommand:
                 """\
             [tool.cluv]
             results_path = "results"
-            [tool.cluv.slurm]
+            [tool.cluv.env]
             MY_VAR="1"
-            [tool.cluv.clusters.mila]
+            [tool.cluv.clusters.mila.env]
             SPECIAL_MILA_VAR="xyz"
-            [tool.cluv.clusters.vulcan]
+            [tool.cluv.clusters.vulcan.env]
             SPECIAL_VULCAN_VAR="kij"
             """
             )
@@ -56,11 +56,11 @@ class TestGetSbatchCommand:
                 """\
             [tool.cluv]
             results_path = "results"
-            [tool.cluv.slurm]
+            [tool.cluv.env]
             MY_VAR="1"
-            [tool.cluv.clusters.mila]
+            [tool.cluv.clusters.mila.env]
             MY_VAR="2"
-            [tool.cluv.clusters.vulcan]
+            [tool.cluv.clusters.vulcan.env]
             MY_VAR="3"
             """
             )

@@ -254,7 +254,7 @@ async def sbatch(
 
 async def get_job_status(remote: Remote, job_id: int) -> str:
     """Get the status of the job with the given id on the remote cluster."""
-    sacct_command = f"sacct -j {job_id} --format=State --noheader --parsable2 | head -1"
+    sacct_command = f"sacct -j {job_id} --format=State --noheader --allocations"
     return await remote.get_output(sacct_command)
 
 

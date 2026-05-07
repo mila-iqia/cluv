@@ -12,7 +12,7 @@ def write_pyproject(tmp_path: Path, content: str) -> Path:
 
 
 # ---------------------------------------------------------------------------
-# clusters field — new table format
+# clusters field — table format
 # ---------------------------------------------------------------------------
 
 

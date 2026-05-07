@@ -19,7 +19,7 @@ results_path = "logs"
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
 SBATCH_TIME = "3:00:00"
-SBATCH_REQUE = true
+SBATCH_REQUEUE = true
 
 [tool.cluv.clusters.mila]
 env = {UV_OFFLINE=0, WANDB_MODE="online"}
@@ -29,7 +29,6 @@ env = {UV_OFFLINE=0, WANDB_MODE="online"}
 env = {UV_OFFLINE=1, WANDB_MODE="offline"}
 
 [tool.cluv.clusters.killarney]
-# submit_from_scratch = true # TODO: Need to do cd $SCRATCH sbatch --chdir $HOME/<project_path>
 env = {UV_OFFLINE=1, WANDB_MODE="offline"}
 
 [tool.cluv.clusters.vulcan]

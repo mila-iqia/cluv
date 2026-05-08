@@ -220,13 +220,15 @@ async def clone_project(remote: Remote):
                 f"{git_remote_name}/{github_head_ref}",
                 hide=False,
             )
-            await remote.run(f"git -C {git_root_path} pull {git_remote_name} {github_head_ref}")
+            await remote.run(
+                f"git -C {git_root_path} pull {git_remote_name} {github_head_ref}", hide=False
+            )
             return
         current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
         await remote.run(f"git -C {git_root_path} checkout --detach {current_git_commit}", hide=False)
     else:
         await remote.run(f"git -C {git_root_path} checkout {current_git_branch}", hide=False)
-        await remote.run(f"git -C {git_root_path} pull")
+        await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
 async def fetch_results(remote: Remote, results_path: Path | str):

@@ -16,12 +16,12 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+from cluv.config import load_cluv_config
+from cluv.cli.init import DEFAULT_RESULTS_PATH, init
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.cli.init import DEFAULT_RESULTS_PATH, DRAC_CLUSTERS, init
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.remote import Remote, control_socket_is_running
-from cluv.config import load_cluv_config
 
 # Some useful constants used to turn tests on and off depending on where we are.
 IN_GITHUB_CI = "GITHUB_ACTIONS" in os.environ
@@ -251,7 +251,8 @@ def test_init(
             project_dir / generated_config.results_path
         ).resolve() == scratch / DEFAULT_RESULTS_PATH / project_name
 
-    assert generated_config.clusters_names == ["mila"] + DRAC_CLUSTERS
+    expected_config = load_cluv_config(Path(__file__).resolve().parents[1] / "pyproject.toml")
+    assert generated_config.clusters_names == expected_config.clusters_names
 
 
 @pytest.mark.timeout(5)

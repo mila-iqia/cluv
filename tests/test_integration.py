@@ -212,6 +212,7 @@ async def test_submit(remote: Remote):
         final_status = "UNKNOWN"
         max_poll_attempts = 75
         poll_interval_seconds = 2
+        attempt = 0
         # Poll up to ~150s (75 * 2s) for terminal state, leaving a bit of room in the
         # 180s test timeout for sync + output validation.
         for attempt in range(1, max_poll_attempts + 1):
@@ -235,7 +236,7 @@ async def test_submit(remote: Remote):
             pytest.fail(f"Submitted job {job_id} ended with unexpected status: {final_status!r}")
         job_completed_successfully = True
         await sync(clusters=[remote.hostname])
-        output_file = Path("logs") / str(job_id) / f"slurm-{job_id}.out"
+        output_file = Path(DEFAULT_RESULTS_PATH) / str(job_id) / f"slurm-{job_id}.out"
         assert output_file.is_file(), f"Expected job output file to be synced locally: {output_file}"
         output_text = output_file.read_text(errors="replace")
         assert re.search(r"Python \d+\.\d+(\.\d+)?", output_text), (

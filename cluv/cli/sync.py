@@ -180,6 +180,7 @@ async def clone_project(remote: Remote):
     # TODO: This git info is shared, but currently repeatedly executed for each cluster.
     # Could be done only once.
     current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
+    safe_current_git_branch = shlex.quote(current_git_branch)
     detached_head = current_git_branch == "HEAD"
     git_remote_name = (
         subprocess.getoutput(f"git config --get branch.{current_git_branch}.remote").strip()
@@ -239,7 +240,7 @@ async def clone_project(remote: Remote):
             f"git -C {git_root_path} checkout --detach {safe_current_git_commit}", hide=False
         )
     else:
-        await remote.run(f"git -C {git_root_path} checkout {current_git_branch}", hide=False)
+        await remote.run(f"git -C {git_root_path} checkout {safe_current_git_branch}", hide=False)
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 

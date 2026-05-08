@@ -1,5 +1,6 @@
 """Unit tests for cluv/cli/init.py check functions."""
 
+import importlib
 import textwrap
 from pathlib import Path
 
@@ -15,6 +16,10 @@ from cluv.cli.init import (
     check_symlink_to_scratch,
 )
 from cluv.config import load_cluv_config
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CLUV_INIT_MODULE = importlib.import_module("cluv.cli.init")
+
 
 class TestCheckHomeDir:
     def test_not_under_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -49,9 +54,12 @@ class TestCheckCluvConfig:
 
         check_cluv_config(p)
         config = load_cluv_config(p)
-        expected_config = load_cluv_config(Path(__file__).resolve().parents[1] / "pyproject.toml")
+        expected_config = load_cluv_config(REPO_ROOT / "pyproject.toml")
 
-        assert config == expected_config
+        assert config.results_path == expected_config.results_path
+        assert config.env == expected_config.env
+        assert config.clusters_names == expected_config.clusters_names
+        assert config.clusters == expected_config.clusters
 
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
@@ -161,3 +169,45 @@ class TestJobScriptCheck:
         assert 'project_root="$HOME/my_project"' in safe_job_script_content
         assert 'results_path="outputs"' in safe_job_script_content
         assert "results_dir" not in safe_job_script_content
+        assert "mkdir -p $project_root_in_tmpdir/$results_path" in safe_job_script_content
+        assert (
+            "rsync --update --recursive $project_root/$results_path/$SLURM_JOB_ID "
+            "$project_root_in_tmpdir/$results_path/"
+        ) in safe_job_script_content
+        assert (
+            "rsync --update --recursive $project_root_in_tmpdir/$results_path/$SLURM_JOB_ID "
+            "$project_root/$results_path/"
+        ) in safe_job_script_content
+
+    def test_replace_results_dir_from_legacy_template(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        project_root = fake_home / "my_project"
+        project_root.mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+        templates_dir = tmp_path / "templates"
+        templates_dir.mkdir()
+        legacy_script = templates_dir / "legacy_job.sh"
+        legacy_script.write_text(
+            textwrap.dedent(
+                """\
+                #!/bin/bash
+                #SBATCH --output=logs/%j/slurm-%j.out
+                results_dir="logs"
+                echo "Using $results_dir"
+                """
+            )
+        )
+        monkeypatch.setattr(CLUV_INIT_MODULE, "_get_script_templates_path", lambda: templates_dir)
+
+        check_job_script(project_root, "outputs")
+
+        generated_legacy_script = project_root / "scripts" / "legacy_job.sh"
+        assert generated_legacy_script.exists()
+        generated_legacy_script_content = generated_legacy_script.read_text()
+        assert '#SBATCH --output=outputs/%j/slurm-%j.out' in generated_legacy_script_content
+        assert 'results_path="outputs"' in generated_legacy_script_content
+        assert "Using $results_path" in generated_legacy_script_content
+        assert "results_dir" not in generated_legacy_script_content

@@ -184,7 +184,7 @@ async def test_submit(remote: Remote):
     """
     if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
-    job_finished = False
+    job_completed_successfully = False
     job_id = await submit(
         cluster=remote.hostname,
         job_script=Path("scripts/safe_job.sh"),
@@ -209,9 +209,11 @@ async def test_submit(remote: Remote):
             "BOOT_FAIL",
             "DEADLINE",
         }
-        final_status = ""
+        final_status = "UNKNOWN"
+        max_poll_attempts = 45
+        poll_interval_seconds = 2
         # Poll up to ~90s (45 * 2s) for terminal state.
-        for _ in range(45):
+        for _ in range(max_poll_attempts):
             status_output = await remote.get_output(
                 f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
                 warn=True,
@@ -221,10 +223,10 @@ async def test_submit(remote: Remote):
             final_status = status_output.strip().split("|")[0]
             if final_status in terminal_statuses:
                 break
-            await asyncio.sleep(2)
+            await asyncio.sleep(poll_interval_seconds)
         if final_status != "COMPLETED":
             pytest.fail(f"Submitted job {job_id} ended with unexpected status: {final_status!r}")
-        job_finished = True
+        job_completed_successfully = True
         await sync(clusters=[remote.hostname])
         output_file = Path("logs") / str(job_id) / f"slurm-{job_id}.out"
         assert output_file.is_file(), f"Expected job output file to be synced locally: {output_file}"
@@ -233,7 +235,7 @@ async def test_submit(remote: Remote):
             f"Expected python version output in {output_file}, got:\n{output_text}"
         )
     finally:
-        if isinstance(job_id, int) and not job_finished:
+        if isinstance(job_id, int) and not job_completed_successfully:
             await remote.run(f"scancel {job_id}", warn=True, hide=True, display=False)
 
 

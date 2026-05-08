@@ -178,12 +178,20 @@ async def clone_project(remote: Remote):
     # TODO: This git info is shared, but currently repeatedly executed for each cluster.
     # Could be done only once.
     current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
-    git_remote_name = subprocess.getoutput(
-        f"git config --get branch.{current_git_branch}.remote"
-    ).strip()
-    github_repo_url = subprocess.getoutput(
-        f"git config --get remote.{git_remote_name}.url"
-    ).strip()
+    detached_head = current_git_branch == "HEAD"
+    git_remote_name = (
+        subprocess.getoutput(f"git config --get branch.{current_git_branch}.remote").strip()
+        if not detached_head
+        else "origin"
+    )
+    if not git_remote_name:
+        git_remote_name = "origin"
+    github_repo_url = subprocess.getoutput(f"git config --get remote.{git_remote_name}.url").strip()
+    if not github_repo_url:
+        raise RuntimeError(
+            f"Could not determine Git remote URL from remote '{git_remote_name}'. "
+            "Make sure your git remote is configured."
+        )
 
     # TODO: Scp the ~/.git-credentials file if needed?
     # Or configure the config credential-helper to store first?
@@ -204,8 +212,12 @@ async def clone_project(remote: Remote):
         logger.debug(f"Project isn't cloned yet on {remote.hostname}.")
         await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True)
     await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True)
-    await remote.run(f"git -C {git_root_path} checkout {current_git_branch}", hide=False)
-    await remote.run(f"git -C {git_root_path} pull")
+    if detached_head:
+        current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+        await remote.run(f"git -C {git_root_path} checkout --detach {current_git_commit}", hide=False)
+    else:
+        await remote.run(f"git -C {git_root_path} checkout {current_git_branch}", hide=False)
+        await remote.run(f"git -C {git_root_path} pull")
 
 
 async def fetch_results(remote: Remote, results_path: Path | str):

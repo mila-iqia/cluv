@@ -27,7 +27,7 @@ srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES bash -e <<END
     uv sync
     # Copy any existing results from $SCRATCH to the project root.
     mkdir -p $project_root_in_tmpdir/$results_dir
-    exec rsync --update --recursive $project_root/$results_dir/$SLURM_JOB_ID $project_root_in_tmpdir/$results_dir/
+    rsync --update --recursive $project_root/$results_dir/$SLURM_JOB_ID $project_root_in_tmpdir/$results_dir/
 END
 
 # Run the actual job command passed as an argument ('python main.py' for example)

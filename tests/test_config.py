@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from cluv.config import load_cluv_config
+from cluv.config import load_cluv_config, ClusterConfig
 from milatools.cli.init_command import DRAC_CLUSTERS
 import pytest
 
@@ -43,7 +43,7 @@ results_path = "logs"
         )
         cfg = load_cluv_config(p)
         assert "mila" in cfg.clusters
-        assert cfg.clusters.get("mila", None) is not None
+        assert isinstance(cfg.clusters["mila"], ClusterConfig)
         assert cfg.clusters["mila"].env == {}
 
     def test_per_cluster_sbatch_vars_new_format(self, tmp_path: Path) -> None:

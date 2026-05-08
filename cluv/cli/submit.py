@@ -219,7 +219,7 @@ def get_sbatch_command(
     # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
     config = get_config()
     env_vars: dict[str, str] = {**config.env}
-    env_vars.update(config.cluster_configs.get(cluster, ClusterConfig()).env)
+    env_vars.update(config.clusters.get(cluster, ClusterConfig()).env)
 
     # Prefix the job name with "cluv-" so it is easy to identify cluv-submitted jobs in sacct.
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem

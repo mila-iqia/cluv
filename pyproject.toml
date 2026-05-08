@@ -76,25 +76,43 @@ source = ["cluv"]
 show_missing = true
 
 [tool.cluv]
-# IDEA: either the job script is set here, or passed as a positional argument (after the cluster)
-# OR, leave it as a required positional argument. More explicit.
-job_script = "scripts/job.sh"
 results_path = "logs"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
 SBATCH_TIME = "3:00:00"
-SBATCH_REQUE = true
+SBATCH_REQUEUE = true
 
-[tool.cluv.clusters.mila.env]
-SBATCH_PARTITION = "long"
+[tool.cluv.clusters.mila]
+env = {UV_OFFLINE=0, WANDB_MODE="online"}
 
-[tool.cluv.clusters.rorqual.env]
-UV_OFFLINE = 1
-
+# PAICE clusters.
 [tool.cluv.clusters.tamia]
-# [tool.cluv.clusters.fir]
-# [tool.cluv.clusters.nibi]
-# [tool.cluv.clusters.killarney]
-# [tool.cluv.clusters.vulcan]
-# [tool.cluv.clusters.trillium-gpu]
+env = {UV_OFFLINE=1, WANDB_MODE="offline"}
+
+[tool.cluv.clusters.killarney]
+env = {UV_OFFLINE=1, WANDB_MODE="offline"}
+
+[tool.cluv.clusters.vulcan]
+env = {UV_OFFLINE=1, WANDB_MODE="offline"}
+
+# DRAC clusters.
+[tool.cluv.clusters.rorqual]
+env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.fir]
+env = {UV_OFFLINE=0, WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.nibi]
+env = {UV_OFFLINE=0, WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.trillium]
+env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.trillium-gpu]
+env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.narval]
+# Mila doesn't have an allocation on Narval anymore.
+# You can also use "def-yourusername" (the default partitions).
+env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="def-bengioy"}

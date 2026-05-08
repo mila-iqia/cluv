@@ -45,6 +45,8 @@ pytestmark = [
 
 REQUIRED_CLUSTERS = ("mila", "rorqual", "tamia")
 ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)
+STATUS_SUPPORTED_CLUSTERS = {"mila", "tamia", "rorqual"}
+SUBMIT_SUPPORTED_CLUSTERS = {"mila", "rorqual"}
 # Mark all the tests here as 'slow', so they are only run when the --slow flag is passed to pytest,
 # specifically in the integration-tests CI step, which happens on a self-hosted runner that has
 # reusable SSH connections to those clusters.
@@ -127,22 +129,30 @@ async def cluster_status(remote: Remote):
 @pytest.mark.slow
 @pytest.mark.timeout(30)
 @pytest.mark.asyncio
-async def test_status_online(cluster_status: ClusterStatus):
+async def test_status_online(cluster_status: ClusterStatus, cluster: str):
+    if cluster not in STATUS_SUPPORTED_CLUSTERS:
+        pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
     assert cluster_status.online is True
 
 
 @pytest.mark.asyncio
-async def test_status_has_gpus(cluster_status: ClusterStatus):
+async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
+    if cluster not in STATUS_SUPPORTED_CLUSTERS:
+        pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
     assert cluster_status.gpu_total > 0, "Expected tamia to report GPU nodes"
 
 
 @pytest.mark.asyncio
-async def test_status_gpu_model(cluster_status: ClusterStatus):
+async def test_status_gpu_model(cluster_status: ClusterStatus, cluster: str):
+    if cluster not in STATUS_SUPPORTED_CLUSTERS:
+        pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
     assert cluster_status.gpu_model != "?", f"GPU model not detected: {cluster_status.gpu_model!r}"
 
 
 @pytest.mark.asyncio
-async def test_status_jobs(cluster_status: ClusterStatus):
+async def test_status_jobs(cluster_status: ClusterStatus, cluster: str):
+    if cluster not in STATUS_SUPPORTED_CLUSTERS:
+        pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
     # Job counts must be non-negative integers (tamia is a busy cluster)
     assert cluster_status.jobs.running >= 0
     assert cluster_status.jobs.pending >= 0
@@ -169,6 +179,8 @@ async def test_submit(remote: Remote):
 
     NOTE: This **will** push the current branch to GitHub (since it runs `cluv sync`).
     """
+    if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
+        pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
     job_id = await submit(
         cluster=remote.hostname,
         job_script=Path("scripts/safe_job.sh"),

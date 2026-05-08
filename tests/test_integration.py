@@ -198,7 +198,7 @@ async def test_submit(remote: Remote):
         )
         assert job_name.strip().startswith("cluv-")
         # Wait until the job exits, then verify output content after syncing logs back locally.
-        terminal_statuses = {
+        TERMINAL_STATUSES = {
             "COMPLETED",
             "FAILED",
             "CANCELLED",
@@ -223,10 +223,10 @@ async def test_submit(remote: Remote):
             )
             # --parsable2 uses pipe-delimited output (`STATE|...`), so keep only the state field.
             final_status = status_output.strip().partition("|")[0].strip()
-            if final_status in terminal_statuses:
+            if final_status in TERMINAL_STATUSES:
                 break
             await asyncio.sleep(POLL_INTERVAL_SECONDS)
-        if final_status not in terminal_statuses:
+        if final_status not in TERMINAL_STATUSES:
             pytest.fail(
                 f"Job {job_id} did not reach terminal status within "
                 f"{MAX_POLL_ATTEMPTS * POLL_INTERVAL_SECONDS}s "

@@ -1,34 +1,17 @@
 import os
 import subprocess
 from pathlib import Path
-import textwrap
-
-from milatools.cli.init_command import DRAC_CLUSTERS
+import re
 
 from cluv.config import find_pyproject, has_cluv_config, load_cluv_config
-from cluv.utils import console
 from cluv.ssh import get_ssh_hostnames
+from cluv.utils import console
 
 __all__ = ["init"]
 
-JOB_SCRIPT_PATH = "scripts/job.sh"
+SCRIPTS_DIR_PATH = "scripts"
+JOB_SCRIPT_PATH = f"{SCRIPTS_DIR_PATH}/job.sh"
 DEFAULT_RESULTS_PATH = "logs"
-
-CLUV_DEFAULT_CONFIG = textwrap.dedent(f"""\
-    [tool.cluv]
-    results_path = "{DEFAULT_RESULTS_PATH}"
-
-    [tool.cluv.env]
-    # Environment variables applied when using Slurm commands on all clusters.
-    UV_OFFLINE = "1"
-    WANDB_MODE = "offline"
-    """
-)
-
-CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS = [
-    'UV_OFFLINE = "0"',
-    'WANDB_MODE = "online"',
-]
 
 
 def init() -> None:
@@ -138,10 +121,7 @@ def check_cluv_config(pyproject_path: Path) -> None:
     )
     console.print("Adding config for cluv tool :")
 
-    cluv_config = CLUV_DEFAULT_CONFIG
-    cluv_config += generate_cluster_config("mila", CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS)
-    for cluster in DRAC_CLUSTERS:
-        cluv_config += generate_cluster_config(cluster)
+    cluv_config = _load_cluv_config_template()
     add_cluv_config_section(pyproject_path, cluv_config)
 
 
@@ -152,15 +132,6 @@ def add_cluv_config_section(pyproject_path: Path, section_lines: str) -> None:
     console.log("\n" + section_lines.replace("[", "\\["))
     with pyproject_path.open("a") as f:
         f.write("\n" + section_lines)
-
-
-def generate_cluster_config(cluster: str, config_lines: list[str] = []) -> str:
-    """
-    Generate a cluster config section for the given cluster, with the given variables.
-    """
-    if config_lines:
-        return f"\n[tool.cluv.clusters.{cluster}.env]\n" + "\n".join(config_lines) + "\n"
-    return f"\n[tool.cluv.clusters.{cluster}]\n"
 
 
 def check_git() -> None:
@@ -237,69 +208,99 @@ def check_ssh_hostnames(clusters: list[str]) -> None:
 
 def check_job_script(project_root: Path, results_path: str | None) -> None:
     """
-    Check if the job script template exists. If not, create it.
-    The job script is a template for users to submit jobs to Slurm with cluv.
+    Check if job script templates exist. If not, create them.
+    The scripts are templates for users to submit jobs to Slurm with cluv.
     """
-    job_script_path = project_root / JOB_SCRIPT_PATH
-
-    if job_script_path.exists():
-        console.print(
-            f"[green]✅ Job template script already exists at '{job_script_path}'.[/green]"
-        )
-        return
-
     if results_path is None:
         console.print(
             "[yellow]⚠️  Warning: Results path is not configured. Skipping job template script generation.[/yellow]"
         )
         return
 
-    console.print(f"Adding job template script at '{job_script_path}'.")
-
     project_name = project_root.name
-    project_root = str(project_root.relative_to(Path.home()))
+    try:
+        project_root_relative_to_home = project_root.relative_to(Path.home())
+        project_root_for_script = f"$HOME/{project_root_relative_to_home}"
+    except ValueError:
+        project_root_for_script = str(project_root)
+    scripts_dir = project_root / SCRIPTS_DIR_PATH
+    script_templates_path = _get_script_templates_path()
+    script_templates = sorted(script_templates_path.glob("*.sh"))
 
-    script_content = f"""#!/bin/bash
-#SBATCH --output={results_path}/%j/slurm-%j.out
-#SBATCH --ntasks=1
-#SBATCH --mem=8G
-#SBATCH --time=0:05:00
+    if not script_templates:
+        console.print("[yellow]⚠️  Warning: No script templates found.[/yellow]")
+        return
 
-project_name="{project_name}"
-results_path="{results_path}"
-project_root="{project_root}"
-"""
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    for script_template in script_templates:
+        script_path = scripts_dir / script_template.name
+        if script_path.exists():
+            console.print(f"[green]✅ Job template script already exists at '{script_path}'.[/green]")
+            continue
+        script_content = script_template.read_text()
+        script_content = re.sub(
+            r"^#SBATCH --output=.*$",
+            f"#SBATCH --output={results_path}/%j/slurm-%j.out",
+            script_content,
+            flags=re.MULTILINE,
+        )
+        script_content = re.sub(
+            r"^project_name=.*$",
+            f'project_name="{project_name}"',
+            script_content,
+            flags=re.MULTILINE,
+        )
+        script_content = re.sub(
+            r"^project_root=.*$",
+            f'project_root="{project_root_for_script}"',
+            script_content,
+            flags=re.MULTILINE,
+        )
+        script_content = re.sub(
+            r"^results_path=.*$",
+            f'results_path="{results_path}"',
+            script_content,
+            flags=re.MULTILINE,
+        )
+        script_path.write_text(script_content)
+        console.print(f"Adding job template script at '{script_path}'.")
 
-    script_content += """
-# Minimal test job for cluv submit.
-echo "hostname: $(hostname)"
-echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
 
-# Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.
-echo "Preparing the repo and virtual environment in $SLURM_TMPDIR"
-srun --ntasks-per-node=1 --ntasks=$SLURM_NNODES --input=all bash -e <<END
-cd $SLURM_TMPDIR
-git clone $project_root
-cd $SLURM_TMPDIR/$project_name
-git checkout --detach $GIT_COMMIT
-exec uv sync
-END
+def _load_cluv_config_template() -> str:
+    pyproject_template_path = _get_pyproject_template_path()
+    pyproject_lines = pyproject_template_path.read_text().splitlines()
+    start = next(
+        (line_index for line_index, line in enumerate(pyproject_lines) if line == "[tool.cluv]"),
+        None,
+    )
+    if start is None:
+        raise RuntimeError(f"Couldn't find [tool.cluv] section in {pyproject_template_path}.")
+    end = next(
+        (
+            line_index
+            for line_index, line in enumerate(pyproject_lines[start + 1 :], start=start + 1)
+            if line.startswith("[") and not line.startswith("[tool.cluv")
+        ),
+        len(pyproject_lines),
+    )
+    return "\n".join(pyproject_lines[start:end]).strip() + "\n"
 
-# Run the actual job command passed as an argument ('python main.py' for example)
-echo "Running command: $@"
-# Note: This `--gres-flags=allow-task-sharing` is required to allow tasks on the same node to access
-# GPUs allocated to other tasks on that node. Without this flag, --gpus-per-task=1 would isolate
-# each task to only see its own GPU, which can cause some mysterious NCCL errors.
-srun --gres-flags=allow-task-sharing uv --directory=$SLURM_TMPDIR/$project_name run "$@"
 
-# Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
-echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path to $project_root/$results_path"
-if [ -d "$SLURM_TMPDIR/$project_name/$results_path/$SLURM_JOB_ID" ]; then
-    srun --ntasks-per-node=1 \
-        rsync --update --recursive "$SLURM_TMPDIR/$project_name/$results_path/$SLURM_JOB_ID" "$project_root/$results_path/"
-fi
-"""
+def _get_script_templates_path() -> Path:
+    for script_templates_path in [
+        Path(__file__).resolve().parents[2] / "scripts",
+        Path(__file__).resolve().parents[1] / "templates" / "scripts",
+    ]:
+        if script_templates_path.exists():
+            return script_templates_path
+    raise RuntimeError("Couldn't find the script templates folder.")
 
-    job_script_path.parent.mkdir(exist_ok=True)
-    with open(job_script_path, "w") as sh_file:
-        sh_file.write(script_content)
+
+def _get_pyproject_template_path() -> Path:
+    for pyproject_template_path in [
+        Path(__file__).resolve().parents[2] / "pyproject.toml",
+        Path(__file__).resolve().parents[1] / "templates" / "pyproject.toml",
+    ]:
+        if pyproject_template_path.exists():
+            return pyproject_template_path
+    raise RuntimeError("Couldn't find pyproject.toml template for cluv init.")

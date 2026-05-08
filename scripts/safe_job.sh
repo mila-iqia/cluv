@@ -7,7 +7,7 @@
 
 project_name="cluv"  # to be replaced with the user's project name.
 project_root="$HOME/repos/$project_name" # to be replaced with the path to the user's project in their $HOME.
-results_dir="logs" # to be replaced with the path to the results dir name. (--output flag above too)
+results_path="logs" # to be replaced with the path to the results path name. (--output flag above too)
 
 
 echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
@@ -28,9 +28,9 @@ srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES bash -e <<END
     uv sync
 
     # Copy any existing results from $SCRATCH to the project root.
-    mkdir -p $project_root_in_tmpdir/$results_dir
-    if [ -d "$project_root/$results_dir/$SLURM_JOB_ID" ]; then
-        rsync --update --recursive $project_root/$results_dir/$SLURM_JOB_ID $project_root_in_tmpdir/$results_dir/
+    mkdir -p $project_root_in_tmpdir/$results_path
+    if [ -d "$project_root/$results_path/$SLURM_JOB_ID" ]; then
+        rsync --update --recursive $project_root/$results_path/$SLURM_JOB_ID $project_root_in_tmpdir/$results_path/
     fi
 END
 
@@ -39,8 +39,8 @@ echo "Running command: 'uv run $@' in $project_root_in_tmpdir"
 srun uv --directory=$project_root_in_tmpdir run "$@"
 
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
-echo "Copying logs from $project_root_in_tmpdir/$results_dir to $project_root/$results_dir"
-if [ -d "$project_root_in_tmpdir/$results_dir/$SLURM_JOB_ID" ]; then
+echo "Copying logs from $project_root_in_tmpdir/$results_path to $project_root/$results_path"
+if [ -d "$project_root_in_tmpdir/$results_path/$SLURM_JOB_ID" ]; then
     srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES \
-        rsync --update --recursive $project_root_in_tmpdir/$results_dir/$SLURM_JOB_ID $project_root/$results_dir/
+        rsync --update --recursive $project_root_in_tmpdir/$results_path/$SLURM_JOB_ID $project_root/$results_path/
 fi

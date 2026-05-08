@@ -4,7 +4,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from milatools.cli.init_command import DRAC_CLUSTERS
 
 from cluv.cli.init import (
     DEFAULT_RESULTS_PATH,
@@ -15,7 +14,7 @@ from cluv.cli.init import (
     check_job_script,
     check_symlink_to_scratch,
 )
-from cluv.config import load_cluv_config, ClusterConfig
+from cluv.config import load_cluv_config
 
 class TestCheckHomeDir:
     def test_not_under_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,14 +49,9 @@ class TestCheckCluvConfig:
 
         check_cluv_config(p)
         config = load_cluv_config(p)
+        expected_config = load_cluv_config(Path(__file__).resolve().parents[1] / "pyproject.toml")
 
-        assert config.clusters_names == ["mila"] + DRAC_CLUSTERS
-        assert config.results_path == DEFAULT_RESULTS_PATH
-        assert config.env == {"UV_OFFLINE": "1", "WANDB_MODE": "offline"}
-        assert config.clusters == {
-            "mila": ClusterConfig(env={"UV_OFFLINE": "0", "WANDB_MODE": "online"}),
-            **{cluster: ClusterConfig() for cluster in DRAC_CLUSTERS},
-        }
+        assert config == expected_config
 
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
@@ -144,3 +138,26 @@ class TestJobScriptCheck:
 
         assert job_script_path.exists()
         assert job_script_path.read_text() == "#!/bin/bash\necho 'Hello world!'"
+
+    def test_create_missing_job_scripts_from_templates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_home = tmp_path / "home"
+        project_root = fake_home / "my_project"
+        project_root.mkdir(parents=True)
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+
+        check_job_script(project_root, "outputs")
+
+        job_script = project_root / "scripts" / "job.sh"
+        safe_job_script = project_root / "scripts" / "safe_job.sh"
+
+        assert job_script.exists()
+        assert safe_job_script.exists()
+        assert "#SBATCH --output=outputs/%j/slurm-%j.out" in job_script.read_text()
+
+        safe_job_script_content = safe_job_script.read_text()
+        assert 'project_name="my_project"' in safe_job_script_content
+        assert 'project_root="$HOME/my_project"' in safe_job_script_content
+        assert 'results_path="outputs"' in safe_job_script_content
+        assert "results_dir" not in safe_job_script_content

@@ -19,12 +19,14 @@ srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES bash -e <<END
     cd $SLURM_TMPDIR
     echo "Cloning the project from $project_root to $SLURM_TMPDIR"
     set -x  # show commands as they are executed (for debugging).
+
     git clone $project_root  # clone the project from $HOME to $SLURM_TMPDIR
     cd $SLURM_TMPDIR/$project_name
     git checkout --detach $GIT_COMMIT
     # Copy the virtualenv (seems necessary for some clusters in offline mode).
     cp -r $project_root/.venv $SLURM_TMPDIR/$project_name/.venv
     uv sync
+
     # Copy any existing results from $SCRATCH to the project root.
     mkdir -p $project_root_in_tmpdir/$results_dir
     rsync --update --recursive $project_root/$results_dir/$SLURM_JOB_ID $project_root_in_tmpdir/$results_dir/

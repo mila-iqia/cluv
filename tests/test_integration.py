@@ -251,7 +251,7 @@ def test_init(
             project_dir / generated_config.results_path
         ).resolve() == scratch / DEFAULT_RESULTS_PATH / project_name
 
-    assert generated_config.clusters == ["mila"] + DRAC_CLUSTERS
+    assert generated_config.clusters_names == ["mila"] + DRAC_CLUSTERS
 
 
 @pytest.mark.timeout(5)

@@ -65,7 +65,7 @@ async def sync(
     this_cluster = current_cluster()
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     if not clusters:
-        clusters = get_config().clusters
+        clusters = get_config().clusters_names
         if this_cluster and this_cluster in clusters:
             clusters.remove(this_cluster)
         connections = await asyncio.gather(
@@ -115,7 +115,7 @@ async def sync_task_function(
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    num_tasks = 4 if config.results_path else 3
+    num_tasks = 4
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
     await install_uv(remote)
@@ -126,9 +126,8 @@ async def sync_task_function(
     _update_progress(2, "Running 'uv sync'", num_tasks)
     await remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
 
-    if config.results_path:
-        _update_progress(3, "Fetching results", num_tasks)
-        await fetch_results(remote, config.results_path)
+    _update_progress(3, "Fetching results", num_tasks)
+    await fetch_results(remote, config.results_path)
 
     _update_progress(num_tasks, "Done", num_tasks)
 

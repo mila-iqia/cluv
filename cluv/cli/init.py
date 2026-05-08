@@ -1,7 +1,7 @@
 import os
+import re
 import subprocess
 from pathlib import Path
-import re
 
 from cluv.config import find_pyproject, has_cluv_config, load_cluv_config
 from cluv.ssh import get_ssh_hostnames
@@ -12,6 +12,9 @@ __all__ = ["init"]
 SCRIPTS_DIR_PATH = "scripts"
 JOB_SCRIPT_PATH = f"{SCRIPTS_DIR_PATH}/job.sh"
 DEFAULT_RESULTS_PATH = "logs"
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+# Repository root when running cluv from a source checkout.
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def init() -> None:
@@ -257,10 +260,13 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
             flags=re.MULTILINE,
         )
         script_content = re.sub(
-            r"^results_path=.*$",
+            r"^results_(?:dir|path)=.*$",
             f'results_path="{results_path}"',
             script_content,
             flags=re.MULTILINE,
+        )
+        script_content = re.sub(
+            r"\$(?:\{results_dir\}|results_dir\b)", "$results_path", script_content
         )
         script_path.write_text(script_content)
         console.print(f"Adding job template script at '{script_path}'.")
@@ -274,7 +280,9 @@ def _load_cluv_config_template() -> str:
         None,
     )
     if start is None:
-        raise RuntimeError(f"Couldn't find [tool.cluv] section in {pyproject_template_path}.")
+        raise RuntimeError(
+            f"Template file {pyproject_template_path} is missing required [tool.cluv] section."
+        )
     end = next(
         (
             line_index
@@ -287,20 +295,20 @@ def _load_cluv_config_template() -> str:
 
 
 def _get_script_templates_path() -> Path:
-    for script_templates_path in [
-        Path(__file__).resolve().parents[2] / "scripts",
-        Path(__file__).resolve().parents[1] / "templates" / "scripts",
-    ]:
+    checked_paths = [REPO_ROOT / "scripts", PACKAGE_ROOT / "templates" / "scripts"]
+    for script_templates_path in checked_paths:
         if script_templates_path.exists():
             return script_templates_path
-    raise RuntimeError("Couldn't find the script templates folder.")
+    checked_paths_text = ", ".join(str(path) for path in checked_paths)
+    raise RuntimeError(f"Couldn't find the script templates folder. Checked: {checked_paths_text}.")
 
 
 def _get_pyproject_template_path() -> Path:
-    for pyproject_template_path in [
-        Path(__file__).resolve().parents[2] / "pyproject.toml",
-        Path(__file__).resolve().parents[1] / "templates" / "pyproject.toml",
-    ]:
+    checked_paths = [REPO_ROOT / "pyproject.toml", PACKAGE_ROOT / "templates" / "pyproject.toml"]
+    for pyproject_template_path in checked_paths:
         if pyproject_template_path.exists():
             return pyproject_template_path
-    raise RuntimeError("Couldn't find pyproject.toml template for cluv init.")
+    checked_paths_text = ", ".join(str(path) for path in checked_paths)
+    raise RuntimeError(
+        f"Couldn't find pyproject.toml template for cluv init. Checked: {checked_paths_text}."
+    )

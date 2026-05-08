@@ -25,6 +25,8 @@ from cluv.cli.sync import sync
 from cluv.config import load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 # Some useful constants used to turn tests on and off depending on where we are.
 IN_GITHUB_CI = "GITHUB_ACTIONS" in os.environ
 IN_SELF_HOSTED_GITHUB_CI = IN_GITHUB_CI and (
@@ -328,7 +330,7 @@ def test_init(
             project_dir / generated_config.results_path
         ).resolve() == scratch / DEFAULT_RESULTS_PATH / project_name
 
-    expected_config = load_cluv_config(Path(__file__).resolve().parents[1] / "pyproject.toml")
+    expected_config = load_cluv_config(REPO_ROOT / "pyproject.toml")
     assert generated_config.clusters_names == expected_config.clusters_names
 
 

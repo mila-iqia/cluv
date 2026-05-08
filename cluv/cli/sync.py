@@ -217,7 +217,10 @@ async def clone_project(remote: Remote):
     if detached_head:
         github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
         if github_head_ref:
-            if not re.fullmatch(r"[A-Za-z0-9._/-]+", github_head_ref) or ".." in github_head_ref:
+            if (
+                not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", github_head_ref)
+                or ".." in github_head_ref
+            ):
                 raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
             safe_head_ref = shlex.quote(github_head_ref)
             safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")

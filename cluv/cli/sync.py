@@ -4,6 +4,7 @@ import asyncio
 import functools
 import logging
 import os
+import re
 import shutil
 import subprocess
 import textwrap
@@ -215,6 +216,8 @@ async def clone_project(remote: Remote):
     if detached_head:
         github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
         if github_head_ref:
+            if not re.fullmatch(r"[A-Za-z0-9._/-]+", github_head_ref):
+                raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
             await remote.run(
                 f"git -C {git_root_path} checkout -B {github_head_ref} "
                 f"{git_remote_name}/{github_head_ref}",

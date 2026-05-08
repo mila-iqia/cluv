@@ -6,7 +6,9 @@ Or have tests for every cluster in the same pytest session?
 efficient, since at some point there might be like 10 different clusters, and 10 CI steps to run.
 """
 
+import asyncio
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -19,6 +21,7 @@ from cluv.cli.init import DEFAULT_RESULTS_PATH, DRAC_CLUSTERS, init
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
+from cluv.cli.sync import sync
 from cluv.config import load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 
@@ -170,7 +173,7 @@ async def test_status_storage(cluster_status: ClusterStatus):
 
 
 @pytest.mark.slow
-@pytest.mark.timeout(60)
+@pytest.mark.timeout(180)
 async def test_submit(remote: Remote):
     """End-to-end: actually submit scripts/job.sh to a slurm cluster via sbatch.
 
@@ -181,6 +184,8 @@ async def test_submit(remote: Remote):
     """
     if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
+    job_id: int | None = None
+    job_finished = False
     job_id = await submit(
         cluster=remote.hostname,
         job_script=Path("scripts/safe_job.sh"),
@@ -193,8 +198,43 @@ async def test_submit(remote: Remote):
             f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
         )
         assert job_name.strip().startswith("cluv-")
+        # Wait until the job exits, then verify output content after syncing logs back locally.
+        terminal_statuses = {
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED",
+            "TIMEOUT",
+            "NODE_FAIL",
+            "OUT_OF_MEMORY",
+            "PREEMPTED",
+            "BOOT_FAIL",
+            "DEADLINE",
+        }
+        final_status = ""
+        for _ in range(45):
+            status_output = await remote.get_output(
+                f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
+                warn=True,
+                hide=True,
+                display=False,
+            )
+            final_status = status_output.strip().split("|")[0].strip()
+            if final_status in terminal_statuses:
+                break
+            await asyncio.sleep(2)
+        if final_status != "COMPLETED":
+            pytest.fail(f"Submitted job {job_id} ended with unexpected status: {final_status!r}")
+        job_finished = True
+        await sync(clusters=[remote.hostname])
+        output_file = Path("logs") / str(job_id) / f"slurm-{job_id}.out"
+        assert output_file.is_file(), f"Expected job output file to be synced locally: {output_file}"
+        output_text = output_file.read_text(errors="replace")
+        assert re.search(r"Python \d+\.\d+(\.\d+)?", output_text), (
+            f"Expected python version output in {output_file}, got:\n{output_text}"
+        )
     finally:
-        await remote.run(f"scancel {job_id}")
+        if isinstance(job_id, int) and not job_finished:
+            await remote.run(f"scancel {job_id}", warn=True, hide=True, display=False)
 
 
 @pytest.fixture

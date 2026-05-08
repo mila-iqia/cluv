@@ -157,7 +157,7 @@ async def test_submit(remote: Remote):
     """
     job_id = await submit(
         cluster=remote.hostname,
-        job_script="scripts/job.sh",
+        job_script=Path("scripts/safe_job.sh"),
         sbatch_args=["--time=00:00:30"],
         program_args=["python", "--version"],
     )

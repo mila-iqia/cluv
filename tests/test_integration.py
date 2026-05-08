@@ -184,7 +184,6 @@ async def test_submit(remote: Remote):
     """
     if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
-    job_id: int | None = None
     job_finished = False
     job_id = await submit(
         cluster=remote.hostname,
@@ -211,6 +210,7 @@ async def test_submit(remote: Remote):
             "DEADLINE",
         }
         final_status = ""
+        # Poll up to ~90s (45 * 2s) for terminal state.
         for _ in range(45):
             status_output = await remote.get_output(
                 f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
@@ -218,7 +218,7 @@ async def test_submit(remote: Remote):
                 hide=True,
                 display=False,
             )
-            final_status = status_output.strip().split("|")[0].strip()
+            final_status = status_output.strip().split("|")[0]
             if final_status in terminal_statuses:
                 break
             await asyncio.sleep(2)

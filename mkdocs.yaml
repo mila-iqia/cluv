@@ -47,5 +47,5 @@ plugins:
             signature_crossrefs: true
             show_signature_annotations: true
             allow_inspection: true
-            backlinks: true
+            backlinks: tree
             show_labels: false

@@ -57,7 +57,7 @@ async def _get_cluster_remotes(clusters: list[str] | None) -> list[Remote]:
     # Actually Remote constructor doesn't start if _start_control_socket=False
     this_cluster = current_cluster()
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
-    clusters = get_config().clusters
+    clusters = get_config().clusters_names
     if this_cluster and this_cluster in clusters:
         clusters.remove(this_cluster)
     connections = await asyncio.gather(

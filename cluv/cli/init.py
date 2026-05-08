@@ -20,13 +20,13 @@ CLUV_DEFAULT_CONFIG = textwrap.dedent(f"""\
 
     [tool.cluv.env]
     # Environment variables applied when using Slurm commands on all clusters.
-    UV_OFFLINE = 1
+    UV_OFFLINE = "1"
     WANDB_MODE = "offline"
     """
 )
 
 CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS = [
-    "UV_OFFLINE = 0",
+    'UV_OFFLINE = "0"',
     'WANDB_MODE = "online"',
 ]
 
@@ -66,7 +66,7 @@ def init() -> None:
     config = load_cluv_config(pyproject_path)
 
     # Compare the cluster names in the config to the SSH hostnames.
-    check_ssh_hostnames(config.clusters)
+    check_ssh_hostnames(config.clusters_names)
 
     # Check if project structure is correct
     console.print()

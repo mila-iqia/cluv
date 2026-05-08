@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from cluv.config import load_cluv_config
+from milatools.cli.init_command import DRAC_CLUSTERS
 import pytest
 
 def write_pyproject(tmp_path: Path, content: str) -> Path:
@@ -156,3 +157,15 @@ SBATCH_PARTITION = "main"
             "SBATCH_ACCOUNT": "def-bengioy",
             "SBATCH_PARTITION": "main",
         }
+
+
+# ---------------------------------------------------------------------------
+# Real project config
+# ---------------------------------------------------------------------------
+
+class TestRealProjectConfig:
+    def test_loads_without_error(self, pytestconfig) -> None:
+        root_dir = pytestconfig.rootpath
+        cfg = load_cluv_config(root_dir / "pyproject.toml")
+        assert cfg is not None
+        assert set(cfg.clusters_names) == set (DRAC_CLUSTERS + ["mila"])

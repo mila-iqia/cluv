@@ -234,7 +234,10 @@ async def clone_project(remote: Remote):
             )
             return
         current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
-        await remote.run(f"git -C {git_root_path} checkout --detach {current_git_commit}", hide=False)
+        safe_current_git_commit = shlex.quote(current_git_commit)
+        await remote.run(
+            f"git -C {git_root_path} checkout --detach {safe_current_git_commit}", hide=False
+        )
     else:
         await remote.run(f"git -C {git_root_path} checkout {current_git_branch}", hide=False)
         await remote.run(f"git -C {git_root_path} pull", hide=False)

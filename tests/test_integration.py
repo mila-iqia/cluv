@@ -244,7 +244,7 @@ async def test_submit(remote: Remote):
         )
     finally:
         if should_cancel_job:
-            await remote.run(f"scancel {job_id}", warn=True, hide=True, display=False)
+            await remote.run(f"scancel {job_id}", warn=True, hide=True, display=True)
 
 
 @pytest.fixture

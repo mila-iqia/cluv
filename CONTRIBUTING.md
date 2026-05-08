@@ -37,4 +37,3 @@ uv run pytest -m "not integration"
 ```bash
 uv run pre-commit run --all-files
 ```
-

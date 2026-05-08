@@ -139,7 +139,7 @@ async def test_status_online(cluster_status: ClusterStatus, cluster: str):
 async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
     if cluster not in STATUS_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    assert cluster_status.gpu_total > 0, "Expected tamia to report GPU nodes"
+    assert cluster_status.gpu_total > 0, "Expected cluster to report GPU nodes"
 
 
 @pytest.mark.asyncio

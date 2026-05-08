@@ -210,25 +210,26 @@ async def test_submit(remote: Remote):
             "DEADLINE",
         }
         final_status = "UNKNOWN"
-        max_poll_attempts = 75
-        poll_interval_seconds = 2
+        MAX_POLL_ATTEMPTS = 75
+        POLL_INTERVAL_SECONDS = 2
         # Poll up to ~150s (75 * 2s) for terminal state, leaving a bit of room in the
         # 180s test timeout for sync + output validation.
-        for _ in range(max_poll_attempts):
+        for _ in range(MAX_POLL_ATTEMPTS):
             status_output = await remote.get_output(
                 f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
                 warn=True,
                 hide=True,
                 display=False,
             )
+            # --parsable2 uses pipe-delimited output (`STATE|...`), so keep only the state field.
             final_status = status_output.strip().partition("|")[0].strip()
             if final_status in terminal_statuses:
                 break
-            await asyncio.sleep(poll_interval_seconds)
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
         if final_status not in terminal_statuses:
             pytest.fail(
                 f"Job {job_id} did not reach terminal status within "
-                f"{max_poll_attempts * poll_interval_seconds}s "
+                f"{MAX_POLL_ATTEMPTS * POLL_INTERVAL_SECONDS}s "
                 f"(last status: {final_status!r})"
             )
         if final_status != "COMPLETED":

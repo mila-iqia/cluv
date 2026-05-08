@@ -184,7 +184,7 @@ async def test_submit(remote: Remote):
     """
     if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
-    job_completed_successfully = False
+    should_cancel_job = True
     job_id = await submit(
         cluster=remote.hostname,
         job_script=Path("scripts/safe_job.sh"),
@@ -212,10 +212,9 @@ async def test_submit(remote: Remote):
         final_status = "UNKNOWN"
         max_poll_attempts = 75
         poll_interval_seconds = 2
-        attempt = 0
         # Poll up to ~150s (75 * 2s) for terminal state, leaving a bit of room in the
         # 180s test timeout for sync + output validation.
-        for attempt in range(1, max_poll_attempts + 1):
+        for _ in range(max_poll_attempts):
             status_output = await remote.get_output(
                 f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
                 warn=True,
@@ -230,11 +229,11 @@ async def test_submit(remote: Remote):
             pytest.fail(
                 f"Job {job_id} did not reach terminal status within "
                 f"{max_poll_attempts * poll_interval_seconds}s "
-                f"(attempt {attempt}/{max_poll_attempts}, last status: {final_status!r})"
+                f"(last status: {final_status!r})"
             )
         if final_status != "COMPLETED":
             pytest.fail(f"Submitted job {job_id} ended with unexpected status: {final_status!r}")
-        job_completed_successfully = True
+        should_cancel_job = False
         await sync(clusters=[remote.hostname])
         output_file = Path(DEFAULT_RESULTS_PATH) / str(job_id) / f"slurm-{job_id}.out"
         assert output_file.is_file(), f"Expected job output file to be synced locally: {output_file}"
@@ -243,7 +242,7 @@ async def test_submit(remote: Remote):
             f"Expected python version output in {output_file}, got:\n{output_text}"
         )
     finally:
-        if not job_completed_successfully:
+        if should_cancel_job:
             await remote.run(f"scancel {job_id}", warn=True, hide=True, display=False)
 
 

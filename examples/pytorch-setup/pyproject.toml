@@ -19,38 +19,38 @@ results_path = "logs"
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
 SBATCH_TIME = "3:00:00"
-SBATCH_REQUEUE = true
+SBATCH_REQUEUE = "1"
 
 [tool.cluv.clusters.mila]
-env = {UV_OFFLINE=0, WANDB_MODE="online"}
+env = {UV_OFFLINE="0", WANDB_MODE="online"}
 
 # PAICE clusters.
 [tool.cluv.clusters.tamia]
-env = {UV_OFFLINE=1, WANDB_MODE="offline"}
+env = {UV_OFFLINE="1", WANDB_MODE="offline"}
 
 [tool.cluv.clusters.killarney]
-env = {UV_OFFLINE=1, WANDB_MODE="offline"}
+env = {UV_OFFLINE="1", WANDB_MODE="offline"}
 
 [tool.cluv.clusters.vulcan]
-env = {UV_OFFLINE=1, WANDB_MODE="offline"}
+env = {UV_OFFLINE="1", WANDB_MODE="offline"}
 
 # DRAC clusters.
 [tool.cluv.clusters.rorqual]
-env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.fir]
-env = {UV_OFFLINE=0, WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.nibi]
-env = {UV_OFFLINE=0, WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.trillium]
-env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.trillium-gpu]
-env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.
 # You can also use "def-yourusername" (the default partitions).
-env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="def-bengioy"}
+env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="def-bengioy"}

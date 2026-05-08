@@ -225,6 +225,11 @@ async def test_submit(remote: Remote):
             if final_status in terminal_statuses:
                 break
             await asyncio.sleep(poll_interval_seconds)
+        if final_status not in terminal_statuses:
+            pytest.fail(
+                f"Job {job_id} did not reach terminal status within "
+                f"{max_poll_attempts * poll_interval_seconds}s (last status: {final_status!r})"
+            )
         if final_status != "COMPLETED":
             pytest.fail(f"Submitted job {job_id} ended with unexpected status: {final_status!r}")
         job_completed_successfully = True

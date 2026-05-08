@@ -18,7 +18,7 @@ assignees: ''
 <!-- If applicable, add screenshots to help explain your problem. -->
 
 ### Setup
-<!-- Please provide details about your setup : OS, Clusters... -->:
+<!-- Please provide details about your setup : OS, Cluv config, Clusters... -->:
 
 ### Additional context
 <!-- Add any other context about the problem here. -->

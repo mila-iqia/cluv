@@ -210,9 +210,10 @@ async def test_submit(remote: Remote):
             "DEADLINE",
         }
         final_status = "UNKNOWN"
-        max_poll_attempts = 45
+        max_poll_attempts = 75
         poll_interval_seconds = 2
-        # Poll up to ~90s (45 * 2s) for terminal state.
+        # Poll up to ~150s (75 * 2s) for terminal state, leaving a bit of room in the
+        # 180s test timeout for sync + output validation.
         for _ in range(max_poll_attempts):
             status_output = await remote.get_output(
                 f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
@@ -235,7 +236,7 @@ async def test_submit(remote: Remote):
             f"Expected python version output in {output_file}, got:\n{output_text}"
         )
     finally:
-        if isinstance(job_id, int) and not job_completed_successfully:
+        if not job_completed_successfully:
             await remote.run(f"scancel {job_id}", warn=True, hide=True, display=False)
 
 

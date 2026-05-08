@@ -16,29 +16,41 @@ build-backend = "hatchling.build"
 [tool.cluv]
 results_path = "logs"
 
-[tool.cluv.slurm]
+[tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
-UV_OFFLINE = 1
-WANDB_MODE = "offline"
+SBATCH_TIME = "3:00:00"
+SBATCH_REQUEUE = true
 
 [tool.cluv.clusters.mila]
-UV_OFFLINE = 0
-WANDB_MODE = "online"
+env = {UV_OFFLINE=0, WANDB_MODE="online"}
 
+# PAICE clusters.
 [tool.cluv.clusters.tamia]
-
-[tool.cluv.clusters.rorqual]
-
-[tool.cluv.clusters.nibi]
-
-[tool.cluv.clusters.narval]
-
-[tool.cluv.clusters.fir]
-
-[tool.cluv.clusters.trillium]
-
-[tool.cluv.clusters.trillium-gpu]
+env = {UV_OFFLINE=1, WANDB_MODE="offline"}
 
 [tool.cluv.clusters.killarney]
+env = {UV_OFFLINE=1, WANDB_MODE="offline"}
 
 [tool.cluv.clusters.vulcan]
+env = {UV_OFFLINE=1, WANDB_MODE="offline"}
+
+# DRAC clusters.
+[tool.cluv.clusters.rorqual]
+env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.fir]
+env = {UV_OFFLINE=0, WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.nibi]
+env = {UV_OFFLINE=0, WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.trillium]
+env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.trillium-gpu]
+env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+
+[tool.cluv.clusters.narval]
+# Mila doesn't have an allocation on Narval anymore.
+# You can also use "def-yourusername" (the default partitions).
+env = {UV_OFFLINE=1, WANDB_MODE="offline", SBATCH_ACCOUNT="def-bengioy"}

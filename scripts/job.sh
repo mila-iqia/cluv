@@ -18,6 +18,8 @@ cd $SLURM_TMPDIR
 git clone $project_root
 cd $SLURM_TMPDIR/cluv
 git checkout --detach $GIT_COMMIT
+# VERY WEIRD, but helps fix issues with uv sync --offline on the compute nodes.
+cp -r $project_root/.venv .
 exec uv sync
 END
 

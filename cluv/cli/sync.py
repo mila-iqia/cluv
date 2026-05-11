@@ -182,11 +182,16 @@ async def clone_project(remote: Remote):
     current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
     safe_current_git_branch = shlex.quote(current_git_branch)
     detached_head = current_git_branch == "HEAD"
-    git_remote_name = (
-        subprocess.getoutput(f"git config --get branch.{current_git_branch}.remote").strip()
-        if not detached_head
-        else "origin"
-    )
+    if not detached_head:
+        try:
+            git_remote_name = subprocess.check_output(
+                ["git", "config", "--get", f"branch.{current_git_branch}.remote"],
+                text=True,
+            ).strip()
+        except subprocess.CalledProcessError:
+            git_remote_name = ""
+    else:
+        git_remote_name = "origin"
     if not git_remote_name:
         git_remote_name = "origin"
     github_repo_url = subprocess.getoutput(f"git config --get remote.{git_remote_name}.url").strip()

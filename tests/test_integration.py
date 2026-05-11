@@ -180,7 +180,8 @@ async def test_submit(remote: Remote):
     Requires an active SSH connection to the cluster and a clean git tree.
     Also actually performs a `cluv sync` to that cluster.
 
-    NOTE: This **will** push the current branch to GitHub (since it runs `cluv sync`).
+    NOTE: This may push the current branch to GitHub when run locally, but in
+    GitHub Actions `cluv sync` skips `git push`.
     """
     if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")

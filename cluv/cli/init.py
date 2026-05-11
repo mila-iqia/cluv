@@ -296,7 +296,7 @@ srun --gres-flags=allow-task-sharing uv --directory=$SLURM_TMPDIR/$project_name 
 echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path to $project_root/$results_path"
 if [ -d "$SLURM_TMPDIR/$project_name/$results_path/$SLURM_JOB_ID" ]; then
     srun --ntasks-per-node=1 \
-        rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_path/$SLURM_JOB_ID $project_root/$results_path/
+        rsync --update --recursive "$SLURM_TMPDIR/$project_name/$results_path/$SLURM_JOB_ID" "$project_root/$results_path/"
 fi
 """
 

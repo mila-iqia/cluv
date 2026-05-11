@@ -46,6 +46,7 @@ managed = true
 [tool.uv.workspace]
 members = [
     "examples/pytorch-setup",
+    "examples/imagenet",
 ]
 
 

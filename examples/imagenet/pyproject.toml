@@ -1,0 +1,44 @@
+[project]
+name = "imagenet"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.4.4",
+    "tensorboard>=2.20.0",
+    "torch>=2.10.0",
+    "torch-tb-profiler>=0.4.3",
+    "torchvision>=0.25.0",
+    "wandb>=0.26.1",
+]
+
+[tool.cluv]
+results_path = "logs"
+
+[tool.cluv.env]
+# Environment variables applied when using Slurm commands on all clusters.
+UV_OFFLINE = "1"
+WANDB_MODE = "offline"
+
+[tool.cluv.clusters.mila.env]
+UV_OFFLINE = "0"
+WANDB_MODE = "online"
+
+[tool.cluv.clusters.narval]
+
+[tool.cluv.clusters.rorqual]
+
+[tool.cluv.clusters.fir]
+
+[tool.cluv.clusters.nibi]
+
+[tool.cluv.clusters.trillium]
+
+[tool.cluv.clusters.trillium-gpu]
+
+[tool.cluv.clusters.tamia]
+
+[tool.cluv.clusters.killarney]
+
+[tool.cluv.clusters.vulcan]

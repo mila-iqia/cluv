@@ -198,6 +198,26 @@ def ensure_clean_git_state() -> str:
         )
         sys.exit(1)
 
+    # In GitHub Actions PR jobs we can be on a detached merge commit that doesn't exist on
+    # the synced remote checkout. Prefer the branch tip commit in that case.
+    current_git_branch = subprocess.check_output(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"], text=True
+    ).strip()
+    if current_git_branch == "HEAD" and os.environ.get("GITHUB_ACTIONS"):
+        github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
+        if github_head_ref:
+            remote_head_ref = f"origin/{github_head_ref}"
+            remote_head = subprocess.run(
+                ["git", "rev-parse", "--verify", remote_head_ref],
+                capture_output=True,
+                text=True,
+            )
+            if remote_head.returncode == 0:
+                return remote_head.stdout.strip()
+            console.log(
+                f"[yellow]Could not resolve {remote_head_ref}. Falling back to local HEAD commit.[/yellow]"
+            )
+
     # Capture current commit hash.
     return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 

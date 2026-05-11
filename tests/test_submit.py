@@ -1,7 +1,8 @@
 import textwrap
+import subprocess
 from pathlib import Path
 
-from cluv.cli.submit import get_sbatch_command, get_config
+from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command, get_config
 
 import pytest
 
@@ -78,3 +79,30 @@ class TestGetSbatchCommand:
             sbatch_command
             == "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
         )
+
+
+class TestEnsureCleanGitState:
+    def test_prefers_branch_tip_in_github_actions_detached_head(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("GITHUB_HEAD_REF", "proper_integration_tests")
+
+        def fake_run(cmd: list[str], capture_output: bool, text: bool) -> subprocess.CompletedProcess[str]:
+            if cmd == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+            if cmd == ["git", "rev-parse", "--verify", "origin/proper_integration_tests"]:
+                return subprocess.CompletedProcess(cmd, 0, stdout="remotebranchsha\n", stderr="")
+            raise AssertionError(f"Unexpected subprocess.run call: {cmd}")
+
+        def fake_check_output(cmd: list[str], text: bool) -> str:
+            if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return "HEAD\n"
+            if cmd == ["git", "rev-parse", "HEAD"]:
+                return "detachedheadsha\n"
+            raise AssertionError(f"Unexpected subprocess.check_output call: {cmd}")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        monkeypatch.setattr(subprocess, "check_output", fake_check_output)
+
+        assert ensure_clean_git_state() == "remotebranchsha"

@@ -294,7 +294,10 @@ srun --gres-flags=allow-task-sharing uv --directory=$SLURM_TMPDIR/$project_name 
 
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
 echo "Copying logs from $SLURM_TMPDIR/$project_name/$results_path to $project_root/$results_path"
-srun --ntasks-per-node=1 rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_path $project_root/
+if [ -d "$SLURM_TMPDIR/$project_name/$results_path/$SLURM_JOB_ID" ]; then
+    srun --ntasks-per-node=1 \
+        rsync --update --recursive $SLURM_TMPDIR/$project_name/$results_path/$SLURM_JOB_ID $project_root/$results_path/
+fi
 """
 
     job_script_path.parent.mkdir(exist_ok=True)

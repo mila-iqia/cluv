@@ -24,6 +24,7 @@ WANDB_MODE = "offline"
 [tool.cluv.clusters.mila.env]
 UV_OFFLINE = "0"
 WANDB_MODE = "online"
+SBATCH_GPUS_PER_TASK = "l40s:1"
 
 [tool.cluv.clusters.narval]
 
@@ -37,7 +38,8 @@ WANDB_MODE = "online"
 
 [tool.cluv.clusters.trillium-gpu]
 
-[tool.cluv.clusters.tamia]
+[tool.cluv.clusters.tamia.env]
+SBATCH_GPUS_PER_NODE = "h100:4"
 
 [tool.cluv.clusters.killarney]
 

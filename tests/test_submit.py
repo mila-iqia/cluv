@@ -94,7 +94,9 @@ class TestEnsureCleanGitState:
             if cmd == ["git", "status", "--porcelain"]:
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             if cmd == ["git", "rev-parse", "--verify", "origin/proper_integration_tests"]:
-                return subprocess.CompletedProcess(cmd, 0, stdout="remotebranchsha\n", stderr="")
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n", stderr=""
+                )
             raise AssertionError(f"Unexpected subprocess.run call: {cmd}")
 
         def mock_subprocess_check_output(cmd: list[str], **kwargs) -> str:
@@ -102,13 +104,13 @@ class TestEnsureCleanGitState:
             if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return "HEAD\n"
             if cmd == ["git", "rev-parse", "HEAD"]:
-                return "detachedheadsha\n"
+                return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
             raise AssertionError(f"Unexpected subprocess.check_output call: {cmd}")
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
 
-        assert ensure_clean_git_state() == "remotebranchsha"
+        assert ensure_clean_git_state() == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
     def test_falls_back_to_head_if_remote_branch_ref_missing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -130,10 +132,10 @@ class TestEnsureCleanGitState:
             if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return "HEAD\n"
             if cmd == ["git", "rev-parse", "HEAD"]:
-                return "detachedheadsha\n"
+                return "cccccccccccccccccccccccccccccccccccccccc\n"
             raise AssertionError(f"Unexpected subprocess.check_output call: {cmd}")
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
 
-        assert ensure_clean_git_state() == "detachedheadsha"
+        assert ensure_clean_git_state() == "cccccccccccccccccccccccccccccccccccccccc"

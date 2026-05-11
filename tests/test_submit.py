@@ -88,24 +88,24 @@ class TestEnsureCleanGitState:
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
         monkeypatch.setenv("GITHUB_HEAD_REF", "proper_integration_tests")
 
-        def mock_subprocess_run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
             assert kwargs.get("text") is True
-            if cmd == ["git", "status", "--porcelain"]:
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-            if cmd == ["git", "rev-parse", "--verify", "origin/proper_integration_tests"]:
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if command == ["git", "rev-parse", "--verify", "origin/proper_integration_tests"]:
                 return subprocess.CompletedProcess(
-                    cmd, 0, stdout="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n", stderr=""
+                    command, 0, stdout="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n", stderr=""
                 )
-            raise AssertionError(f"Unexpected subprocess.run call: {cmd}")
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
 
-        def mock_subprocess_check_output(cmd: list[str], **kwargs) -> str:
+        def mock_subprocess_check_output(command: list[str], **kwargs) -> str:
             assert kwargs.get("text") is True
-            if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            if command == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return "HEAD\n"
-            if cmd == ["git", "rev-parse", "HEAD"]:
+            if command == ["git", "rev-parse", "HEAD"]:
                 return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-            raise AssertionError(f"Unexpected subprocess.check_output call: {cmd}")
+            raise AssertionError(f"Unexpected subprocess.check_output call: {command}")
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
@@ -118,22 +118,22 @@ class TestEnsureCleanGitState:
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
         monkeypatch.setenv("GITHUB_HEAD_REF", "missing_branch")
 
-        def mock_subprocess_run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
             assert kwargs.get("text") is True
-            if cmd == ["git", "status", "--porcelain"]:
-                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-            if cmd == ["git", "rev-parse", "--verify", "origin/missing_branch"]:
-                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="unknown revision")
-            raise AssertionError(f"Unexpected subprocess.run call: {cmd}")
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if command == ["git", "rev-parse", "--verify", "origin/missing_branch"]:
+                return subprocess.CompletedProcess(command, 1, stdout="", stderr="unknown revision")
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
 
-        def mock_subprocess_check_output(cmd: list[str], **kwargs) -> str:
+        def mock_subprocess_check_output(command: list[str], **kwargs) -> str:
             assert kwargs.get("text") is True
-            if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+            if command == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return "HEAD\n"
-            if cmd == ["git", "rev-parse", "HEAD"]:
+            if command == ["git", "rev-parse", "HEAD"]:
                 return "cccccccccccccccccccccccccccccccccccccccc\n"
-            raise AssertionError(f"Unexpected subprocess.check_output call: {cmd}")
+            raise AssertionError(f"Unexpected subprocess.check_output call: {command}")
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)

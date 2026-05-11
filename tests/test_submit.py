@@ -88,14 +88,17 @@ class TestEnsureCleanGitState:
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
         monkeypatch.setenv("GITHUB_HEAD_REF", "proper_integration_tests")
 
-        def fake_run(cmd: list[str], capture_output: bool, text: bool) -> subprocess.CompletedProcess[str]:
+        def fake_run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            assert kwargs.get("capture_output") is True
+            assert kwargs.get("text") is True
             if cmd == ["git", "status", "--porcelain"]:
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
             if cmd == ["git", "rev-parse", "--verify", "origin/proper_integration_tests"]:
                 return subprocess.CompletedProcess(cmd, 0, stdout="remotebranchsha\n", stderr="")
             raise AssertionError(f"Unexpected subprocess.run call: {cmd}")
 
-        def fake_check_output(cmd: list[str], text: bool) -> str:
+        def fake_check_output(cmd: list[str], **kwargs) -> str:
+            assert kwargs.get("text") is True
             if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return "HEAD\n"
             if cmd == ["git", "rev-parse", "HEAD"]:

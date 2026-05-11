@@ -88,7 +88,7 @@ class TestEnsureCleanGitState:
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
         monkeypatch.setenv("GITHUB_HEAD_REF", "proper_integration_tests")
 
-        def fake_run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        def mock_subprocess_run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
             assert kwargs.get("text") is True
             if cmd == ["git", "status", "--porcelain"]:
@@ -97,7 +97,7 @@ class TestEnsureCleanGitState:
                 return subprocess.CompletedProcess(cmd, 0, stdout="remotebranchsha\n", stderr="")
             raise AssertionError(f"Unexpected subprocess.run call: {cmd}")
 
-        def fake_check_output(cmd: list[str], **kwargs) -> str:
+        def mock_subprocess_check_output(cmd: list[str], **kwargs) -> str:
             assert kwargs.get("text") is True
             if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return "HEAD\n"
@@ -105,8 +105,8 @@ class TestEnsureCleanGitState:
                 return "detachedheadsha\n"
             raise AssertionError(f"Unexpected subprocess.check_output call: {cmd}")
 
-        monkeypatch.setattr(subprocess, "run", fake_run)
-        monkeypatch.setattr(subprocess, "check_output", fake_check_output)
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
 
         assert ensure_clean_git_state() == "remotebranchsha"
 
@@ -116,7 +116,7 @@ class TestEnsureCleanGitState:
         monkeypatch.setenv("GITHUB_ACTIONS", "true")
         monkeypatch.setenv("GITHUB_HEAD_REF", "missing_branch")
 
-        def fake_run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        def mock_subprocess_run(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
             assert kwargs.get("text") is True
             if cmd == ["git", "status", "--porcelain"]:
@@ -125,7 +125,7 @@ class TestEnsureCleanGitState:
                 return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="unknown revision")
             raise AssertionError(f"Unexpected subprocess.run call: {cmd}")
 
-        def fake_check_output(cmd: list[str], **kwargs) -> str:
+        def mock_subprocess_check_output(cmd: list[str], **kwargs) -> str:
             assert kwargs.get("text") is True
             if cmd == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
                 return "HEAD\n"
@@ -133,7 +133,7 @@ class TestEnsureCleanGitState:
                 return "detachedheadsha\n"
             raise AssertionError(f"Unexpected subprocess.check_output call: {cmd}")
 
-        monkeypatch.setattr(subprocess, "run", fake_run)
-        monkeypatch.setattr(subprocess, "check_output", fake_check_output)
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
 
         assert ensure_clean_git_state() == "detachedheadsha"

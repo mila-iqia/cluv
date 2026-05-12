@@ -254,6 +254,40 @@ async def test_submit(remote: Remote):
             await remote.run(f"scancel {job_id}", warn=True, hide=True, display=True)
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(300)
+async def test_submit_first():
+    """End-to-end: test the 'submit first' command.
+
+    Calls `submit(cluster="first", ...)` which internally submits the job on all
+    clusters with active SSH connections, waits for the first job to start, and
+    cancels the rest.
+    Requires at least one cluster in SUBMIT_SUPPORTED_CLUSTERS to have an active
+    SSH connection.
+    """
+    available_clusters = [
+        c for c in SUBMIT_SUPPORTED_CLUSTERS if await control_socket_is_running(c)
+    ]
+    if not available_clusters:
+        pytest.skip("No submit-supported clusters with active SSH connections available.")
+    job_id: int | None = None
+    remotes = [await get_remote_without_2fa_prompt(c) for c in available_clusters]
+    try:
+        job_id = await submit(
+            cluster="first",
+            job_script=Path("scripts/safe_job.sh"),
+            sbatch_args=["--time=00:00:30"],
+            program_args=["python", "--version"],
+        )
+        assert isinstance(job_id, int)
+    finally:
+        if job_id is not None:
+            # Cancel the winning job on all available clusters (only one will have it).
+            for r in remotes:
+                if r is not None:
+                    await r.run(f"scancel {job_id}", warn=True, hide=True, display=True)
+
+
 @pytest.fixture
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)  # Set the home directory to tmp_path

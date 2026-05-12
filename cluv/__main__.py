@@ -12,6 +12,7 @@ import logging
 import subprocess
 import sys
 import typing
+from pathlib import Path
 from typing import Callable
 
 import rich
@@ -214,6 +215,14 @@ def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
         "init",
         help="Initialize the current project across clusters.",
         formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    init_parser.add_argument(
+        "path",
+        nargs="?",
+        default=None,
+        metavar="<path>",
+        type=Path,
+        help="Path to initialize the project in. Creates the directory if it doesn't exist. Defaults to the current directory.",
     )
     init_parser.set_defaults(func=init)
     return init_parser

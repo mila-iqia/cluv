@@ -31,7 +31,7 @@ CLUV_CLUSTER_MILA_DEFAULT_ARGUMENTS = [
 ]
 
 
-def init() -> None:
+def init(path: Path | None = None) -> None:
     """Initialize a new project with cluv.
 
     This does the following:
@@ -43,6 +43,11 @@ def init() -> None:
     console.print()
     console.rule("[bold cyan]cluv init[/bold cyan]")
     console.print()
+
+    if path is not None:
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        os.chdir(path)
 
     # Check if the current directory is under the home directory. If not, raise an error and exit.
     check_home_dir()

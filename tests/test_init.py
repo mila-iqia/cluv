@@ -14,6 +14,7 @@ from cluv.cli.init import (
     check_home_dir,
     check_job_script,
     check_symlink_to_scratch,
+    init,
 )
 from cluv.config import load_cluv_config, ClusterConfig
 
@@ -144,3 +145,92 @@ class TestJobScriptCheck:
 
         assert job_script_path.exists()
         assert job_script_path.read_text() == "#!/bin/bash\necho 'Hello world!'"
+
+
+class TestInitPath:
+    def test_creates_directory_if_not_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """init(path) should create the directory if it doesn't exist and chdir into it."""
+        import os
+        import sys
+
+        # Use sys.modules to get the actual init module (not the init function exported by __init__.py)
+        init_module = sys.modules["cluv.cli.init"]
+
+        new_dir = tmp_path / "new_project"
+        assert not new_dir.exists()
+
+        chdir_calls: list[Path] = []
+        monkeypatch.setattr(os, "chdir", lambda p: chdir_calls.append(Path(p)))
+
+        # Patch the rest of init so we only test the path/mkdir behaviour
+        monkeypatch.setattr(init_module, "check_home_dir", lambda: None)
+        monkeypatch.setattr(init_module, "run_uv_init", lambda: None)
+        monkeypatch.setattr(init_module, "check_git", lambda: None)
+        monkeypatch.setattr(init_module, "find_pyproject", lambda: tmp_path / "pyproject.toml")
+        monkeypatch.setattr(init_module, "check_cluv_config", lambda p: None)
+        monkeypatch.setattr(init_module, "load_cluv_config", lambda p: type("C", (), {"clusters_names": [], "results_path": None})())
+        monkeypatch.setattr(init_module, "check_ssh_hostnames", lambda c: None)
+        monkeypatch.setattr(init_module, "check_job_script", lambda r, p: None)
+        monkeypatch.setattr(init_module, "check_symlink_to_scratch", lambda r, p: None)
+
+        init(path=new_dir)
+
+        assert new_dir.exists()
+        assert new_dir.is_dir()
+        assert chdir_calls == [new_dir]
+
+    def test_chdir_into_existing_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """init(path) should chdir into an existing directory without error."""
+        import os
+        import sys
+
+        init_module = sys.modules["cluv.cli.init"]
+        existing_dir = tmp_path / "existing_project"
+        existing_dir.mkdir()
+
+        chdir_calls: list[Path] = []
+        monkeypatch.setattr(os, "chdir", lambda p: chdir_calls.append(Path(p)))
+
+        monkeypatch.setattr(init_module, "check_home_dir", lambda: None)
+        monkeypatch.setattr(init_module, "run_uv_init", lambda: None)
+        monkeypatch.setattr(init_module, "check_git", lambda: None)
+        monkeypatch.setattr(init_module, "find_pyproject", lambda: tmp_path / "pyproject.toml")
+        monkeypatch.setattr(init_module, "check_cluv_config", lambda p: None)
+        monkeypatch.setattr(init_module, "load_cluv_config", lambda p: type("C", (), {"clusters_names": [], "results_path": None})())
+        monkeypatch.setattr(init_module, "check_ssh_hostnames", lambda c: None)
+        monkeypatch.setattr(init_module, "check_job_script", lambda r, p: None)
+        monkeypatch.setattr(init_module, "check_symlink_to_scratch", lambda r, p: None)
+
+        init(path=existing_dir)
+
+        assert chdir_calls == [existing_dir]
+
+    def test_no_chdir_when_path_is_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """init() without a path should not chdir."""
+        import os
+        import sys
+
+        init_module = sys.modules["cluv.cli.init"]
+
+        chdir_calls: list[Path] = []
+        monkeypatch.setattr(os, "chdir", lambda p: chdir_calls.append(Path(p)))
+
+        monkeypatch.setattr(init_module, "check_home_dir", lambda: None)
+        monkeypatch.setattr(init_module, "run_uv_init", lambda: None)
+        monkeypatch.setattr(init_module, "check_git", lambda: None)
+        monkeypatch.setattr(init_module, "find_pyproject", lambda: tmp_path / "pyproject.toml")
+        monkeypatch.setattr(init_module, "check_cluv_config", lambda p: None)
+        monkeypatch.setattr(init_module, "load_cluv_config", lambda p: type("C", (), {"clusters_names": [], "results_path": None})())
+        monkeypatch.setattr(init_module, "check_ssh_hostnames", lambda c: None)
+        monkeypatch.setattr(init_module, "check_job_script", lambda r, p: None)
+        monkeypatch.setattr(init_module, "check_symlink_to_scratch", lambda r, p: None)
+
+        init(path=None)
+
+        assert chdir_calls == []

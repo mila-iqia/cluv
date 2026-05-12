@@ -25,6 +25,7 @@ async def submit(
     job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
+    make_commit: bool = False,
 ) -> int | None:
     """Submit a SLURM job on a remote cluster.
 
@@ -56,8 +57,12 @@ async def submit(
     )
     ```
     """
+    submit_command = build_submit_command(cluster, job_script, sbatch_args, program_args, make_commit)
+
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
-    git_commit = ensure_clean_git_state()
+    git_commit = ensure_clean_git_state(
+        make_commit=make_commit, launched_job_command=submit_command
+    )
 
     if cluster == "first":
         return await submit_first(job_script, sbatch_args, program_args, git_commit)
@@ -186,17 +191,55 @@ async def submit_first(
     return start_job_id
 
 
-def ensure_clean_git_state() -> str:
+def build_submit_command(
+    cluster: str,
+    job_script: Path,
+    sbatch_args: list[str],
+    program_args: list[str],
+    make_commit: bool,
+) -> str:
+    """Build the local `cluv submit` command line used to launch the job."""
+    command_parts = ["cluv", "submit"]
+    if make_commit:
+        command_parts.append("--make-commit")
+    command_parts.extend([cluster, str(job_script), *sbatch_args])
+    if program_args:
+        command_parts.extend(["--", *program_args])
+    return shlex.join(command_parts)
+
+
+def create_submit_commit(launched_job_command: str) -> None:
+    """Create a commit with tracked changes and include the launched job command in the body."""
+    subprocess.run(["git", "add", "-u"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "commit",
+            "-m",
+            "cluv submit: auto-commit tracked changes",
+            "-m",
+            f"Launched job command:\n\n{launched_job_command}",
+        ],
+        check=True,
+    )
+
+
+def ensure_clean_git_state(
+    make_commit: bool = False, launched_job_command: str | None = None
+) -> str:
     """
     Check git is clean locally and return the current commit hash.
     """
     git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
     dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
-    if dirty_lines and not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
-        console.print(
-            "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
-        )
-        sys.exit(1)
+    if dirty_lines:
+        if make_commit:
+            create_submit_commit(launched_job_command=launched_job_command or "cluv submit")
+        elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
+            console.print(
+                "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
+            )
+            sys.exit(1)
 
     # In GitHub Actions PR jobs we can be on a detached merge commit that doesn't exist on
     # the synced remote checkout. Prefer the branch tip commit in that case.

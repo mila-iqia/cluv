@@ -193,6 +193,75 @@ class TestSubmitCliParsing:
 
 
 class TestEnsureCleanGitState:
+    def test_dirty_repo_without_make_commit_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            assert kwargs.get("capture_output") is True
+            assert kwargs.get("text") is True
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(command, 0, stdout=" M cluv/cli/submit.py\n", stderr="")
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        with pytest.raises(SystemExit):
+            ensure_clean_git_state()
+
+    def test_make_commit_creates_commit_with_tracked_changes_and_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        command_calls: list[tuple[list[str], dict]] = []
+
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            command_calls.append((command, kwargs))
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=" M cluv/cli/submit.py\n?? notes.txt\n", stderr=""
+                )
+            if command == ["git", "add", "-u"]:
+                assert kwargs.get("check") is True
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if command[:2] == ["git", "commit"]:
+                assert kwargs.get("check") is True
+                assert command[2:4] == ["-m", "cluv submit: auto-commit tracked changes"]
+                assert command[4] == "-m"
+                assert (
+                    command[5]
+                    == "Launched job command:\n\ncluv submit --make-commit mila scripts/job.sh -- --flag"
+                )
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        def mock_subprocess_check_output(command: list[str], **kwargs) -> str:
+            assert kwargs.get("text") is True
+            if command == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return "main\n"
+            if command == ["git", "rev-parse", "HEAD"]:
+                return "dddddddddddddddddddddddddddddddddddddddd\n"
+            raise AssertionError(f"Unexpected subprocess.check_output call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
+
+        assert (
+            ensure_clean_git_state(
+                make_commit=True,
+                launched_job_command="cluv submit --make-commit mila scripts/job.sh -- --flag",
+            )
+            == "dddddddddddddddddddddddddddddddddddddddd"
+        )
+        assert [call[0] for call in command_calls[:3]] == [
+            ["git", "status", "--porcelain"],
+            ["git", "add", "-u"],
+            [
+                "git",
+                "commit",
+                "-m",
+                "cluv submit: auto-commit tracked changes",
+                "-m",
+                "Launched job command:\n\ncluv submit --make-commit mila scripts/job.sh -- --flag",
+            ],
+        ]
+
     def test_prefers_branch_tip_in_github_actions_detached_head(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

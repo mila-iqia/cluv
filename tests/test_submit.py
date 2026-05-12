@@ -95,7 +95,9 @@ class TestBuildSubmitCommand:
 
 
 class TestEnsureCleanGitState:
-    def test_dirty_repo_without_make_commit_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_ensure_clean_git_state_exits_when_repo_dirty_without_make_commit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
             assert kwargs.get("text") is True
@@ -108,7 +110,7 @@ class TestEnsureCleanGitState:
         with pytest.raises(SystemExit):
             ensure_clean_git_state()
 
-    def test_make_commit_creates_commit_with_tracked_changes_and_command(
+    def test_ensure_clean_git_state_creates_commit_when_make_commit_enabled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         launched_job_command = "cluv submit mila scripts/job.sh -- --flag"
@@ -163,7 +165,7 @@ class TestEnsureCleanGitState:
             ],
         ]
 
-    def test_make_commit_without_command_raises_value_error(
+    def test_ensure_clean_git_state_raises_when_make_commit_without_builder(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:

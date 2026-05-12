@@ -125,9 +125,13 @@ class TestEnsureCleanGitState:
                 )
             if command == ["git", "add", "-u"]:
                 assert kwargs.get("check") is True
+                assert kwargs.get("capture_output") is True
+                assert kwargs.get("text") is True
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
             if command[:2] == ["git", "commit"]:
                 assert kwargs.get("check") is True
+                assert kwargs.get("capture_output") is True
+                assert kwargs.get("text") is True
                 assert command[2:4] == ["-m", "cluv submit: auto-commit tracked changes"]
                 assert command[4] == "-m"
                 assert command[5] == expected_commit_body

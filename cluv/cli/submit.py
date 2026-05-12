@@ -54,6 +54,7 @@ async def submit(
             When omitted, uses the configured default for the target cluster.
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
+        make_commit: If True, automatically create a local commit with tracked changes before submitting.
 
     Returns:
         The job ID of the submitted job or None if the sbatch command fails.
@@ -429,18 +430,28 @@ def build_submit_command(
 
 def create_submit_commit(launched_job_command: str) -> None:
     """Create a commit with tracked changes and include the launched job command in the body."""
-    subprocess.run(["git", "add", "-u"], check=True)
-    subprocess.run(
-        [
-            "git",
-            "commit",
-            "-m",
-            "cluv submit: auto-commit tracked changes",
-            "-m",
-            f"Launched job command:\n\n{launched_job_command}",
-        ],
-        check=True,
-    )
+    try:
+        subprocess.run(["git", "add", "-u"], check=True, capture_output=True, text=True)
+        subprocess.run(
+            [
+                "git",
+                "commit",
+                "-m",
+                "cluv submit: auto-commit tracked changes",
+                "-m",
+                f"Launched job command:\n\n{launched_job_command}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as err:
+        error_text = (err.stderr or err.stdout or str(err)).strip()
+        console.print(
+            "[red]Failed to create automatic submit commit before job submission:[/red] "
+            f"{error_text}"
+        )
+        raise
 
 
 def ensure_clean_git_state(

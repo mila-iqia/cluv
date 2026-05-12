@@ -66,15 +66,13 @@ async def submit(
     )
     ```
     """
-    submit_command: str | None = None
+    launched_job_command: str | None = None
     if make_commit:
-        submit_command = build_submit_command(
-            cluster, job_script, sbatch_args, program_args, make_commit
-        )
+        launched_job_command = build_submit_command(cluster, job_script, sbatch_args, program_args)
 
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(
-        make_commit=make_commit, launched_job_command=submit_command
+        make_commit=make_commit, launched_job_command=launched_job_command
     )
 
     here = current_cluster()
@@ -416,12 +414,10 @@ def build_submit_command(
     job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
-    make_commit: bool,
 ) -> str:
     """Build the local `cluv submit` command line used to launch the job."""
     command_parts = ["cluv", "submit"]
-    if make_commit:
-        command_parts.append("--make-commit")
+    command_parts.append("--make-commit")
     command_parts.extend([cluster, str(job_script), *sbatch_args])
     if program_args:
         command_parts.extend(["--", *program_args])

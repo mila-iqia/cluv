@@ -209,6 +209,8 @@ class TestEnsureCleanGitState:
     def test_make_commit_creates_commit_with_tracked_changes_and_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        launched_job_command = "cluv submit --make-commit mila scripts/job.sh -- --flag"
+        expected_commit_body = f"Launched job command:\n\n{launched_job_command}"
         command_calls: list[tuple[list[str], dict]] = []
 
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
@@ -224,10 +226,7 @@ class TestEnsureCleanGitState:
                 assert kwargs.get("check") is True
                 assert command[2:4] == ["-m", "cluv submit: auto-commit tracked changes"]
                 assert command[4] == "-m"
-                assert (
-                    command[5]
-                    == "Launched job command:\n\ncluv submit --make-commit mila scripts/job.sh -- --flag"
-                )
+                assert command[5] == expected_commit_body
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
             raise AssertionError(f"Unexpected subprocess.run call: {command}")
 
@@ -245,7 +244,7 @@ class TestEnsureCleanGitState:
         assert (
             ensure_clean_git_state(
                 make_commit=True,
-                launched_job_command="cluv submit --make-commit mila scripts/job.sh -- --flag",
+                launched_job_command=launched_job_command,
             )
             == "dddddddddddddddddddddddddddddddddddddddd"
         )
@@ -258,7 +257,7 @@ class TestEnsureCleanGitState:
                 "-m",
                 "cluv submit: auto-commit tracked changes",
                 "-m",
-                "Launched job command:\n\ncluv submit --make-commit mila scripts/job.sh -- --flag",
+                expected_commit_body,
             ],
         ]
 

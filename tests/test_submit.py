@@ -151,6 +151,21 @@ class TestEnsureCleanGitState:
             ],
         ]
 
+    def test_make_commit_without_command_raises_value_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            assert kwargs.get("capture_output") is True
+            assert kwargs.get("text") is True
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(command, 0, stdout=" M cluv/cli/submit.py\n", stderr="")
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        with pytest.raises(ValueError, match="launched_job_command is required"):
+            ensure_clean_git_state(make_commit=True)
+
     def test_prefers_branch_tip_in_github_actions_detached_head(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

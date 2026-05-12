@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
+import re
+import shlex
 import shutil
 import subprocess
 import textwrap
@@ -82,8 +85,9 @@ async def sync(
     else:
         remotes = await login(clusters)
 
-    # Git push first?
-    await run(("git", "push"), hide=False)
+    if "GITHUB_ACTIONS" not in os.environ:
+        # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
+        await run(("git", "push"), hide=False)
 
     # TODO: Do we raise an error if we fail to connect to a given cluster?
     # TODO: Add an --ignore flag to ignore some clusters?
@@ -176,12 +180,26 @@ async def clone_project(remote: Remote):
     # TODO: This git info is shared, but currently repeatedly executed for each cluster.
     # Could be done only once.
     current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
-    git_remote_name = subprocess.getoutput(
-        f"git config --get branch.{current_git_branch}.remote"
-    ).strip()
-    github_repo_url = subprocess.getoutput(
-        f"git config --get remote.{git_remote_name}.url"
-    ).strip()
+    safe_current_git_branch = shlex.quote(current_git_branch)
+    detached_head = current_git_branch == "HEAD"
+    if not detached_head:
+        try:
+            git_remote_name = subprocess.check_output(
+                ["git", "config", "--get", f"branch.{current_git_branch}.remote"],
+                text=True,
+            ).strip()
+        except subprocess.CalledProcessError:
+            git_remote_name = ""
+    else:
+        git_remote_name = "origin"
+    if not git_remote_name:
+        git_remote_name = "origin"
+    github_repo_url = subprocess.getoutput(f"git config --get remote.{git_remote_name}.url").strip()
+    if not github_repo_url:
+        raise RuntimeError(
+            f"Could not determine Git remote URL from remote '{git_remote_name}'. "
+            "Make sure your git remote is configured."
+        )
 
     # TODO: Scp the ~/.git-credentials file if needed?
     # Or configure the config credential-helper to store first?
@@ -202,8 +220,33 @@ async def clone_project(remote: Remote):
         logger.debug(f"Project isn't cloned yet on {remote.hostname}.")
         await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True)
     await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True)
-    await remote.run(f"git -C {git_root_path} checkout {current_git_branch}", hide=False)
-    await remote.run(f"git -C {git_root_path} pull")
+    if detached_head:
+        github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
+        if github_head_ref:
+            if (
+                not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", github_head_ref)
+                or ".." in github_head_ref
+            ):
+                raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
+            safe_head_ref = shlex.quote(github_head_ref)
+            safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
+            safe_remote_name = shlex.quote(git_remote_name)
+            await remote.run(
+                f"git -C {git_root_path} checkout -B {safe_head_ref} {safe_tracking_ref}",
+                hide=False,
+            )
+            await remote.run(
+                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}", hide=False
+            )
+            return
+        current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+        safe_current_git_commit = shlex.quote(current_git_commit)
+        await remote.run(
+            f"git -C {git_root_path} checkout --detach {safe_current_git_commit}", hide=False
+        )
+    else:
+        await remote.run(f"git -C {git_root_path} checkout {safe_current_git_branch}", hide=False)
+        await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
 async def fetch_results(remote: Remote, results_path: Path | str):

@@ -1,7 +1,8 @@
 import textwrap
+import subprocess
 from pathlib import Path
 
-from cluv.cli.submit import get_sbatch_command, get_config
+from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command, get_config
 
 import pytest
 
@@ -78,3 +79,63 @@ class TestGetSbatchCommand:
             sbatch_command
             == "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
         )
+
+
+class TestEnsureCleanGitState:
+    def test_prefers_branch_tip_in_github_actions_detached_head(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("GITHUB_HEAD_REF", "proper_integration_tests")
+
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            assert kwargs.get("capture_output") is True
+            assert kwargs.get("text") is True
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if command == ["git", "rev-parse", "--verify", "origin/proper_integration_tests"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n", stderr=""
+                )
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        def mock_subprocess_check_output(command: list[str], **kwargs) -> str:
+            assert kwargs.get("text") is True
+            if command == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return "HEAD\n"
+            if command == ["git", "rev-parse", "HEAD"]:
+                return "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+            raise AssertionError(f"Unexpected subprocess.check_output call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
+
+        assert ensure_clean_git_state() == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+    def test_falls_back_to_head_if_remote_branch_ref_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv("GITHUB_HEAD_REF", "missing_branch")
+
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            assert kwargs.get("capture_output") is True
+            assert kwargs.get("text") is True
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if command == ["git", "rev-parse", "--verify", "origin/missing_branch"]:
+                return subprocess.CompletedProcess(command, 1, stdout="", stderr="unknown revision")
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        def mock_subprocess_check_output(command: list[str], **kwargs) -> str:
+            assert kwargs.get("text") is True
+            if command == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return "HEAD\n"
+            if command == ["git", "rev-parse", "HEAD"]:
+                return "cccccccccccccccccccccccccccccccccccccccc\n"
+            raise AssertionError(f"Unexpected subprocess.check_output call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
+
+        assert ensure_clean_git_state() == "cccccccccccccccccccccccccccccccccccccccc"

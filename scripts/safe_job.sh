@@ -29,7 +29,9 @@ srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES bash -e <<END
 
     # Copy any existing results from $SCRATCH to the project root.
     mkdir -p $project_root_in_tmpdir/$results_dir
-    rsync --update --recursive $project_root/$results_dir/$SLURM_JOB_ID $project_root_in_tmpdir/$results_dir/
+    if [ -d "$project_root/$results_dir/$SLURM_JOB_ID" ]; then
+        rsync --update --recursive $project_root/$results_dir/$SLURM_JOB_ID $project_root_in_tmpdir/$results_dir/
+    fi
 END
 
 # Run the actual job command passed as an argument ('python main.py' for example)
@@ -38,5 +40,7 @@ srun uv --directory=$project_root_in_tmpdir run "$@"
 
 # Copy results (if any) from the local storage back to the results dir (eg in $SCRATCH)
 echo "Copying logs from $project_root_in_tmpdir/$results_dir to $project_root/$results_dir"
-srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES \
-    rsync --update --recursive $project_root_in_tmpdir/$results_dir/$SLURM_JOB_ID $project_root/$results_dir/
+if [ -d "$project_root_in_tmpdir/$results_dir/$SLURM_JOB_ID" ]; then
+    srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES \
+        rsync --update --recursive $project_root_in_tmpdir/$results_dir/$SLURM_JOB_ID $project_root/$results_dir/
+fi

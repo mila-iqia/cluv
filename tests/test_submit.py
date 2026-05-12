@@ -194,6 +194,19 @@ class TestSubmitCliParsing:
         )
 
 
+class TestBuildSubmitCommand:
+    def test_build_submit_command_with_program_args(self) -> None:
+        assert (
+            build_submit_command(
+                cluster="mila",
+                job_script=Path("scripts/job.sh"),
+                sbatch_args=[],
+                program_args=["--flag"],
+            )
+            == "cluv submit mila scripts/job.sh -- --flag"
+        )
+
+
 class TestEnsureCleanGitState:
     def test_dirty_repo_without_make_commit_exits(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
@@ -214,15 +227,6 @@ class TestEnsureCleanGitState:
         launched_job_command = "cluv submit mila scripts/job.sh -- --flag"
         expected_commit_body = f"Launched job command:\n\n{launched_job_command}"
         command_calls: list[tuple[list[str], dict]] = []
-        assert (
-            build_submit_command(
-                cluster="mila",
-                job_script=Path("scripts/job.sh"),
-                sbatch_args=[],
-                program_args=["--flag"],
-            )
-            == launched_job_command
-        )
 
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             command_calls.append((command, kwargs))

@@ -2,7 +2,7 @@ import textwrap
 import subprocess
 from pathlib import Path
 
-from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command, get_config
+from cluv.cli.submit import build_submit_command, ensure_clean_git_state, get_sbatch_command, get_config
 
 import pytest
 
@@ -98,9 +98,18 @@ class TestEnsureCleanGitState:
     def test_make_commit_creates_commit_with_tracked_changes_and_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        launched_job_command = "cluv submit --make-commit mila scripts/job.sh -- --flag"
+        launched_job_command = "cluv submit mila scripts/job.sh -- --flag"
         expected_commit_body = f"Launched job command:\n\n{launched_job_command}"
         command_calls: list[tuple[list[str], dict]] = []
+        assert (
+            build_submit_command(
+                cluster="mila",
+                job_script=Path("scripts/job.sh"),
+                sbatch_args=[],
+                program_args=["--flag"],
+            )
+            == launched_job_command
+        )
 
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             command_calls.append((command, kwargs))

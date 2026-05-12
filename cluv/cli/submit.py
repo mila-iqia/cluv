@@ -201,7 +201,6 @@ def build_submit_command(
 ) -> str:
     """Build the local `cluv submit` command line used to launch the job."""
     command_parts = ["cluv", "submit"]
-    command_parts.append("--make-commit")
     command_parts.extend([cluster, str(job_script), *sbatch_args])
     if program_args:
         command_parts.extend(["--", *program_args])

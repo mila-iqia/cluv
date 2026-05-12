@@ -66,7 +66,11 @@ async def submit(
     )
     ```
     """
-    submit_command = build_submit_command(cluster, job_script, sbatch_args, program_args, make_commit)
+    submit_command: str | None = None
+    if make_commit:
+        submit_command = build_submit_command(
+            cluster, job_script, sbatch_args, program_args, make_commit
+        )
 
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(
@@ -450,7 +454,9 @@ def ensure_clean_git_state(
     dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
     if dirty_lines:
         if make_commit:
-            create_submit_commit(launched_job_command=launched_job_command or "cluv submit")
+            if launched_job_command is None:
+                raise ValueError("launched_job_command is required when make_commit=True")
+            create_submit_commit(launched_job_command=launched_job_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
             console.print(
                 "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",

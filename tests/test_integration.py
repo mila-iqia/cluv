@@ -21,7 +21,7 @@ from cluv.config import load_cluv_config
 from cluv.cli.init import DEFAULT_RESULTS_PATH, init
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
-from cluv.cli.submit import submit
+from cluv.cli.submit import JobInfo, submit
 from cluv.cli.sync import sync
 from cluv.remote import Remote, control_socket_is_running
 
@@ -192,13 +192,15 @@ async def test_submit(remote: Remote):
     if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
     should_cancel_job = True
-    job_id = await submit(
+    job_info = await submit(
         cluster=remote.hostname,
         job_script=Path("scripts/safe_job.sh"),
         sbatch_args=["--time=00:00:30"],
         program_args=["python", "--version"],
     )
-    assert isinstance(job_id, int)
+    assert isinstance(job_info, JobInfo)
+    assert job_info.cluster == remote.hostname
+    job_id = job_info.job_id
     try:
         job_name = await remote.get_output(
             f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
@@ -270,22 +272,22 @@ async def test_submit_first():
     ]
     if not available_clusters:
         pytest.skip("No submit-supported clusters with active SSH connections available.")
-    job_id: int | None = None
+    job_info: JobInfo | None = None
     remotes = [await get_remote_without_2fa_prompt(c) for c in available_clusters]
     try:
-        job_id = await submit(
+        job_info = await submit(
             cluster="first",
             job_script=Path("scripts/safe_job.sh"),
             sbatch_args=["--time=00:00:30"],
             program_args=["python", "--version"],
         )
-        assert isinstance(job_id, int)
+        assert isinstance(job_info, JobInfo)
     finally:
-        if job_id is not None:
+        if job_info is not None:
             # Cancel the winning job on all available clusters (only one will have it).
             for r in remotes:
                 if r is not None:
-                    await r.run(f"scancel {job_id}", warn=True, hide=True, display=True)
+                    await r.run(f"scancel {job_info.job_id}", warn=True, hide=True, display=True)
 
 
 @pytest.fixture

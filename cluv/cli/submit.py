@@ -5,6 +5,8 @@ import os
 import shlex
 import subprocess
 import sys
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cluv.cli.sync import sync
@@ -17,7 +19,16 @@ RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
 FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
 
-__all__ = ["submit"]
+__all__ = ["JobInfo", "submit"]
+
+
+@dataclass(frozen=True)
+class JobInfo:
+    """Information about a submitted SLURM job."""
+
+    cluster: str
+    job_id: int
+    submit_time: datetime
 
 
 async def submit(
@@ -25,7 +36,7 @@ async def submit(
     job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
-) -> int | None:
+) -> JobInfo | None:
     """Submit a SLURM job on a remote cluster.
 
     Enforces a clean git state, syncs the project, sets `GIT_COMMIT` and any
@@ -43,7 +54,7 @@ async def submit(
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
 
     Returns:
-        The job ID of the submitted job or None if the sbatch command fails.
+        A `JobInfo` with the cluster hostname, job ID, and submission time, or None if the sbatch command fails.
 
     Examples:
 
@@ -73,6 +84,7 @@ async def submit(
         console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
         return None
 
+    submit_time = datetime.now(timezone.utc)
     job_id = int(result.stdout.strip())
 
     console.log(
@@ -80,7 +92,7 @@ async def submit(
         f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
     )
 
-    return job_id
+    return JobInfo(cluster=cluster, job_id=job_id, submit_time=submit_time)
 
 
 async def submit_first(
@@ -88,7 +100,7 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-) -> int | None:
+) -> JobInfo | None:
     """Submit the job on all clusters, and wait until one of them starts.
     Once one starts, cancel the others.
     """
@@ -110,6 +122,7 @@ async def submit_first(
         ],
         return_exceptions=True,
     )
+    submit_time = datetime.now(timezone.utc)
 
     # Get the results of the sbatch command. We expect an int (the job id) or the exception
     # if the command failed on the remote cluster.
@@ -183,7 +196,9 @@ async def submit_first(
     finally:
         await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)
 
-    return start_job_id
+    if start_cluster is None or start_job_id is None:
+        return None
+    return JobInfo(cluster=start_cluster, job_id=start_job_id, submit_time=submit_time)
 
 
 def ensure_clean_git_state() -> str:

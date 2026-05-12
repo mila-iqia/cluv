@@ -22,7 +22,7 @@ from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.cli.sync import sync
-from cluv.config import load_cluv_config
+from cluv.config import get_config, load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 
 # Some useful constants used to turn tests on and off depending on where we are.
@@ -246,6 +246,90 @@ async def test_submit(remote: Remote):
     finally:
         if should_cancel_job:
             await remote.run(f"scancel {job_id}", warn=True, hide=True, display=True)
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(300)
+async def test_submit_pytorch_setup_example(remote: Remote, monkeypatch: pytest.MonkeyPatch):
+    """End-to-end: submit the pytorch-setup example to a Slurm cluster via sbatch.
+
+    Requires an active SSH connection to the cluster and a clean git tree.
+    Also actually performs a `cluv sync` to that cluster.
+
+    NOTE: This may push the current branch to GitHub when run locally, but in
+    GitHub Actions `cluv sync` skips `git push`.
+    """
+    if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
+        pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
+
+    pytorch_setup_dir = Path(__file__).parent.parent / "examples" / "pytorch-setup"
+    monkeypatch.chdir(pytorch_setup_dir)
+    # Clear the config cache so it picks up the pytorch-setup example's pyproject.toml.
+    get_config.cache_clear()
+
+    should_cancel_job = True
+    job_id = await submit(
+        cluster=remote.hostname,
+        job_script=Path("scripts/job.sh"),
+        sbatch_args=["--time=00:05:00"],
+        program_args=["python", "src/pytorch_setup/main.py"],
+    )
+    assert isinstance(job_id, int)
+    try:
+        job_name = await remote.get_output(
+            f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
+        )
+        assert job_name.strip().startswith("cluv-")
+        # Wait until the job exits, then verify output content after syncing logs back locally.
+        TERMINAL_STATUSES = {
+            "COMPLETED",
+            "FAILED",
+            "CANCELLED",
+            "TIMEOUT",
+            "NODE_FAIL",
+            "OUT_OF_MEMORY",
+            "PREEMPTED",
+            "BOOT_FAIL",
+            "DEADLINE",
+        }
+        final_status = "UNKNOWN"
+        MAX_POLL_ATTEMPTS = 75
+        POLL_INTERVAL_SECONDS = 2
+        # Poll up to ~150s (75 * 2s) for terminal state, leaving a bit of room in the
+        # 300s test timeout for sync + output validation.
+        for _ in range(MAX_POLL_ATTEMPTS):
+            status_output = await remote.get_output(
+                f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
+                warn=True,
+                hide=True,
+                display=False,
+            )
+            # --parsable2 uses pipe-delimited output (`STATE|...`), so keep only the state field.
+            final_status = status_output.strip().partition("|")[0].strip()
+            if final_status in TERMINAL_STATUSES:
+                break
+            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        if final_status not in TERMINAL_STATUSES:
+            pytest.fail(
+                f"Job {job_id} did not reach terminal status within "
+                f"{MAX_POLL_ATTEMPTS * POLL_INTERVAL_SECONDS}s "
+                f"(last status: {final_status!r})"
+            )
+        if final_status != "COMPLETED":
+            pytest.fail(f"Submitted job {job_id} ended with unexpected status: {final_status!r}")
+        should_cancel_job = False
+        await sync(clusters=[remote.hostname])
+        output_file = Path("logs") / str(job_id) / f"slurm-{job_id}.out"
+        assert output_file.is_file(), f"Expected job output file to be synced locally: {output_file}"
+        output_text = output_file.read_text(errors="replace")
+        assert "PyTorch built with CUDA:" in output_text, (
+            f"Expected PyTorch output in {output_file}, got:\n{output_text}"
+        )
+    finally:
+        if should_cancel_job:
+            await remote.run(f"scancel {job_id}", warn=True, hide=True, display=True)
+        # Clear the config cache to avoid polluting other tests with the pytorch-setup config.
+        get_config.cache_clear()
 
 
 @pytest.fixture

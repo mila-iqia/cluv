@@ -17,6 +17,9 @@ import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, save_job
+from pathlib import Path
+from typing import Callable
+
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
@@ -66,13 +69,14 @@ async def submit(
     )
     ```
     """
-    launched_job_command = (
-        build_submit_command(cluster, job_script, sbatch_args, program_args) if make_commit else None
-    )
-
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(
-        make_commit=make_commit, launched_job_command=launched_job_command
+        make_commit=make_commit,
+        launched_job_command_builder=(
+            (lambda: build_submit_command(cluster, job_script, sbatch_args, program_args))
+            if make_commit
+            else None
+        ),
     )
 
     here = current_cluster()
@@ -440,7 +444,7 @@ def create_submit_commit(launched_job_command: str) -> None:
 
 
 def ensure_clean_git_state(
-    make_commit: bool = False, launched_job_command: str | None = None
+    make_commit: bool = False, launched_job_command_builder: Callable[[], str] | None = None
 ) -> str:
     """
     Check git is clean locally and return the current commit hash.
@@ -449,8 +453,9 @@ def ensure_clean_git_state(
     dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
     if dirty_lines:
         if make_commit:
-            if launched_job_command is None:
-                raise ValueError("launched_job_command is required when make_commit=True")
+            if launched_job_command_builder is None:
+                raise ValueError("launched_job_command_builder is required when make_commit=True")
+            launched_job_command = launched_job_command_builder()
             create_submit_commit(launched_job_command=launched_job_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
             console.print(

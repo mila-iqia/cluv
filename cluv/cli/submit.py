@@ -57,9 +57,9 @@ async def submit(
     )
     ```
     """
-    launched_job_command: str | None = None
-    if make_commit:
-        launched_job_command = build_submit_command(cluster, job_script, sbatch_args, program_args)
+    launched_job_command = (
+        build_submit_command(cluster, job_script, sbatch_args, program_args) if make_commit else None
+    )
 
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(

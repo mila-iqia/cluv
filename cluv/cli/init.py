@@ -45,7 +45,6 @@ def init(path: Path | None = None) -> None:
     console.print()
 
     if path is not None:
-        path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         os.chdir(path)
 

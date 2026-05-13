@@ -271,7 +271,7 @@ async def test_submit_first():
         c for c in SUBMIT_SUPPORTED_CLUSTERS if await control_socket_is_running(c)
     ]
     if not available_clusters:
-        pytest.skip("No submit-supported clusters with active SSH connections available.")
+        pytest.skip("None of the designated clusters for this test have an active SSH connections available.")
     job_info: JobInfo | None = None
     remotes = [await get_remote_without_2fa_prompt(c) for c in available_clusters]
     try:
@@ -285,10 +285,8 @@ async def test_submit_first():
     finally:
         if job_info is not None:
             # Cancel the winning job only on the cluster where it was submitted.
-            for cluster, r in zip(available_clusters, remotes):
-                if cluster == job_info.cluster and r is not None:
-                    await r.run(f"scancel {job_info.job_id}", warn=True, hide=True, display=True)
-                    break
+            remote = next(remote for remote in remotes if remote.hostname == job_info.cluster
+            await r.run(f"scancel {job_info.job_id}", warn=True, hide=True, display=True)
 
 
 @pytest.fixture

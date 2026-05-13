@@ -24,7 +24,7 @@ __all__ = ["JobInfo", "submit"]
 
 @dataclass(frozen=True)
 class JobInfo:
-    """Information about a submitted SLURM job."""
+    """Information about a submitted Slurm job."""
 
     cluster: str
     job_id: int
@@ -296,7 +296,7 @@ async def get_job_status(remote: Remote, job_id: int) -> str:
 async def cancel_job(remote: Remote, job_id: int) -> str:
     """Cancel the job with the given id on the remote cluster."""
     scancel_command = f"scancel {job_id}"
-    output = await remote.get_output(scancel_command)
+    output = await remote.get_output(scancel_command, warn=True)
     console.print(f"Cancelled job {job_id} on cluster {remote.hostname}.")
     return output
 

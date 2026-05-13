@@ -1,6 +1,8 @@
 """Unit tests for cluv/cli/init.py check functions."""
 
 import importlib
+import shutil
+import subprocess
 import textwrap
 from pathlib import Path
 
@@ -214,81 +216,57 @@ class TestJobScriptCheck:
         assert "results_dir" not in generated_legacy_script_content
 
 
-class TestInitPath:
-    def test_creates_directory_if_not_exists(
+class TestInitIntegration:
+    """Integration tests for the init() function that run the full init flow locally."""
+
+    @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not installed")
+    def test_init_with_path_creates_project(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """init(path) should create the directory if it doesn't exist and chdir into it."""
-        import os
+        """init(path=<name>) creates and initializes a project directory end-to-end."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        new_project = fake_home / "my_project"
 
-        new_dir = tmp_path / "new_project"
-        assert not new_dir.exists()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.delenv("SCRATCH", raising=False)
+        monkeypatch.chdir(tmp_path)  # ensures cwd is restored after the test
 
-        chdir_calls: list[Path] = []
-        monkeypatch.setattr(os, "chdir", lambda p: chdir_calls.append(Path(p)))
+        # Pre-init a git repo so that check_git() doesn't raise
+        subprocess.run(["git", "init", str(new_project)], check=True, capture_output=True)
 
-        # Patch the rest of init so we only test the path/mkdir behaviour
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_home_dir", lambda: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "run_uv_init", lambda: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_git", lambda: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "find_pyproject", lambda: tmp_path / "pyproject.toml")
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_cluv_config", lambda p: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "load_cluv_config", lambda p: type("C", (), {"clusters_names": [], "results_path": None})())
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_ssh_hostnames", lambda c: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_job_script", lambda r, p: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_symlink_to_scratch", lambda r, p: None)
+        init(path=new_project)
 
-        init(path=new_dir)
+        assert new_project.is_dir()
+        pyproject_path = new_project / "pyproject.toml"
+        assert pyproject_path.exists()
 
-        assert new_dir.exists()
-        assert new_dir.is_dir()
-        assert chdir_calls == [new_dir]
+        config = load_cluv_config(pyproject_path)
+        assert config.results_path is not None
 
-    def test_chdir_into_existing_directory(
+        assert (new_project / "scripts").is_dir()
+        assert (new_project / JOB_SCRIPT_PATH).exists()
+
+    @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not installed")
+    def test_init_without_path_uses_cwd(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """init(path) should chdir into an existing directory without error."""
-        import os
+        """init() without a path argument runs in the current directory."""
+        fake_home = tmp_path / "home"
+        project_dir = fake_home / "my_project"
+        project_dir.mkdir(parents=True)
 
-        existing_dir = tmp_path / "existing_project"
-        existing_dir.mkdir()
+        monkeypatch.setattr(Path, "home", lambda: fake_home)
+        monkeypatch.delenv("SCRATCH", raising=False)
+        monkeypatch.chdir(project_dir)
 
-        chdir_calls: list[Path] = []
-        monkeypatch.setattr(os, "chdir", lambda p: chdir_calls.append(Path(p)))
+        subprocess.run(["git", "init", str(project_dir)], check=True, capture_output=True)
 
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_home_dir", lambda: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "run_uv_init", lambda: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_git", lambda: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "find_pyproject", lambda: tmp_path / "pyproject.toml")
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_cluv_config", lambda p: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "load_cluv_config", lambda p: type("C", (), {"clusters_names": [], "results_path": None})())
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_ssh_hostnames", lambda c: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_job_script", lambda r, p: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_symlink_to_scratch", lambda r, p: None)
+        init()
 
-        init(path=existing_dir)
+        pyproject_path = project_dir / "pyproject.toml"
+        assert pyproject_path.exists()
 
-        assert chdir_calls == [existing_dir]
+        config = load_cluv_config(pyproject_path)
+        assert config.results_path is not None
 
-    def test_no_chdir_when_path_is_none(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """init() without a path should not chdir."""
-        import os
-
-        chdir_calls: list[Path] = []
-        monkeypatch.setattr(os, "chdir", lambda p: chdir_calls.append(Path(p)))
-
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_home_dir", lambda: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "run_uv_init", lambda: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_git", lambda: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "find_pyproject", lambda: tmp_path / "pyproject.toml")
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_cluv_config", lambda p: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "load_cluv_config", lambda p: type("C", (), {"clusters_names": [], "results_path": None})())
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_ssh_hostnames", lambda c: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_job_script", lambda r, p: None)
-        monkeypatch.setattr(CLUV_INIT_MODULE, "check_symlink_to_scratch", lambda r, p: None)
-
-        init(path=None)
-
-        assert chdir_calls == []

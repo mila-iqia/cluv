@@ -284,10 +284,11 @@ async def test_submit_first():
         assert isinstance(job_info, JobInfo)
     finally:
         if job_info is not None:
-            # Cancel the winning job on all available clusters (only one will have it).
-            for r in remotes:
-                if r is not None:
+            # Cancel the winning job only on the cluster where it was submitted.
+            for cluster, r in zip(available_clusters, remotes):
+                if cluster == job_info.cluster and r is not None:
                     await r.run(f"scancel {job_info.job_id}", warn=True, hide=True, display=True)
+                    break
 
 
 @pytest.fixture

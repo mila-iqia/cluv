@@ -333,6 +333,28 @@ async def get_job_status(remote: Remote, job_id: int) -> str:
     return await remote.get_output(sacct_command)
 
 
+async def get_max_rss_mb(remote: Remote, job_id: int) -> int | None:
+    """Read peak RSS across all steps of `job_id` from sacct, in MiB.
+
+    Returns None if sacct reports no parseable value. `MaxRSS` is a per-step
+    metric (the allocation row is blank), so this walks every row and keeps the
+    max. Used to populate `salvo.policy.OomContext.max_rss_mb`; `apply_oom` is
+    designed to also work with None and fall back to the multiplicative factor.
+    """
+    sacct_command = f"sacct -j {job_id} --format=MaxRSS --noheader --units=M --parsable2"
+    output = await remote.get_output(sacct_command)
+    values: list[int] = []
+    for line in output.splitlines():
+        raw = line.strip().rstrip("M")
+        if not raw:
+            continue
+        try:
+            values.append(int(float(raw)))
+        except ValueError:
+            continue
+    return max(values) if values else None
+
+
 async def cancel_job(remote: Remote, job_id: int) -> str:
     """Cancel the job with the given id on the remote cluster."""
     scancel_command = f"scancel {job_id}"

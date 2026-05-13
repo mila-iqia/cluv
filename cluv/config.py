@@ -18,6 +18,24 @@ class ClusterConfig(BaseModel):
     """Environment variables to set when running Slurm commands on this cluster."""
 
 
+class RetryConfig(BaseModel):
+    """Opt-in OOM-aware resubmit policy.
+
+    DSL strings in `on_oom` are parsed by `salvo.policy.parse` at first use, not at
+    config load. Keeps `cluv.config` free of a pysalvo import and lets users see a
+    clear error pointing at the bad step.
+    """
+
+    on_oom: list[str] = []
+    """Ordered policy steps tried on `OUT_OF_MEMORY`. First applicable step wins.
+
+    Example: `["bump_mem(1.5x, max=128G)", "fail"]`.
+    """
+
+    max_hops: int = 5
+    """Hard ceiling on resubmits per top-level invocation."""
+
+
 class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
@@ -37,6 +55,9 @@ class CluvConfig(BaseModel):
     The keys are cluster names; each value is a `ClusterConfig` whose `env` dict contains
     environment variables to set when running Slurm commands on that cluster.
     """
+
+    retry: RetryConfig | None = None
+    """Optional OOM-aware resubmit policy. When absent, `cluv submit` is unchanged."""
 
     @property
     def clusters_names(self) -> list[str]:

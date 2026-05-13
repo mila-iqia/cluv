@@ -17,13 +17,15 @@ import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
-from cluv.cli.init import DEFAULT_RESULTS_PATH, DRAC_CLUSTERS, init
+from cluv.config import load_cluv_config
+from cluv.cli.init import DEFAULT_RESULTS_PATH, init
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.cli.sync import sync
-from cluv.config import load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Some useful constants used to turn tests on and off depending on where we are.
 IN_GITHUB_CI = "GITHUB_ACTIONS" in os.environ
@@ -332,7 +334,8 @@ def test_init(
             project_dir / generated_config.results_path
         ).resolve() == scratch / DEFAULT_RESULTS_PATH / project_name
 
-    assert generated_config.clusters_names == ["mila"] + DRAC_CLUSTERS
+    expected_config = load_cluv_config(REPO_ROOT / "pyproject.toml")
+    assert generated_config.clusters_names == expected_config.clusters_names
 
 
 @pytest.mark.timeout(5)

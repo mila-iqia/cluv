@@ -110,7 +110,8 @@ my_project/
 ├── logs -> $SCRATCH/logs/my_project   # symlink to $SCRATCH
 ├── pyproject.toml        # includes [tool.cluv] config
 ├── scripts/
-│   └── job.sh            # Slurm job script template
+│   ├── job.sh            # Slurm job script template
+│   └── safe_job.sh       # Slurm job script template (copies .venv and prior results)
 └── src/
     └── my_project/
         └── __init__.py

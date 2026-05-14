@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from cluv.cli.sync import sync
-from cluv.config import ClusterConfig, find_pyproject, get_config
+from cluv.config import ClusterConfig, RetryConfig, find_pyproject, get_config
 from cluv.remote import Remote
 from cluv.utils import console
 
@@ -53,6 +53,9 @@ SBATCH_ENV_TO_FLAG: dict[str, str] = {
     "SBATCH_RESERVATION": "--reservation",
     "SBATCH_TIME": "--time",
 }
+
+# How often to poll sacct while waiting for a terminal state in the retry loop.
+RETRY_POLL_INTERVAL_S = 10
 
 
 def _split_env_for_sbatch(env_vars: dict[str, str]) -> tuple[list[str], dict[str, str]]:
@@ -110,7 +113,15 @@ async def submit(
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state()
 
+    cluv_config = get_config()
+
     if cluster == "first":
+        if cluv_config.retry is not None:
+            console.print(
+                "[red]`cluv submit first` cannot be combined with [tool.cluv.retry]. "
+                "See open-question 3 in the OOM-aware resubmit proposal.[/red]"
+            )
+            return None
         return await submit_first(job_script, sbatch_args, program_args, git_commit)
 
     # Sync.
@@ -131,7 +142,18 @@ async def submit(
         f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
     )
 
-    return job_id
+    if cluv_config.retry is None:
+        return job_id
+
+    return await _retry_on_oom(
+        remote=remote,
+        job_id=job_id,
+        job_script=job_script,
+        sbatch_args=sbatch_args,
+        program_args=program_args,
+        git_commit=git_commit,
+        retry=cluv_config.retry,
+    )
 
 
 async def submit_first(
@@ -237,6 +259,91 @@ async def submit_first(
     return start_job_id
 
 
+async def _wait_terminal(remote: Remote, job_id: int) -> str:
+    """Poll sacct until `job_id` reaches a state in `TERMINAL_JOB_STATES`."""
+    while True:
+        raw = await get_job_status(remote, job_id)
+        # sacct may report states like "CANCELLED by 1234"; the first word is enough.
+        state = raw.split()[0] if raw else ""
+        if state and state in TERMINAL_JOB_STATES:
+            return state
+        await asyncio.sleep(RETRY_POLL_INTERVAL_S)
+
+
+async def _retry_on_oom(
+    remote: Remote,
+    job_id: int,
+    job_script: Path,
+    sbatch_args: list[str],
+    program_args: list[str],
+    git_commit: str,
+    retry: RetryConfig,
+) -> int | None:
+    """OOM-aware resubmit loop layered on top of the single-cluster `submit()` path.
+
+    Polls sacct for `job_id` until terminal. On `OUT_OF_MEMORY`, asks
+    `salvo.policy.apply_oom` for the next memory ask, mutates the env-var dict
+    passed to `sbatch`, and resubmits. On any other terminal state, returns the
+    current `job_id`. Bounded by `retry.max_hops` and by `FailStep` in the policy.
+    """
+    # Import lazily so users who don't opt in don't pay for pysalvo at import time.
+    from salvo.job.spec import JobSpec
+    from salvo.policy import OomContext, apply_oom
+
+    env_overrides: dict[str, str] = {}
+    hop = 0
+    # Track current memory ask through hops. None means "rely on cluster default";
+    # in that case bump_mem still works because JobSpec defaults to 4G.
+    current_mem = env_overrides.get("SBATCH_MEM") or _initial_mem(remote.hostname)
+
+    while hop < retry.max_hops:
+        state = await _wait_terminal(remote, job_id)
+        if state != "OUT_OF_MEMORY":
+            return job_id
+
+        max_rss_mb = await get_max_rss_mb(remote, job_id)
+        spec = JobSpec(
+            name="cluv-retry",
+            cmd=["sbatch"],
+            mem=current_mem,
+            on_oom=retry.on_oom,
+        )
+        new_spec, action = apply_oom(spec, OomContext(kind="cpu", max_rss_mb=max_rss_mb))
+        if new_spec is None:
+            console.log(f"OOM policy terminated after hop {hop}: {action}")
+            return job_id
+
+        hop += 1
+        current_mem = new_spec.mem
+        env_overrides["SBATCH_MEM"] = current_mem
+        env_overrides["CLUV_HOP"] = f"{hop}/{retry.max_hops}"
+        console.log(
+            f"hop {hop}/{retry.max_hops}: resubmitting on {remote.hostname} with mem={current_mem}"
+        )
+        result = await sbatch(
+            remote, job_script, sbatch_args, program_args, git_commit, env_overrides
+        )
+        if result.returncode != 0:
+            console.print(f"[red]resubmit hop {hop} failed: {result.stderr}[/red]")
+            return None
+        job_id = int(result.stdout.strip())
+        console.log(f"hop {hop}/{retry.max_hops}: submitted as job {job_id}")
+
+    console.log(f"max_hops={retry.max_hops} reached; last job id is {job_id}")
+    return job_id
+
+
+def _initial_mem(cluster: str) -> str:
+    """Best-effort read of the configured `SBATCH_MEM` for `cluster`.
+
+    Falls back to "4G" (matching `JobSpec`'s default) when nothing is set, so the
+    policy parser has a number to multiply.
+    """
+    config = get_config()
+    merged = {**config.env, **config.clusters.get(cluster, ClusterConfig()).env}
+    return merged.get("SBATCH_MEM", "4G")
+
+
 def ensure_clean_git_state() -> str:
     """
     Check git is clean locally and return the current commit hash.
@@ -279,9 +386,14 @@ def get_sbatch_command(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    env_overrides: dict[str, str] | None = None,
 ) -> str:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
+
+    `env_overrides`, when set, is applied after the global + per-cluster `env` merge so
+    the retry loop can bump `SBATCH_MEM` / set `CLUV_HOP` between hops without
+    touching the on-disk config.
     """
     # Resolve remote job script path.
     project_path = find_pyproject().parent.relative_to(Path.home())
@@ -296,6 +408,9 @@ def get_sbatch_command(
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
+
+    if env_overrides:
+        env_vars.update(env_overrides)
 
     sbatch_flags, env_remaining = _split_env_for_sbatch(env_vars)
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_remaining.items())
@@ -315,12 +430,13 @@ async def sbatch(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    env_overrides: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Submit the job via sbatch on the remote cluster, and return the job id."""
     cluster = remote.hostname
 
     remote_cmd = get_sbatch_command(
-        cluster, job_script, sbatch_args, program_args, git_commit
+        cluster, job_script, sbatch_args, program_args, git_commit, env_overrides
     )
     return await remote.run(remote_cmd, display=True, warn=True, hide=True)
 

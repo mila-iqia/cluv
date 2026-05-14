@@ -285,9 +285,8 @@ async def test_submit_first():
     finally:
         if job_info is not None:
             # Cancel the winning job only on the cluster where it was submitted.
-            remote = next((r for r in remotes if r.hostname == job_info.cluster), None)
-            if remote is not None:
-                await remote.run(f"scancel {job_info.job_id}", warn=True, hide=True, display=True)
+            remote = next(r for r in remotes if r.hostname == job_info.cluster)
+            await remote.run(f"scancel {job_info.job_id}", warn=True, hide=True, display=True)
 
 
 @pytest.fixture

@@ -1,10 +1,12 @@
 import textwrap
 import subprocess
+from io import StringIO
 from pathlib import Path
 
+from rich.console import Console
 from rich.text import Text
 
-from cluv.cli.submit import _build_submission_table, ensure_clean_git_state, get_sbatch_command, get_config
+from cluv.cli.submit import _build_commands_table, _build_submission_table, ensure_clean_git_state, get_sbatch_command, get_config
 
 import pytest
 
@@ -181,9 +183,6 @@ class TestBuildSubmissionTable:
         assert cluster_to_jobid == {}
 
     def test_table_cells_contain_expected_text(self) -> None:
-        from io import StringIO
-        from rich.console import Console
-
         cluster_to_jobid: dict[str, int] = {}
         table = _build_submission_table(
             ["mila", "narval", "rorqual"],
@@ -200,3 +199,19 @@ class TestBuildSubmissionTable:
         assert "99" in rendered
         assert "sbatch: error:" in rendered
         assert "timeout" in rendered
+
+
+class TestBuildCommandsTable:
+    def test_renders_all_clusters_and_commands(self) -> None:
+        commands = {
+            "mila": "bash --login -c 'GIT_COMMIT=abc sbatch --parsable --chdir=proj job.sh'",
+            "narval": "bash --login -c 'GIT_COMMIT=abc sbatch --parsable --chdir=proj job.sh'",
+        }
+        table = _build_commands_table(commands)
+        buf = StringIO()
+        Console(file=buf, no_color=True, highlight=False).print(table)
+        rendered = buf.getvalue()
+        assert "mila" in rendered
+        assert "narval" in rendered
+        assert "GIT_COMMIT=abc" in rendered
+        assert table.row_count == 2

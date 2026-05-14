@@ -88,6 +88,21 @@ async def submit(
     return job_id
 
 
+def _build_commands_table(cluster_to_command: dict[str, str]) -> Table:
+    """Build a rich Table showing the sbatch command that will be run on each cluster."""
+    table = Table(
+        title="[bold cyan]sbatch Commands[/bold cyan]",
+        box=box.ROUNDED,
+        show_lines=True,
+        header_style="bold white",
+    )
+    table.add_column("Cluster", style="bold magenta", min_width=12)
+    table.add_column("Command", style="green", overflow="fold")
+    for cluster, command in cluster_to_command.items():
+        table.add_row(cluster, command)
+    return table
+
+
 def _build_submission_table(
     cluster_names: Iterable[str],
     sbatch_results: Sequence[subprocess.CompletedProcess[str] | BaseException],
@@ -114,7 +129,7 @@ def _build_submission_table(
             cluster_to_jobid[cluster] = job_id
             status_cell = Text(str(job_id), style="green")
         else:
-            status_cell = Text(f"error: {result.stderr.strip()}", style="red")
+            status_cell = Text(result.stderr.strip(), style="red")
         table.add_row(cluster, status_cell)
 
     return table
@@ -133,6 +148,15 @@ async def submit_first(
     remotes = await sync()
     clusters_to_remote = {remote.hostname: remote for remote in remotes}
 
+    # Pre-compute and display the sbatch command for each cluster.
+    cluster_to_command = {
+        remote.hostname: get_sbatch_command(
+            remote.hostname, job_script, sbatch_args, program_args, git_commit
+        )
+        for remote in remotes
+    }
+    console.print(_build_commands_table(cluster_to_command))
+
     # Submit the job on all the clusters
     sbatch_results = await asyncio.gather(
         *[
@@ -142,6 +166,7 @@ async def submit_first(
                 sbatch_args,
                 program_args,
                 git_commit,
+                display=False,
             )
             for remote in remotes
         ],
@@ -290,6 +315,8 @@ async def sbatch(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    *,
+    display: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """Submit the job via sbatch on the remote cluster, and return the job id."""
     cluster = remote.hostname
@@ -297,7 +324,7 @@ async def sbatch(
     remote_cmd = get_sbatch_command(
         cluster, job_script, sbatch_args, program_args, git_commit
     )
-    return await remote.run(remote_cmd, display=True, warn=True, hide=True)
+    return await remote.run(remote_cmd, display=display, warn=True, hide=True)
 
 
 async def get_job_status(remote: Remote, job_id: int) -> str:

@@ -106,13 +106,13 @@ env = {UV_OFFLINE="1", WANDB_MODE="offline"}
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.fir]
-env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="def-bengioy"}
 
 [tool.cluv.clusters.nibi]
-env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="def-bengioy"}
 
 [tool.cluv.clusters.trillium]
-env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad", SBATCH_NODES="1", SBATCH_MEM_PER_NODE="0"}
 
 [tool.cluv.clusters.trillium-gpu]
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}

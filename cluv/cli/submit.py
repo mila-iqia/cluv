@@ -5,7 +5,12 @@ import os
 import shlex
 import subprocess
 import sys
+from collections.abc import Iterable, Sequence
 from pathlib import Path
+
+from rich import box
+from rich.table import Table
+from rich.text import Text
 
 from cluv.cli.sync import sync
 from cluv.config import ClusterConfig, find_pyproject, get_config
@@ -83,6 +88,38 @@ async def submit(
     return job_id
 
 
+def _build_submission_table(
+    cluster_names: Iterable[str],
+    sbatch_results: Sequence[subprocess.CompletedProcess[str] | BaseException],
+    cluster_to_jobid: dict[str, int],
+) -> Table:
+    """Build a rich Table summarising sbatch submission results.
+
+    Populates *cluster_to_jobid* as a side-effect for callers that need it.
+    """
+    table = Table(
+        title="[bold cyan]Job Submission Results[/bold cyan]",
+        box=box.ROUNDED,
+        show_lines=True,
+        header_style="bold white",
+    )
+    table.add_column("Cluster", style="bold magenta", min_width=12)
+    table.add_column("Job ID / Status", min_width=30)
+
+    for cluster, result in zip(cluster_names, sbatch_results, strict=True):
+        if isinstance(result, BaseException):
+            status_cell = Text(f"error: {result}", style="red")
+        elif result.returncode == 0:
+            job_id = int(result.stdout.strip())
+            cluster_to_jobid[cluster] = job_id
+            status_cell = Text(str(job_id), style="green")
+        else:
+            status_cell = Text(f"error: {result.stderr.strip()}", style="red")
+        table.add_row(cluster, status_cell)
+
+    return table
+
+
 async def submit_first(
     job_script: Path,
     sbatch_args: list[str],
@@ -113,22 +150,9 @@ async def submit_first(
 
     # Get the results of the sbatch command. We expect an int (the job id) or the exception
     # if the command failed on the remote cluster.
-    console.print("Jobs submitted on the clusters:")
     cluster_to_jobid: dict[str, int] = {}
-    for cluster, result in zip(clusters_to_remote.keys(), sbatch_results):
-        if isinstance(result, BaseException):
-            console.print(
-                f"    - [bold]{cluster}[/bold]: error when trying to use remote, [red]{result}[/red]"
-            )
-        else:
-            if result.returncode == 0:
-                job_id = int(result.stdout.strip())
-                cluster_to_jobid[cluster] = job_id
-                console.print(f"    - [bold]{cluster}[/bold]: job {job_id}")
-            else:
-                console.print(
-                    f"    - [bold]{cluster}[/bold]: no job, [red]{result.stderr.strip()}[/red]"
-                )
+    submission_table = _build_submission_table(clusters_to_remote.keys(), sbatch_results, cluster_to_jobid)
+    console.print(submission_table)
 
     if len(cluster_to_jobid) == 0:
         console.print("No job submitted on clusters. See errors above.")
@@ -175,13 +199,17 @@ async def submit_first(
                 await asyncio.sleep(wait_time)
                 wait_time = min(wait_time*2, 20)
         console.log(
-            f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs...\n",
-            f"Use `ssh {start_cluster} sacct -j {start_job_id}` to view its status.",
+            f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs..."
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
         console.log("Interrupted by user. Cancelling all jobs...")
     finally:
         await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)
+
+    if start_cluster is not None and start_job_id is not None:
+        console.print(
+            f"\nTo watch the job: [bold]ssh {start_cluster} sacct -j {start_job_id}[/bold]"
+        )
 
     return start_job_id
 

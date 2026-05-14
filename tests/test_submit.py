@@ -2,7 +2,9 @@ import textwrap
 import subprocess
 from pathlib import Path
 
-from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command, get_config
+from rich.text import Text
+
+from cluv.cli.submit import _build_submission_table, ensure_clean_git_state, get_sbatch_command, get_config
 
 import pytest
 
@@ -139,3 +141,62 @@ class TestEnsureCleanGitState:
         monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
 
         assert ensure_clean_git_state() == "cccccccccccccccccccccccccccccccccccccccc"
+
+
+class TestBuildSubmissionTable:
+    def _make_ok(self, job_id: int) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 0, stdout=f"{job_id}\n", stderr="")
+
+    def _make_err(self, msg: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 1, stdout="", stderr=msg)
+
+    def test_successful_submissions_populate_cluster_to_jobid(self) -> None:
+        cluster_to_jobid: dict[str, int] = {}
+        table = _build_submission_table(
+            ["mila", "narval"],
+            [self._make_ok(12345), self._make_ok(67890)],
+            cluster_to_jobid,
+        )
+        assert cluster_to_jobid == {"mila": 12345, "narval": 67890}
+        # Two data rows expected
+        assert table.row_count == 2
+
+    def test_failed_submission_not_added_to_cluster_to_jobid(self) -> None:
+        cluster_to_jobid: dict[str, int] = {}
+        _build_submission_table(
+            ["mila", "narval"],
+            [self._make_ok(42), self._make_err("out of memory")],
+            cluster_to_jobid,
+        )
+        assert "narval" not in cluster_to_jobid
+        assert cluster_to_jobid == {"mila": 42}
+
+    def test_exception_result_not_added_to_cluster_to_jobid(self) -> None:
+        cluster_to_jobid: dict[str, int] = {}
+        _build_submission_table(
+            ["mila"],
+            [RuntimeError("connection refused")],
+            cluster_to_jobid,
+        )
+        assert cluster_to_jobid == {}
+
+    def test_table_cells_contain_expected_text(self) -> None:
+        from io import StringIO
+        from rich.console import Console
+
+        cluster_to_jobid: dict[str, int] = {}
+        table = _build_submission_table(
+            ["mila", "narval", "rorqual"],
+            [
+                self._make_ok(99),
+                self._make_err("sbatch: error: ..."),
+                RuntimeError("timeout"),
+            ],
+            cluster_to_jobid,
+        )
+        buf = StringIO()
+        Console(file=buf, no_color=True, highlight=False).print(table)
+        rendered = buf.getvalue()
+        assert "99" in rendered
+        assert "sbatch: error:" in rendered
+        assert "timeout" in rendered

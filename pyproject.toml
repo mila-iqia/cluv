@@ -67,6 +67,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["cluv"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"scripts" = "cluv/templates/scripts"
+"pyproject.toml" = "cluv/templates/pyproject.toml"
+
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
 

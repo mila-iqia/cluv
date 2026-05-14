@@ -4,7 +4,6 @@ from io import StringIO
 from pathlib import Path
 
 from rich.console import Console
-from rich.text import Text
 
 from cluv.cli.submit import _build_commands_table, _build_submission_table, ensure_clean_git_state, get_sbatch_command, get_config
 

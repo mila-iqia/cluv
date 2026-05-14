@@ -2,7 +2,6 @@
 
 import importlib
 import shutil
-import subprocess
 import textwrap
 from pathlib import Path
 
@@ -232,9 +231,6 @@ class TestInitIntegration:
         monkeypatch.delenv("SCRATCH", raising=False)
         monkeypatch.chdir(tmp_path)  # ensures cwd is restored after the test
 
-        # Pre-init a git repo so that check_git() doesn't raise
-        subprocess.run(["git", "init", str(new_project)], check=True, capture_output=True)
-
         init(path=new_project)
 
         assert new_project.is_dir()
@@ -259,8 +255,6 @@ class TestInitIntegration:
         monkeypatch.setattr(Path, "home", lambda: fake_home)
         monkeypatch.delenv("SCRATCH", raising=False)
         monkeypatch.chdir(project_dir)
-
-        subprocess.run(["git", "init", str(project_dir)], check=True, capture_output=True)
 
         init()
 

@@ -274,11 +274,11 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 
 def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     table = Table(
-        title="[bold cyan]Cluster Overview[/bold cyan]",
+        title="Cluster Overview",
         box=box.ROUNDED,
         show_lines=True,
         header_style="bold white on #1a1a2e",
-        title_style="bold",
+        title_style="bold cyan",
         expand=True,
     )
 
@@ -323,9 +323,10 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
 
 def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
     table = Table(
-        title="[bold cyan]Your Jobs Summary[/bold cyan]",
+        title="Jobs Overview",
         box=box.SIMPLE_HEAVY,
         header_style="bold white on #1a1a2e",
+        title_style="bold cyan",
         expand=True,
     )
     table.add_column("Cluster", style="bold magenta")

@@ -381,7 +381,7 @@ def _build_legend() -> Panel:
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 
 
-async def status(clusters: list[str] | None = None):
+async def status(clusters: list[str] | None = None, show: str = "all"):
     """Gets the status of available clusters.
     - Gives you an overview of the state of each cluster, and displays an overview of the state of your jobs across the clusters.
     - Displays the number of idle nodes, or the number of idle GPUs, or something similar, for each cluster
@@ -411,9 +411,10 @@ async def status(clusters: list[str] | None = None):
     console.rule("[bold cyan]cluv status[/bold cyan]")
     console.print()
 
-    console.print(_build_cluster_table(data))
-    console.print()
-    console.print(_build_my_jobs_table(data))
-    console.print()
-    console.print(_build_legend())
-    console.print()
+    if show in ("clusters", "all"):
+        console.print(_build_cluster_table(data))
+        console.print(_build_legend())
+        console.print()
+    if show in ("jobs", "all"):
+        console.print(_build_my_jobs_table(data))
+        console.print()

@@ -149,8 +149,12 @@ def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
         metavar="<cluster>",
         help=("Cluster(s) to query. Leave empty to query all clusters with an active connection."),
     )
-    # TODO: Add sub-commands to query the status with respect to different things, GPUs, storage, jobs, etc?
-    # Or just display everything?
+    status_parser.add_argument(
+        "--show",
+        choices=["clusters", "jobs", "all"],
+        default="all",
+        help="Which table to display: cluster overview, jobs overview, or both (default: all).",
+    )
     status_parser.set_defaults(func=status)
     return status_parser
 

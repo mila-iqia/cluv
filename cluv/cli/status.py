@@ -416,16 +416,16 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
         expand=True,
     )
 
-    table.add_column("Cluster", style="bold")
-    table.add_column("Status", justify="center")
-    table.add_column("GPU model", justify="center")
-    table.add_column("Free GPUs", justify="left")
-    table.add_column("My jobs\nrun/pend", justify="center")
-    table.add_column("All jobs\nrun/pend", justify="center")
-    table.add_column("Avg wait", justify="center")
-    table.add_column("GPU util", justify="center")
-    table.add_column("$HOME", justify="left")
-    table.add_column("$SCRATCH", justify="left")
+    table.add_column("Cluster", style="bold", ratio=1)
+    table.add_column("Status", justify="center", ratio=1)
+    table.add_column("GPU model", justify="center", ratio=1)
+    table.add_column("Free GPUs", justify="left", ratio=2)
+    table.add_column("My jobs\nrun/pend", justify="center", ratio=1)
+    table.add_column("All jobs\nrun/pend", justify="center", ratio=1)
+    table.add_column("Avg wait", justify="center", ratio=1)
+    table.add_column("GPU util", justify="center", ratio=1)
+    table.add_column("$HOME", justify="left", ratio=2)
+    table.add_column("$SCRATCH", justify="left", ratio=2)
 
     for c in data:
         if not c.online:

@@ -191,7 +191,7 @@ def _records_from_sacct(output: str, cluster: str) -> list[JobRecord]:
 
 
 async def backfill_from_sacct(
-    remote: Remote, cluster: str, *, since_days: int = 60
+    remote: Remote, cluster: str, *, since_days: int = 30
 ) -> int:
     """Pull recent cluv-stamped jobs from sacct on ``cluster``, write to cache.
 
@@ -271,5 +271,5 @@ __all__ = [
 
 
 # Convenience for sync callers (CLI subcommands) that don't want to await.
-def backfill_sync(remote: Remote, cluster: str, *, since_days: int = 60) -> int:
+def backfill_sync(remote: Remote, cluster: str, *, since_days: int = 30) -> int:
     return asyncio.run(backfill_from_sacct(remote, cluster, since_days=since_days))

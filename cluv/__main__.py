@@ -206,8 +206,8 @@ def add_history_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     history_parser.add_argument(
         "--since-days",
         type=int,
-        default=60,
-        help="How many days of sacct to pull for `backfill`. Default: 60.",
+        default=30,
+        help="How many days of sacct to pull for `backfill`. Default: 30.",
     )
     history_parser.set_defaults(func=history)
     return history_parser

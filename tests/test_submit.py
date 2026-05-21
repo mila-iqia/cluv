@@ -52,7 +52,7 @@ class TestGetSbatchCommand:
 
         assert (
             sbatch_command
-            == "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project --account=my_account --mem=8G ~/my_project/scripts/my_script.sh program_arg_1 program_arg_2'"
+            == "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project --job-name=cluv-my_script --account=my_account --mem=8G ~/my_project/scripts/my_script.sh program_arg_1 program_arg_2'"
         )
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
@@ -82,8 +82,54 @@ class TestGetSbatchCommand:
 
         assert (
             sbatch_command
-            == "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
+            == "bash --login -c 'MY_VAR=2 GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project --job-name=cluv-my_script  ~/my_project/scripts/my_script.sh '"
         )
+
+    def test_sbatch_env_vars_are_translated_to_cli_flags(self, project_dir: Path) -> None:
+        """SBATCH_* env vars must reach sbatch as CLI flags, not as env vars.
+
+        DRAC clusters re-source their site profile inside `bash --login -c`,
+        which clobbers SBATCH_* defaults before sbatch reads them. Flags are
+        parsed by sbatch directly and survive the login shell.
+        """
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.env]
+            SBATCH_MEM = "2G"
+            SBATCH_TIME = "00:05:00"
+            SBATCH_CPUS_PER_TASK = "1"
+            [tool.cluv.clusters.mila.env]
+            SBATCH_ACCOUNT = "rrg-foo"
+            """
+            )
+        )
+
+        sbatch_command = get_sbatch_command(
+            cluster="mila",
+            job_script=Path("scripts/my_script.sh"),
+            sbatch_args=[],
+            program_args=[],
+            git_commit="abecdef",
+        )
+
+        # Resource requests must appear as `--flag=value` between `sbatch --parsable
+        # --chdir=...` and the job script path, not as a `SBATCH_*=...` env prefix.
+        assert "SBATCH_MEM=" not in sbatch_command
+        assert "SBATCH_TIME=" not in sbatch_command
+        assert "SBATCH_CPUS_PER_TASK=" not in sbatch_command
+        assert "SBATCH_ACCOUNT=" not in sbatch_command
+        assert "--mem=2G" in sbatch_command
+        assert "--time=00:05:00" in sbatch_command
+        assert "--cpus-per-task=1" in sbatch_command
+        assert "--account=rrg-foo" in sbatch_command
+        # SBATCH_JOB_NAME injected by get_sbatch_command is also a flag.
+        assert "--job-name=cluv-my_script" in sbatch_command
+        # Non-SBATCH vars stay as env vars.
+        assert "GIT_COMMIT=abecdef" in sbatch_command
 
 
 class TestTerminalJobStates:

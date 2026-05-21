@@ -31,6 +31,42 @@ TERMINAL_JOB_STATES = [
 ]
 FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
+# SBATCH_* env vars that have an equivalent `sbatch` CLI flag. We translate
+# these to flags before invoking sbatch because some clusters (notably DRAC)
+# re-source their site profile inside `bash --login -c`, which can clobber
+# SBATCH_* env defaults before sbatch reads them; CLI flags are parsed by
+# sbatch directly and survive the login shell. Any SBATCH_* key not in this
+# table falls through as a plain env var (preserving existing behavior).
+SBATCH_ENV_TO_FLAG: dict[str, str] = {
+    "SBATCH_ACCOUNT": "--account",
+    "SBATCH_CONSTRAINT": "--constraint",
+    "SBATCH_CPUS_PER_TASK": "--cpus-per-task",
+    "SBATCH_ERROR": "--error",
+    "SBATCH_GRES": "--gres",
+    "SBATCH_JOB_NAME": "--job-name",
+    "SBATCH_MEM": "--mem",
+    "SBATCH_NODES": "--nodes",
+    "SBATCH_NTASKS": "--ntasks",
+    "SBATCH_OUTPUT": "--output",
+    "SBATCH_PARTITION": "--partition",
+    "SBATCH_QOS": "--qos",
+    "SBATCH_RESERVATION": "--reservation",
+    "SBATCH_TIME": "--time",
+}
+
+
+def _split_env_for_sbatch(env_vars: dict[str, str]) -> tuple[list[str], dict[str, str]]:
+    """Translate known SBATCH_* env vars into `sbatch` CLI flags; pass the rest through."""
+    sbatch_flags: list[str] = []
+    remaining: dict[str, str] = {}
+    for key, value in env_vars.items():
+        flag = SBATCH_ENV_TO_FLAG.get(key)
+        if flag is None:
+            remaining[key] = value
+        else:
+            sbatch_flags.append(f"{flag}={shlex.quote(str(value))}")
+    return sbatch_flags, remaining
+
 
 __all__ = ["submit"]
 
@@ -261,13 +297,15 @@ def get_sbatch_command(
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
-    env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
+    sbatch_flags, env_remaining = _split_env_for_sbatch(env_vars)
+    env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_remaining.items())
+    sbatch_flags_str = " ".join(sbatch_flags)
     sbatch_args_str = " ".join(shlex.quote(f) for f in sbatch_args)
     program_args_str = shlex.join(program_args)
 
     return (
         f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={project_path} "
-        f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
+        f"{sbatch_flags_str} {sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
 
 

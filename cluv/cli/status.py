@@ -96,8 +96,6 @@ class ClusterStatus:
     gpu_model: str
     jobs: JobStats
     storage: StorageStats
-    avg_wait_min: int | None = None  # estimated queue wait time in minutes
-    avg_gpu_util_pct: float | None = None  # average GPU utilisation across running jobs
 
 
 # ---------------------------------------------------------------------------
@@ -338,8 +336,6 @@ def get_mock_cluster_status(username: str = "you") -> list[ClusterStatus]:
                     scratch_used=scratch_used,
                     scratch_quota=scratch_quota,
                 ),
-                avg_wait_min=rng.randint(2, 240),
-                avg_gpu_util_pct=round(rng.uniform(40, 99), 1),
             )
         )
     return results
@@ -422,8 +418,6 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     table.add_column("Free GPUs", justify="left", min_width=20)
     table.add_column("My jobs\nrun/pend", justify="center", min_width=9)
     table.add_column("All jobs\nrun/pend", justify="center", min_width=10)
-    table.add_column("Avg wait", justify="center", min_width=8)
-    table.add_column("GPU util", justify="center", min_width=8)
     table.add_column("$HOME", justify="left", min_width=18)
     table.add_column("$SCRATCH", justify="left", min_width=18)
 
@@ -449,10 +443,6 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
             _gpu_bar(c.gpu_idle, c.gpu_total),
             my_jobs,
             all_jobs,
-            Text("—", style="dim") if c.avg_wait_min is None else _wait_text(c.avg_wait_min),
-            Text("—", style="dim")
-            if c.avg_gpu_util_pct is None
-            else _util_text(c.avg_gpu_util_pct),
             home_bar,
             scratch_bar,
             style=row_style,

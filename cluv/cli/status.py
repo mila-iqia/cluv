@@ -550,12 +550,9 @@ async def status(clusters: list[str] | None = None):
         mock = get_mock_cluster_status()
         # When specific clusters were requested, only show mock rows for those.
         data = [c for c in mock if not clusters or c.name in clusters]
-        label = "[dim](mock data)[/dim]"
-    else:
-        label = "[dim](live data)[/dim]"
 
     console.print()
-    console.rule(f"[bold cyan]cluv status[/bold cyan]  {label}")
+    console.rule("[bold cyan]cluv status[/bold cyan]")
     console.print()
 
     console.print(_build_cluster_table(data))

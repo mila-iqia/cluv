@@ -36,6 +36,31 @@ class RetryConfig(BaseModel):
     """Hard ceiling on resubmits per top-level invocation."""
 
 
+class EstimateConfig(BaseModel):
+    """Opt-in memory estimator driven by past sacct observations.
+
+    When enabled, `cluv submit` looks up the local history cache for the (script,
+    git_commit, program_args) key and, if there are enough samples, overrides
+    `SBATCH_MEM` with `estimate_mem(...).mem_mb`. The retry loop still runs as a
+    safety net if the estimate underpredicts.
+    """
+
+    enabled: bool = False
+    """Master switch. When false the estimator is bypassed and submit is unchanged."""
+
+    safety: float = 1.2
+    """Multiplier applied to the P95 of past MaxRSS observations."""
+
+    window: int = 20
+    """Maximum number of recent records considered per submit."""
+
+    min_samples: int = 3
+    """Minimum learnable observations before the estimator overrides SBATCH_MEM."""
+
+    backfill: bool = True
+    """On a cold-cache key, run a single `sacct` query to backfill from cluster history."""
+
+
 class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
@@ -58,6 +83,9 @@ class CluvConfig(BaseModel):
 
     retry: RetryConfig | None = None
     """Optional OOM-aware resubmit policy. When absent, `cluv submit` is unchanged."""
+
+    estimate: EstimateConfig | None = None
+    """Optional memory estimator. When absent or disabled, `cluv submit` is unchanged."""
 
     @property
     def clusters_names(self) -> list[str]:

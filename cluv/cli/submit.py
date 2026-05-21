@@ -274,7 +274,9 @@ async def sbatch(
 
 async def get_job_status(remote: Remote, job_id: int) -> str:
     """Get the status of the job with the given id on the remote cluster."""
-    sacct_command = f"sacct -j {job_id} --format=State --noheader --allocations"
+    # --parsable2 prevents sacct from truncating wider state names to 10 chars
+    # (e.g. "OUT_OF_ME+" for OUT_OF_MEMORY); we want the full canonical string.
+    sacct_command = f"sacct -j {job_id} --format=State --noheader --allocations --parsable2"
     return await remote.get_output(sacct_command)
 
 

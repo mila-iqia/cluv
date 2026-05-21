@@ -13,7 +13,22 @@ from cluv.remote import Remote
 from cluv.utils import console
 
 
-RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
+# SLURM states a job cannot transition out of. Anything else (PENDING, RUNNING,
+# COMPLETING, SUSPENDED, REQUEUED, RESIZING, STAGE_OUT, unknown future states)
+# is treated as transient so wait-loops default to "keep polling" on unknowns.
+TERMINAL_JOB_STATES = [
+    "COMPLETED",
+    "FAILED",
+    "CANCELLED",
+    "TIMEOUT",
+    "NODE_FAIL",
+    "OUT_OF_MEMORY",
+    "PREEMPTED",
+    "BOOT_FAIL",
+    "DEADLINE",
+    "REVOKED",
+    "SPECIAL_EXIT",
+]
 FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
 
@@ -149,7 +164,7 @@ async def submit_first(
                         continue
                     job_status = await get_job_status(remote, job_id)
 
-                    if job_status in RUNNING_JOB_STATES:
+                    if job_status and job_status not in TERMINAL_JOB_STATES:
                         start_cluster = cluster
                         start_job_id = job_id
                         break

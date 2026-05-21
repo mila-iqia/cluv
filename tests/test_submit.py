@@ -2,7 +2,12 @@ import textwrap
 import subprocess
 from pathlib import Path
 
-from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command, get_config
+from cluv.cli.submit import (
+    TERMINAL_JOB_STATES,
+    ensure_clean_git_state,
+    get_config,
+    get_sbatch_command,
+)
 
 import pytest
 
@@ -79,6 +84,35 @@ class TestGetSbatchCommand:
             sbatch_command
             == "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
         )
+
+
+class TestTerminalJobStates:
+    """The wait-loop in submit_first uses `state not in TERMINAL_JOB_STATES`.
+
+    Sanity-check the predicate: known terminal states stop the loop, transient
+    states (including ones absent from old `RUNNING_JOB_STATES`) keep it going,
+    and an empty/unknown state defaults to keep-polling.
+    """
+
+    @pytest.mark.parametrize(
+        "state",
+        ["COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL"],
+    )
+    def test_terminal_states_stop_polling(self, state: str) -> None:
+        assert state in TERMINAL_JOB_STATES
+
+    @pytest.mark.parametrize(
+        "state",
+        ["PENDING", "RUNNING", "COMPLETING", "CONFIGURING", "SUSPENDED", "REQUEUED", "RESIZING"],
+    )
+    def test_transient_states_keep_polling(self, state: str) -> None:
+        assert state not in TERMINAL_JOB_STATES
+
+    @pytest.mark.parametrize("state", ["", "FUTURE_SLURM_STATE"])
+    def test_empty_or_unknown_state_keeps_polling(self, state: str) -> None:
+        # The submit_first call site is `if job_status and job_status not in TERMINAL_JOB_STATES`,
+        # so an empty string short-circuits to "still running" via the truthiness guard.
+        assert state not in TERMINAL_JOB_STATES
 
 
 class TestEnsureCleanGitState:

@@ -5,10 +5,12 @@ import os
 import shlex
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
+from cluv import history
 from cluv.cli.sync import sync
-from cluv.config import ClusterConfig, RetryConfig, find_pyproject, get_config
+from cluv.config import ClusterConfig, EstimateConfig, RetryConfig, find_pyproject, get_config
 from cluv.remote import Remote
 from cluv.utils import console
 
@@ -126,33 +128,56 @@ async def submit(
 
     # Sync.
     remotes = await sync(clusters=[cluster])
-
-    # Run the sbatch command over SSH.
     remote = remotes[0]
-    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
 
+    # Identify "the same job" across submissions; stamp the key into the sacct
+    # Comment field and into the job's env so the history cache and the script
+    # can both see it.
+    from salvo.history import spec_key
+
+    key = spec_key(str(job_script), git_commit, tuple(program_args))
+    sbatch_args = [*sbatch_args, f"--comment={history.build_comment(key)}"]
+    env_overrides: dict[str, str] = {"CLUV_SPEC_KEY": key}
+
+    # Memory estimator (opt-in). Runs after sync so the cold-cache backfill can
+    # use the remote we just connected to.
+    estimate_cfg = cluv_config.estimate if cluv_config.estimate and cluv_config.estimate.enabled else None
+    initial_mem = _initial_mem(cluster)
+    if estimate_cfg is not None:
+        estimate_mem_mb = await _resolve_estimate(remote, cluster, key, estimate_cfg)
+        if estimate_mem_mb is not None:
+            initial_mem = f"{estimate_mem_mb}M"
+            env_overrides["SBATCH_MEM"] = initial_mem
+            env_overrides["CLUV_ESTIMATED_MEM"] = initial_mem
+
+    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit, env_overrides)
     if result.returncode != 0:
         console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
         return None
 
     job_id = int(result.stdout.strip())
-
     console.log(
         f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
         f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
     )
 
-    if cluv_config.retry is None:
+    watch = cluv_config.retry is not None or estimate_cfg is not None
+    if not watch:
         return job_id
 
-    return await _retry_on_oom(
+    return await _watch_job_chain(
         remote=remote,
+        cluster=cluster,
+        key=key,
         job_id=job_id,
         job_script=job_script,
         sbatch_args=sbatch_args,
         program_args=program_args,
         git_commit=git_commit,
+        env_overrides=env_overrides,
+        initial_mem=initial_mem,
         retry=cluv_config.retry,
+        write_back=estimate_cfg is not None,
     )
 
 
@@ -270,35 +295,109 @@ async def _wait_terminal(remote: Remote, job_id: int) -> str:
         await asyncio.sleep(RETRY_POLL_INTERVAL_S)
 
 
-async def _retry_on_oom(
+async def _resolve_estimate(
+    remote: Remote, cluster: str, key: str, cfg: EstimateConfig
+) -> int | None:
+    """Return a memory override (MiB) from local history, or None to skip.
+
+    Loads the cache for `(cluster, key)`, optionally backfills from sacct on
+    cold cache, then asks `salvo.history.estimate_mem` for a number. When the
+    estimator returns `None` (insufficient history), the configured
+    `SBATCH_MEM` is left untouched.
+    """
+    from salvo.history import estimate_mem
+
+    records = history.load(cluster, key)
+    if not records and cfg.backfill:
+        try:
+            n = await history.backfill_from_sacct(remote, cluster)
+            if n:
+                console.log(f"estimator: backfilled {n} record(s) from sacct on {cluster}")
+        except Exception as err:  # network/sacct hiccup should not block submit
+            console.log(f"[yellow]estimator: backfill failed ({err}); continuing[/yellow]")
+        records = history.load(cluster, key)
+
+    estimate = estimate_mem(
+        records,
+        safety=cfg.safety,
+        window=cfg.window,
+        min_samples=cfg.min_samples,
+    )
+    if estimate.mem_mb is None:
+        console.log(f"estimator: {estimate.rationale}; using configured SBATCH_MEM")
+        return None
+    console.log(
+        f"estimator: {estimate.rationale} (confidence={estimate.confidence}); "
+        f"overriding SBATCH_MEM"
+    )
+    return estimate.mem_mb
+
+
+async def _persist_terminal(
+    remote: Remote, cluster: str, key: str, job_id: int, mem_for_job: str
+) -> None:
+    """Read the job's terminal sacct row and append a JobRecord to the cache."""
+    from salvo.history import JobRecord
+    from salvo.job.spec import parse_mem_mb
+
+    state = await get_job_status(remote, job_id)
+    state = (state or "").split()[0]
+    max_rss = await get_max_rss_mb(remote, job_id)
+    try:
+        mem_mb = parse_mem_mb(mem_for_job)
+    except ValueError:
+        mem_mb = 0
+    history.save_record(
+        JobRecord(
+            job_id=str(job_id),
+            key=key,
+            cluster=cluster,
+            state=state or "UNKNOWN",
+            mem_mb=mem_mb,
+            max_rss_mb=max_rss,
+            submitted_at=datetime.now(UTC),
+        )
+    )
+
+
+async def _watch_job_chain(
     remote: Remote,
+    cluster: str,
+    key: str,
     job_id: int,
     job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-    retry: RetryConfig,
+    env_overrides: dict[str, str],
+    initial_mem: str,
+    retry: RetryConfig | None,
+    write_back: bool,
 ) -> int | None:
-    """OOM-aware resubmit loop layered on top of the single-cluster `submit()` path.
+    """Watch a (possibly retrying) job chain to terminal state.
 
-    Polls sacct for `job_id` until terminal. On `OUT_OF_MEMORY`, asks
-    `salvo.policy.apply_oom` for the next memory ask, mutates the env-var dict
-    passed to `sbatch`, and resubmits. On any other terminal state, returns the
-    current `job_id`. Bounded by `retry.max_hops` and by `FailStep` in the policy.
+    Combines two concerns so each terminal state hits one wait loop:
+
+    * If `retry` is set, OUT_OF_MEMORY triggers `salvo.policy.apply_oom`, the
+      memory ask gets bumped, and the job is resubmitted (up to `max_hops`).
+    * If `write_back` is true, each terminal job persists a `JobRecord` so the
+      estimator learns from it on the next run.
     """
-    # Import lazily so users who don't opt in don't pay for pysalvo at import time.
     from salvo.job.spec import JobSpec
     from salvo.policy import OomContext, apply_oom
 
-    env_overrides: dict[str, str] = {}
+    current_mem = initial_mem
+    max_hops = retry.max_hops if retry else 0
     hop = 0
-    # Track current memory ask through hops. None means "rely on cluster default";
-    # in that case bump_mem still works because JobSpec defaults to 4G.
-    current_mem = env_overrides.get("SBATCH_MEM") or _initial_mem(remote.hostname)
 
-    while hop < retry.max_hops:
+    while True:
         state = await _wait_terminal(remote, job_id)
-        if state != "OUT_OF_MEMORY":
+        if write_back:
+            await _persist_terminal(remote, cluster, key, job_id, current_mem)
+        if retry is None or state != "OUT_OF_MEMORY":
+            return job_id
+        if hop >= max_hops:
+            console.log(f"max_hops={max_hops} reached; last job id is {job_id}")
             return job_id
 
         max_rss_mb = await get_max_rss_mb(remote, job_id)
@@ -316,9 +415,9 @@ async def _retry_on_oom(
         hop += 1
         current_mem = new_spec.mem
         env_overrides["SBATCH_MEM"] = current_mem
-        env_overrides["CLUV_HOP"] = f"{hop}/{retry.max_hops}"
+        env_overrides["CLUV_HOP"] = f"{hop}/{max_hops}"
         console.log(
-            f"hop {hop}/{retry.max_hops}: resubmitting on {remote.hostname} with mem={current_mem}"
+            f"hop {hop}/{max_hops}: resubmitting on {remote.hostname} with mem={current_mem}"
         )
         result = await sbatch(
             remote, job_script, sbatch_args, program_args, git_commit, env_overrides
@@ -327,10 +426,7 @@ async def _retry_on_oom(
             console.print(f"[red]resubmit hop {hop} failed: {result.stderr}[/red]")
             return None
         job_id = int(result.stdout.strip())
-        console.log(f"hop {hop}/{retry.max_hops}: submitted as job {job_id}")
-
-    console.log(f"max_hops={retry.max_hops} reached; last job id is {job_id}")
-    return job_id
+        console.log(f"hop {hop}/{max_hops}: submitted as job {job_id}")
 
 
 def _initial_mem(cluster: str) -> str:

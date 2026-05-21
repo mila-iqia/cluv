@@ -14,9 +14,36 @@ from pathlib import Path
 import pytest
 
 from cluv.cli import submit as submit_module
-from cluv.cli.submit import _retry_on_oom
+from cluv.cli.submit import _watch_job_chain
 from cluv.config import RetryConfig, get_config
 from cluv.remote import Remote
+
+
+def _call_watch(
+    *,
+    job_id: int,
+    retry: RetryConfig,
+    initial_mem: str = "16G",
+):
+    """Test helper: invoke _watch_job_chain with retry-only defaults.
+
+    `write_back=False` keeps these tests focused on the retry math; history
+    cache writes are covered separately in test_history.py.
+    """
+    return _watch_job_chain(
+        remote=Remote(hostname="mila"),
+        cluster="mila",
+        key="testkey",
+        job_id=job_id,
+        job_script=Path("scripts/job.sh"),
+        sbatch_args=[],
+        program_args=[],
+        git_commit="abcdef",
+        env_overrides={},
+        initial_mem=initial_mem,
+        retry=retry,
+        write_back=False,
+    )
 
 
 @pytest.fixture
@@ -90,13 +117,8 @@ async def test_retry_bumps_mem_then_completes(
     runner = _ScriptedRunner(states=["OUT_OF_MEMORY", "COMPLETED"], sbatch_jobs=[1002])
     runner.install(monkeypatch)
 
-    job_id = await _retry_on_oom(
-        remote=Remote(hostname="mila"),
+    job_id = await _call_watch(
         job_id=1001,
-        job_script=Path("scripts/job.sh"),
-        sbatch_args=[],
-        program_args=[],
-        git_commit="abcdef",
         retry=RetryConfig(on_oom=["bump_mem(2x, max=128G)", "fail"], max_hops=5),
     )
 
@@ -117,13 +139,8 @@ async def test_retry_grows_mem_across_hops(
     )
     runner.install(monkeypatch)
 
-    job_id = await _retry_on_oom(
-        remote=Remote(hostname="mila"),
+    job_id = await _call_watch(
         job_id=2001,
-        job_script=Path("scripts/job.sh"),
-        sbatch_args=[],
-        program_args=[],
-        git_commit="abcdef",
         retry=RetryConfig(on_oom=["bump_mem(2x, max=128G)", "fail"], max_hops=5),
     )
 
@@ -138,19 +155,17 @@ async def test_retry_grows_mem_across_hops(
 async def test_retry_caps_at_max_hops(
     project_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # max_hops=2 caps resubmits at two even if the last one still OOMs. The
+    # watch loop polls the final job to terminal state so we get a state to
+    # report back, then exits without a third resubmit.
     runner = _ScriptedRunner(
-        states=["OUT_OF_MEMORY", "OUT_OF_MEMORY"],
+        states=["OUT_OF_MEMORY", "OUT_OF_MEMORY", "OUT_OF_MEMORY"],
         sbatch_jobs=[3002, 3003],
     )
     runner.install(monkeypatch)
 
-    job_id = await _retry_on_oom(
-        remote=Remote(hostname="mila"),
+    job_id = await _call_watch(
         job_id=3001,
-        job_script=Path("scripts/job.sh"),
-        sbatch_args=[],
-        program_args=[],
-        git_commit="abcdef",
         retry=RetryConfig(on_oom=["bump_mem(1.5x, max=128G)", "fail"], max_hops=2),
     )
 
@@ -167,13 +182,8 @@ async def test_retry_terminates_on_fail_step(
 
     # 100G * 5 capped at 128G is reachable; force fall-through to fail by
     # asking for a bump that the policy declines (already at the cap).
-    job_id = await _retry_on_oom(
-        remote=Remote(hostname="mila"),
+    job_id = await _call_watch(
         job_id=4001,
-        job_script=Path("scripts/job.sh"),
-        sbatch_args=[],
-        program_args=[],
-        git_commit="abcdef",
         retry=RetryConfig(on_oom=["fail"], max_hops=5),
     )
 
@@ -187,13 +197,8 @@ async def test_retry_returns_immediately_on_non_oom_terminal(
     runner = _ScriptedRunner(states=["COMPLETED"], sbatch_jobs=[])
     runner.install(monkeypatch)
 
-    job_id = await _retry_on_oom(
-        remote=Remote(hostname="mila"),
+    job_id = await _call_watch(
         job_id=5001,
-        job_script=Path("scripts/job.sh"),
-        sbatch_args=[],
-        program_args=[],
-        git_commit="abcdef",
         retry=RetryConfig(on_oom=["bump_mem(2x, max=128G)", "fail"], max_hops=5),
     )
 
@@ -201,12 +206,10 @@ async def test_retry_returns_immediately_on_non_oom_terminal(
     assert runner.recorded == []
 
 
-def test_submit_is_noop_path_when_retry_is_none(project_dir: Path) -> None:
-    """When `[tool.cluv.retry]` is absent, `cluv_config.retry` is None.
-
-    This is the cheap structural guarantee: a config without the retry section
-    deserializes to `retry=None`, so `submit()` skips `_retry_on_oom` on the
-    very first branch and the new code path is dormant.
+def test_submit_is_noop_path_when_retry_and_estimate_are_none(project_dir: Path) -> None:
+    """When neither `[tool.cluv.retry]` nor `[tool.cluv.estimate]` is configured,
+    `submit()` exits the moment sbatch returns and the watch loop never runs.
     """
     config = get_config()
     assert config.retry is None
+    assert config.estimate is None

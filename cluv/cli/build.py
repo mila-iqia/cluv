@@ -8,11 +8,15 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
 
 from cluv.cli.login import login
 from cluv.cli.sync import sync
 from cluv.config import ContainerConfig, find_pyproject, get_cluv_config
 from cluv.utils import console
+
+if TYPE_CHECKING:
+    from cluv.remote import Remote
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +73,11 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
     container: ContainerConfig = cluster_config.container
 
     if not no_sync:
-        await sync(clusters=[cluster])
+        remotes = await sync(clusters=[cluster])
     else:
-        await login([cluster])
+        remotes = await login([cluster])
 
-    remotes = await login([cluster])
     remote = remotes[0]
-
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
 
     console.print("[bold]Exporting pinned requirements from uv.lock...[/bold]")
@@ -111,6 +113,8 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
     console.print("[bold]Building container (this may take several minutes)...[/bold]")
 
     # GOMAXPROCS=1 prevents pids.max cgroup kills on DRAC login nodes.
+    # Their user.slice cgroup has pids.max=512; Go's default thread-per-CPU
+    # overshoots during OCI fetch, killing the build with EAGAIN.
     build_cmd = (
         f"bash -l -c '"
         f"export GOMAXPROCS=${{GOMAXPROCS:-1}} GOMEMLIMIT=${{GOMEMLIMIT:-2GiB}}; "
@@ -122,6 +126,21 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
     result = await remote.run(build_cmd, display=True, hide=False)
     if result.returncode != 0:
         console.print("[red]Container build failed.[/red]")
+        await _cleanup_build_dir(remote)
+        return None
+
+    # Verify the image loads before deploying.
+    console.print("[bold]Verifying container...[/bold]")
+    verify_cmd = (
+        f"bash -l -c '"
+        f"module load apptainer 2>/dev/null || true; "
+        f"apptainer exec /tmp/cluv-build/{sif_name} "
+        f"python -c \"import importlib.metadata; print(\\\"verify OK\\\")\"'"
+    )
+    result = await remote.run(verify_cmd, display=True, hide="out")
+    if result.returncode != 0:
+        console.print("[red]Container verification failed.[/red]")
+        await _cleanup_build_dir(remote)
         return None
 
     console.print(f"[bold]Deploying to {deploy_path}...[/bold]")
@@ -130,16 +149,22 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
         f"mkdir -p {deploy_path} && "
         f"cp /tmp/cluv-build/{sif_name} {deploy_path}/{sif_name} && "
         f"chmod 640 {deploy_path}/{sif_name} && "
-        f"ln -sfn {sif_name} {deploy_path}/current.sif && "
-        f"rm -rf /tmp/cluv-build"
+        f"ln -sfn {sif_name} {deploy_path}/current.sif"
         f"'"
     )
     result = await remote.run(deploy_cmd, display=True, hide=True)
     if result.returncode != 0:
         console.print("[red]Deploy failed.[/red]")
+        await _cleanup_build_dir(remote)
         return None
+
+    await _cleanup_build_dir(remote)
 
     sif_path = f"{deploy_path}/{sif_name}"
     console.print(f"[green]Container deployed: {sif_path}[/green]")
     console.print(f"[green]Symlink: {deploy_path}/current.sif -> {sif_name}[/green]")
     return sif_path
+
+
+async def _cleanup_build_dir(remote: "Remote") -> None:
+    await remote.run("rm -rf /tmp/cluv-build", warn=True, hide=True, display=False)

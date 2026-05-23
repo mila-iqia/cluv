@@ -23,7 +23,10 @@ echo "Running command: apptainer exec $CONTAINER_PATH $@"
 srun apptainer exec --nv \
     --env PYTHONUNBUFFERED=1 \
     --env PYTHONPATH=$project_root \
+    --env MPLCONFIGDIR=/tmp/mpl \
+    --env TORCHDYNAMO_DISABLE=1 \
     --bind $project_root:$project_root \
+    --bind /dev/shm:/dev/shm \
     ${SLURM_TMPDIR:+--bind $SLURM_TMPDIR:$SLURM_TMPDIR} \
     ${SCRATCH:+--bind $SCRATCH:$SCRATCH} \
     $CONTAINER_PATH \

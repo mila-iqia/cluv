@@ -105,6 +105,87 @@ class TestGetSbatchCommand:
         )
 
 
+    def test_container_path_injected_when_container_config_present(self, project_dir: Path) -> None:
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.rorqual.container]
+            deploy_path = "/project/acct/containers"
+            """
+            )
+        )
+
+        (project_dir / "scripts").mkdir()
+        (project_dir / "scripts" / "container_job.sh").touch()
+
+        sbatch_command = get_sbatch_command(
+            cluster="rorqual",
+            job_script=Path("scripts/container_job.sh"),
+            sbatch_args=[],
+            program_args=["python", "main.py"],
+            git_commit="abc1234",
+        )
+
+        assert "CONTAINER_PATH=/project/acct/containers/current.sif" in sbatch_command
+
+    def test_container_path_not_injected_without_container_config(self, project_dir: Path) -> None:
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+
+        (project_dir / "scripts").mkdir()
+        (project_dir / "scripts" / "job.sh").touch()
+
+        sbatch_command = get_sbatch_command(
+            cluster="mila",
+            job_script=Path("scripts/job.sh"),
+            sbatch_args=[],
+            program_args=[],
+            git_commit="abc1234",
+        )
+
+        assert "CONTAINER_PATH" not in sbatch_command
+
+    def test_explicit_container_path_env_not_overridden(self, project_dir: Path) -> None:
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.rorqual.env]
+            CONTAINER_PATH = "/custom/path.sif"
+            [tool.cluv.clusters.rorqual.container]
+            deploy_path = "/project/acct/containers"
+            """
+            )
+        )
+
+        (project_dir / "scripts").mkdir()
+        (project_dir / "scripts" / "container_job.sh").touch()
+
+        sbatch_command = get_sbatch_command(
+            cluster="rorqual",
+            job_script=Path("scripts/container_job.sh"),
+            sbatch_args=[],
+            program_args=[],
+            git_commit="abc1234",
+        )
+
+        assert "CONTAINER_PATH=/custom/path.sif" in sbatch_command
+        assert "CONTAINER_PATH=/project/acct/containers/current.sif" not in sbatch_command
+
+
 class TestEnsureCleanGitState:
     def test_prefers_branch_tip_in_github_actions_detached_head(
         self, monkeypatch: pytest.MonkeyPatch

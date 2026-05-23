@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from cluv.cli.build import generate_def
 from cluv.config import ContainerConfig, PartialClusterConfig, load_cluv_config
 
@@ -63,6 +65,10 @@ class TestContainerConfig:
     def test_cluster_without_container(self):
         cfg = PartialClusterConfig(env={"SBATCH_ACCOUNT": "def-me"})
         assert cfg.container is None
+
+    def test_relative_deploy_path_rejected(self):
+        with pytest.raises(ValueError, match="absolute path"):
+            ContainerConfig(deploy_path="relative/path")
 
 
 class TestContainerConfigFromToml:

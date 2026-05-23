@@ -10,7 +10,7 @@ import tomllib
 from dataclasses import field
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic.dataclasses import dataclass
 
 from cluv.utils import current_cluster
@@ -25,6 +25,13 @@ class ContainerConfig(BaseModel):
 
     deploy_path: str
     """Remote path where built .sif images are stored (e.g. '/project/acct/containers')."""
+
+    @field_validator("deploy_path")
+    @classmethod
+    def deploy_path_must_be_absolute(cls, v: str) -> str:
+        if not v.startswith("/"):
+            raise ValueError(f"deploy_path must be an absolute path, got '{v}'")
+        return v
 
     base_image: str = "python:3.12-slim"
     """Docker base image for the Apptainer definition."""

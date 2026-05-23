@@ -8,15 +8,11 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING
 
 from cluv.cli.login import login
 from cluv.cli.sync import sync
 from cluv.config import ContainerConfig, find_pyproject, get_cluv_config
 from cluv.utils import console
-
-if TYPE_CHECKING:
-    from cluv.remote import Remote
 
 logger = logging.getLogger(__name__)
 
@@ -81,15 +77,23 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
 
     console.print("[bold]Exporting pinned requirements from uv.lock...[/bold]")
-    uv_extra = f"--extra {extra}" if extra else ""
-    export_cmd = (
-        f"bash -l -c 'cd ~/{project_path} && "
-        f"uv export --locked --no-dev --no-hashes --no-annotate --no-header --no-emit-project "
-        f"{uv_extra} --format requirements-txt'"
-    )
+    export_parts = [
+        "uv export --locked --no-dev --no-hashes --no-annotate --no-header --no-emit-project",
+    ]
+    if extra:
+        export_parts.append(f"--extra {extra}")
+    export_parts.append("--format requirements-txt")
+    export_cmd = f"bash -l -c 'cd ~/{project_path} && {' '.join(export_parts)}'"
     result = await remote.run(export_cmd, display=True, hide="out")
     if result.returncode != 0:
-        console.print(f"[red]uv export failed: {result.stderr}[/red]")
+        stderr = result.stderr.strip()
+        if "locked" in stderr.lower() or "lock" in stderr.lower():
+            console.print(
+                "[red]uv.lock is out of sync with pyproject.toml. "
+                "Run 'uv lock' locally, commit, and try again.[/red]"
+            )
+        else:
+            console.print(f"[red]uv export failed: {stderr}[/red]")
         return None
     requirements = result.stdout
 
@@ -107,7 +111,8 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
     git_sha = await remote.get_output(
         f"git -C ~/{project_path} rev-parse --short HEAD",
     )
-    sif_name = f"train-{git_sha}.sif"
+    project_name = find_pyproject().parent.name
+    sif_name = f"{project_name}-{git_sha}.sif"
     deploy_path = container.deploy_path
 
     console.print("[bold]Building container (this may take several minutes)...[/bold]")
@@ -131,11 +136,11 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
 
     # Verify the image loads before deploying.
     console.print("[bold]Verifying container...[/bold]")
+    verify_script = "import sys; sys.exit(0)"
     verify_cmd = (
         f"bash -l -c '"
         f"module load apptainer 2>/dev/null || true; "
-        f"apptainer exec /tmp/cluv-build/{sif_name} "
-        f"python -c \"import importlib.metadata; print(\\\"verify OK\\\")\"'"
+        f"apptainer exec /tmp/cluv-build/{sif_name} python -c \"{verify_script}\"'"
     )
     result = await remote.run(verify_cmd, display=True, hide="out")
     if result.returncode != 0:
@@ -166,5 +171,5 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
     return sif_path
 
 
-async def _cleanup_build_dir(remote: "Remote") -> None:
+async def _cleanup_build_dir(remote) -> None:
     await remote.run("rm -rf /tmp/cluv-build", warn=True, hide=True, display=False)

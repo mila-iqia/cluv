@@ -20,6 +20,22 @@ from cluv.utils import find_pyproject
 logger = logging.getLogger(__name__)
 
 
+class ContainerConfig(BaseModel):
+    """Configuration for Apptainer container builds on a cluster."""
+
+    deploy_path: str
+    """Remote path where built .sif images are stored (e.g. '/project/acct/containers')."""
+
+    base_image: str = "python:3.12-slim"
+    """Docker base image for the Apptainer definition."""
+
+    extra_apt: list[str] = []
+    """Additional apt packages to install in the container."""
+
+    extra_pip_args: str = ""
+    """Extra arguments passed to pip install inside the container (e.g. '--extra-index-url ...')."""
+
+
 @dataclass(frozen=True)
 class PartialClusterConfig:
     """Per-cluster configuration options."""
@@ -37,6 +53,10 @@ class PartialClusterConfig:
 
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
+
+    container: ContainerConfig | None = None
+    """Optional Apptainer container configuration. When set, `cluv build` can build containers on
+    this cluster and `cluv submit` will use the container instead of a venv."""
 
 
 @dataclass(frozen=True)
@@ -57,6 +77,10 @@ class ClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
+    container: ContainerConfig | None = None
+    """Optional Apptainer container configuration. When set, `cluv build` can build containers on
+    this cluster and `cluv submit` will use the container instead of a venv."""
+
     def expandvars(self):
         return ClusterConfig(
             env=self.env,
@@ -64,6 +88,7 @@ class ClusterConfig:
             datasets_path=(
                 Path(os.path.expandvars(self.datasets_path)) if self.datasets_path else None
             ),
+            container=self.container,
         )
 
 
@@ -111,6 +136,7 @@ class CluvConfig(BaseModel):
             # TODO: Use the cluster-specific results_path if we add that option back in the future.
             results_path=Path(cluv_config.results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
+            container=cluster_config.container,
         )
 
 

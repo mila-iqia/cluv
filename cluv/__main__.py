@@ -20,6 +20,7 @@ import rich.logging
 import rich_argparse
 import simple_parsing
 
+from .cli.build import build
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run
@@ -58,6 +59,9 @@ def main(argv: list[str] | None = None) -> None:
     subparsers = parser.add_subparsers(dest="<command>", required=True)
 
     # add -v/--verbose to each subparser as well.
+    build_parser = add_build_args(subparsers)
+    _add_v_arg(build_parser)
+
     init_parser = add_init_args(subparsers)
     _add_v_arg(init_parser)
 
@@ -137,6 +141,33 @@ def add_submit_args(
     )
     submit_parser.set_defaults(func=submit)
     return submit_parser
+
+
+def add_build_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+    build_parser = subparsers.add_parser(
+        "build",
+        help="Build an Apptainer container on a remote cluster.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    build_parser.add_argument(
+        "cluster",
+        metavar="<cluster>",
+        help="The cluster to build the container on.",
+    )
+    build_parser.add_argument(
+        "--extra",
+        metavar="<group>",
+        default=None,
+        help="Optional extras group to include (e.g. 'runtime').",
+    )
+    build_parser.add_argument(
+        "--no-sync",
+        action="store_true",
+        default=False,
+        help="Skip syncing the project before building.",
+    )
+    build_parser.set_defaults(func=build)
+    return build_parser
 
 
 def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:

@@ -291,6 +291,10 @@ def get_sbatch_command(
             )
         )
 
+    # Inject CONTAINER_PATH when the cluster has container config.
+    if cluster_config.container and "CONTAINER_PATH" not in env_vars:
+        env_vars["CONTAINER_PATH"] = f"{cluster_config.container.deploy_path}/current.sif"
+
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     sbatch_args_str = " ".join(shlex.quote(f) for f in sbatch_args)
     program_args_str = shlex.join(program_args)

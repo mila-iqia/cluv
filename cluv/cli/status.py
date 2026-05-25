@@ -10,6 +10,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from cluv.cache import load_jobs
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_config
 from cluv.remote import Remote
@@ -370,6 +371,43 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
     return table
 
 
+def _build_cluv_jobs_table() -> Table:
+    table = Table(
+        title="Cluv Jobs",
+        box=box.SIMPLE_HEAVY,
+        header_style="bold white on #1a1a2e",
+        title_style="bold cyan",
+        expand=True,
+    )
+
+    table.add_column("Job ID", style="bold magenta")
+    table.add_column("Cluster", style="bold magenta")
+    table.add_column("Git commit")
+    table.add_column("Submitted at")
+    table.add_column("Job status")
+    table.add_column("Job script")
+    table.add_column("Waiting time")
+    table.add_column("Elapsed time")
+    table.add_column("Program args")
+    table.add_column("Sbatch args")
+
+    for job in load_jobs():
+        table.add_row(
+            str(job.job_id),
+            job.cluster,
+            job.git_commit[:7],
+            job.submitted_at,
+            "[yellow]Unknown[/yellow]",  # Placeholder for real status
+            job.job_script,
+            "—",  # Placeholder for waiting time
+            "—",  # Placeholder for elapsed time
+            ", ".join(job.program_args),
+            ", ".join(job.sbatch_args),
+        )
+
+    return table
+
+
 def _build_legend() -> Panel:
     legend = (
         "[green]▰[/green] free GPU  "
@@ -416,4 +454,6 @@ async def status(clusters: list[str] | None = None):
     console.print(_build_my_jobs_table(data))
     console.print()
     console.print(_build_legend())
+    console.print()
+    console.print(_build_cluv_jobs_table())
     console.print()

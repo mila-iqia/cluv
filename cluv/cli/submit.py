@@ -7,6 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from cluv.cache import save_job
 from cluv.cli.sync import sync
 from cluv.config import ClusterConfig, find_pyproject, get_config
 from cluv.remote import Remote
@@ -74,6 +75,7 @@ async def submit(
         return None
 
     job_id = int(result.stdout.strip())
+    save_job(job_id, cluster, str(job_script), git_commit, sbatch_args, program_args)
 
     console.log(
         f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
@@ -182,6 +184,9 @@ async def submit_first(
         console.log("Interrupted by user. Cancelling all jobs...")
     finally:
         await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)
+
+    if start_job_id is not None and start_cluster is not None:
+        save_job(start_job_id, start_cluster, str(job_script), git_commit, sbatch_args, program_args)
 
     return start_job_id
 

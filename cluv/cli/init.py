@@ -156,17 +156,11 @@ def check_git() -> None:
         raise RuntimeError("Error when checking git remote: ", git_remote.stderr)
 
 
-def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> None:
+def check_symlink_to_scratch(project_root: Path, results_path: str) -> None:
     """
     Check if a symlink from the results_path in the project in $HOME to the corresponding path in $SCRATCH already exists. If not, create it.
     The symlink should be like : $HOME/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>
     """
-    if results_path is None:
-        console.print(
-            "[yellow]⚠️  Warning: Results path is not configured. Skipping symlink creation.[/yellow]"
-        )
-        return
-
     if "SCRATCH" not in os.environ:
         console.print(
             "[yellow]⚠️  Warning: $SCRATCH variable not set. Skipping symlink creation.[/yellow]"

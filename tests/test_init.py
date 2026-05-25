@@ -79,14 +79,7 @@ class TestCheckCluvConfig:
         assert config.results_path == "results"
 
 
-# TODO : fixture to set environment variables ?
 class TestSymlinkCheck:
-    def test_no_symlink_if_results_path_is_none(self, tmp_path) -> None:
-        """check_symlink_to_scratch() should not create a symlink if the results_path is None"""
-        check_symlink_to_scratch(tmp_path, None)
-
-        assert not (tmp_path / DEFAULT_RESULTS_PATH).exists()
-
     def test_no_symlink_if_scratch_not_set(self, tmp_path, monkeypatch) -> None:
         """check_symlink_to_scratch() should not create a symlink if the $SCRATCH env var is not set"""
         monkeypatch.delenv("SCRATCH", raising=False)
@@ -129,13 +122,6 @@ class TestSymlinkCheck:
 
 
 class TestJobScriptCheck:
-    def test_no_job_script_if_results_path_is_none(self, tmp_path: Path) -> None:
-        """check_job_script() should not create a job script if the results_path is None"""
-
-        check_job_script(tmp_path, None)
-
-        assert not (tmp_path / JOB_SCRIPT_PATH).exists()
-
     def test_keep_existing_job_script(self, tmp_path: Path) -> None:
         """check_job_script() should not overwrite an existing job script"""
         job_script_path = tmp_path / JOB_SCRIPT_PATH

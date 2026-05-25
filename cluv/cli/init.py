@@ -203,18 +203,11 @@ def check_ssh_hostnames(clusters: list[str]) -> None:
         console.print("[green]✅ All clusters in the cluv config are present in your SSH config.[/green]")
 
 
-def check_job_script(project_root: Path, results_path: str | None) -> None:
+def check_job_script(project_root: Path, results_path: str) -> None:
     """
     Check if job script templates exist. If not, create them.
     The scripts are templates for users to submit jobs to Slurm with cluv.
     """
-    if results_path is None:
-        console.print(
-            "[yellow]⚠️  Warning: Results path is not configured. Skipping job template script generation.[/yellow]"
-        )
-        return
-
-    project_name = project_root.name
     try:
         project_root_relative_to_home = project_root.relative_to(Path.home())
         project_root_for_script = f"$HOME/{project_root_relative_to_home}"
@@ -243,7 +236,7 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
         )
         script_content = re.sub(
             r"^project_name=.*$",
-            f'project_name="{project_name}"',
+            f'project_name="{project_root.name}"',
             script_content,
             flags=re.MULTILINE,
         )

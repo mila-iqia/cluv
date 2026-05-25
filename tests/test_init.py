@@ -8,7 +8,7 @@ import pytest
 
 from cluv.cli.init import (
     DEFAULT_RESULTS_PATH,
-    JOB_SCRIPT_PATH,
+    SCRIPTS_DIR_PATH,
     check_cluv_config,
     check_git,
     check_home_dir,
@@ -19,6 +19,7 @@ from cluv.config import load_cluv_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLUV_INIT_MODULE = importlib.import_module("cluv.cli.init")
+JOB_SCRIPT_PATH = f"{SCRIPTS_DIR_PATH}/job.sh"
 
 
 class TestCheckHomeDir:
@@ -101,7 +102,6 @@ class TestSymlinkCheck:
         assert expected_results_path.is_symlink()
         assert expected_results_scratch_path.exists()
         assert expected_results_path.resolve() == expected_results_scratch_path.resolve()
-
 
     def test_keep_existing_symlink(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """check_symlink_to_scratch() should not overwrite an existing symlink not pointing to scratch"""

@@ -10,7 +10,6 @@ from cluv.utils import console
 __all__ = ["init"]
 
 SCRIPTS_DIR_PATH = "scripts"
-JOB_SCRIPT_PATH = f"{SCRIPTS_DIR_PATH}/job.sh"
 DEFAULT_RESULTS_PATH = "logs"
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # Repository root when running cluv from a source checkout.

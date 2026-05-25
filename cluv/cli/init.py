@@ -195,11 +195,15 @@ def check_ssh_hostnames(clusters: list[str]) -> None:
     missing_clusters = set(clusters).difference(ssh_hostnames)
 
     if len(missing_clusters) > 0:
-        console.print(f"[yellow]⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. Try to run [bold]mila init[/bold] to add all available clusters.[/yellow]")
+        console.print(
+            f"[yellow]⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. Try to run [bold]mila init[/bold] to add all available clusters.[/yellow]"
+        )
         for cluster in missing_clusters:
             console.print(f"[yellow]    - {cluster}[/yellow]")
     else:
-        console.print("[green]✅ All clusters in the cluv config are present in your SSH config.[/green]")
+        console.print(
+            "[green]✅ All clusters in the cluv config are present in your SSH config.[/green]"
+        )
 
 
 def check_job_script(project_root: Path, results_path: str) -> None:
@@ -224,7 +228,9 @@ def check_job_script(project_root: Path, results_path: str) -> None:
     for script_template in script_templates:
         script_path = scripts_dir / script_template.name
         if script_path.exists():
-            console.print(f"[green]✅ Job template script already exists at '{script_path}'.[/green]")
+            console.print(
+                f"[green]✅ Job template script already exists at '{script_path}'.[/green]"
+            )
             continue
         script_content = script_template.read_text()
         script_content = re.sub(
@@ -286,7 +292,9 @@ def _get_script_templates_path() -> Path:
         if script_templates_path.exists():
             return script_templates_path
     checked_paths_text = ", ".join(str(path) for path in checked_paths)
-    raise RuntimeError(f"Couldn't find the script templates folder. Checked: {checked_paths_text}.")
+    raise RuntimeError(
+        f"Couldn't find the script templates folder. Checked: {checked_paths_text}."
+    )
 
 
 def _get_pyproject_template_path() -> Path:

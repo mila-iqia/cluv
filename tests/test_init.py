@@ -65,13 +65,15 @@ class TestCheckCluvConfig:
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
         p = tmp_path / "pyproject.toml"
-        p.write_text(textwrap.dedent(
-            """\
+        p.write_text(
+            textwrap.dedent(
+                """\
             [tool.cluv]
             clusters = {"mila" = {}}
             results_path = "results"
             """
-        ))
+            )
+        )
 
         check_cluv_config(p)
         config = load_cluv_config(p)
@@ -193,7 +195,7 @@ class TestJobScriptCheck:
         generated_legacy_script = project_root / "scripts" / "legacy_job.sh"
         assert generated_legacy_script.exists()
         generated_legacy_script_content = generated_legacy_script.read_text()
-        assert '#SBATCH --output=outputs/%j/slurm-%j.out' in generated_legacy_script_content
+        assert "#SBATCH --output=outputs/%j/slurm-%j.out" in generated_legacy_script_content
         assert 'results_path="outputs"' in generated_legacy_script_content
         assert "Using $results_path" in generated_legacy_script_content
         assert "results_dir" not in generated_legacy_script_content

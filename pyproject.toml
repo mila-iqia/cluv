@@ -84,8 +84,7 @@ show_missing = true
 [tool.cluv]
 # Where to store results of jobs all clusters.
 # TODO: Can be overridden in each cluster's config.
-# If this is a simple path (like 'logs'), then on Slurm clusters a symlink is created in $SCRATCH/logs/<project_name>.
-results_path = "$SCRATCH/logs/cluv/$SLURM_JOB_ID"
+results_path = "$SCRATCH/logs/cluv"
 
 # Where to read the data from, when synchronizing data to all clusters.
 data_source = "mila:/network/datasets/cifar10"
@@ -118,26 +117,20 @@ env = {UV_OFFLINE="1", WANDB_MODE="offline"}
 # DRAC clusters.
 [tool.cluv.clusters.rorqual]
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
-datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.fir]
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
-datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.nibi]
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
-datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.trillium]
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
-datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.trillium-gpu]
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
-datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.
 # You can also use "def-yourusername" (the default partitions).
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="def-bengioy"}
-datasets_path = "$SCRATCH/data/cifar10"

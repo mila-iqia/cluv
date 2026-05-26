@@ -11,12 +11,19 @@ from pathlib import Path
 import simple_parsing
 from torchvision.datasets import CIFAR10
 
+import cluv
+import cluv.config
+
 SLURM_JOB_ID = int(os.environ["SLURM_JOB_ID"])
 SCRATCH = Path(os.environ["SCRATCH"])
 SLURM_TMPDIR = Path(os.environ["SLURM_TMPDIR"])
 
 # IDEA: maybe load the cluv config and set the checkpoint_dir
 # from cluv.config import load_cluv_config
+config = cluv.config.current_cluster_config()
+assert config, "Example must be run on a cluster."
+assert config.results_path
+assert config.datasets_path
 
 
 @dataclass(frozen=True)
@@ -24,10 +31,10 @@ class Args:
     """Command-line arguments for this example."""
 
     # NOTE: This should be the same as the `results_path` in the Cluv config.
-    results_path: Path = SCRATCH / "logs" / "cluv" / str(SLURM_JOB_ID)
+    results_path: Path = config.results_path
 
     # NOTE: This should be the same as the `datasets_path` in the Cluv config.
-    datasets_path: Path = SCRATCH / "data" / "cifar10"
+    datasets_path: Path = config.datasets_path
 
     # Time to wait before producing the result.
     # Can be useful to test and simulate preemption or cancelling jobs.

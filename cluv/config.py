@@ -8,16 +8,18 @@ import tomllib
 from pathlib import Path
 
 from pydantic import BaseModel
+from pydantic.dataclasses import dataclass
 
 from cluv.utils import current_cluster, resolve_env_vars
 
 logger = logging.getLogger(__name__)
 
 
-class ClusterConfig(BaseModel):
+@dataclass(frozen=True)
+class PartialClusterConfig:
     """Per-cluster configuration options."""
 
-    env: dict[str, str] = {}
+    env: dict[str, str]
     """Environment variables to set when running Slurm commands on this cluster."""
 
     results_path: str | None  # TODO: Change to `Path` instead. Fix any pydantic errors.
@@ -30,6 +32,32 @@ class ClusterConfig(BaseModel):
 
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
+
+
+@dataclass(frozen=True)
+class ClusterConfig:
+    """Per-cluster configuration options."""
+
+    env: dict[str, str]
+    """Environment variables to set when running Slurm commands on this cluster."""
+
+    results_path: Path
+    """Path to the results directory for a specific cluster."""
+
+    datasets_path: Path
+    """Different path where the datasets should be replicated on this cluster.
+
+    When `None`, this defaults to the top-level config's `datasets_path`.
+
+    This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
+    """
+
+    def resolve_env_vars_in_paths(self):
+        return ClusterConfig(
+            env=self.env,
+            results_path=resolve_env_vars(self.results_path),
+            datasets_path=resolve_env_vars(self.datasets_path),
+        )
 
 
 class CluvConfig(BaseModel):
@@ -51,7 +79,10 @@ class CluvConfig(BaseModel):
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
-    clusters: dict[str, ClusterConfig] = {}
+    data_source: str | None
+    """`hostname:/path` of where to get the data from."""
+
+    clusters: dict[str, PartialClusterConfig] = {}
     """Configuration options for each cluster.
 
     The keys are cluster names; each value is a `ClusterConfig` whose `env` dict contains
@@ -61,6 +92,19 @@ class CluvConfig(BaseModel):
     @property
     def clusters_names(self) -> list[str]:
         return list(self.clusters.keys())
+
+    def get_cluster_config(self, cluster: str) -> ClusterConfig:
+        """Returns the cluster config for a specific cluster.
+
+        The environment variables as part of paths will *not* be resolved.
+        """
+        cluv_config = load_cluv_config(find_pyproject())
+        cluster_config = cluv_config.clusters[cluster]
+        return ClusterConfig(
+            env=cluv_config.env | cluster_config.env,
+            results_path=Path(cluster_config.results_path or cluv_config.results_path),
+            datasets_path=Path(cluster_config.datasets_path or cluv_config.datasets_path),
+        )
 
 
 @functools.cache
@@ -110,9 +154,5 @@ def current_cluster_config() -> ClusterConfig | None:
     if not cluster:
         return None  # not on a cluster.
     cluv_config = load_cluv_config(find_pyproject())
-    cluster_config = cluv_config.clusters[cluster]
-    return ClusterConfig(
-        env=cluv_config.env | cluster_config.env,
-        results_path=resolve_env_vars(cluster_config.results_path or cluv_config.results_path),
-        datasets_path=resolve_env_vars(cluster_config.datasets_path or cluv_config.datasets_path),
-    )
+    config = cluv_config.get_cluster_config(cluster)
+    return config.resolve_env_vars_in_paths()

@@ -21,6 +21,6 @@ def resolve_env_vars(string_or_path: str | Path):
     path = Path(string_or_path)
     parts = path.parts
     new_parts = [
-        os.environ.get(part.removeprefix("$")) if part.startswith("$") else part for part in parts
+        os.environ[part.removeprefix("$")] if part.startswith("$") else part for part in parts
     ]
-    return os.path.join(*new_parts)
+    return Path(*new_parts)

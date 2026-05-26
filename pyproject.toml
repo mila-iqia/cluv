@@ -29,6 +29,7 @@ dev = [
     "pytest-timeout>=2.3.1",
     "ruff",
     "pytest-skip-slow>=0.0.5",
+    "torchvision>=0.25.0",
 ]
 
 [tool.pytest.ini_options]
@@ -81,8 +82,17 @@ source = ["cluv"]
 show_missing = true
 
 [tool.cluv]
+# Where to store results on all clusters. TODO: Can be overridden in each cluster's config.
 results_path = "logs"
-datasets_path = "tests/data"
+
+# Which cluster to get the data from. When unset, assumes the current cluster is the source.
+data_source_cluster = "mila"
+# Where to read the data from on the source cluster.
+data_source_path = "/network/datasets/cifar10"
+
+# Where the dataset should be replicated on all clusters.
+# On the source cluster (ex Mila), the folder could contain symlinks, to avoid duplicating the data.
+datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
@@ -91,34 +101,44 @@ SBATCH_REQUEUE = "1"
 
 [tool.cluv.clusters.mila]
 env = {UV_OFFLINE="0", WANDB_MODE="online"}
+datasets_path = "$SCRATCH/data/cifar10"
 
 # PAICE clusters.
 [tool.cluv.clusters.tamia]
 env = {UV_OFFLINE="1", WANDB_MODE="offline"}
+datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.killarney]
 env = {UV_OFFLINE="1", WANDB_MODE="offline"}
+datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.vulcan]
 env = {UV_OFFLINE="1", WANDB_MODE="offline"}
+datasets_path = "$SCRATCH/data/cifar10"
 
 # DRAC clusters.
 [tool.cluv.clusters.rorqual]
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.fir]
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.nibi]
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.trillium]
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.trillium-gpu]
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.
 # You can also use "def-yourusername" (the default partitions).
 env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="def-bengioy"}
+datasets_path = "$SCRATCH/data/cifar10"

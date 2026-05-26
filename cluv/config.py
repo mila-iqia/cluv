@@ -6,6 +6,7 @@ import functools
 import logging
 import tomllib
 from pathlib import Path
+
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,14 @@ class ClusterConfig(BaseModel):
     env: dict[str, str] = {}
     """Environment variables to set when running Slurm commands on this cluster."""
 
+    datasets_path: str | None
+    """Different path where the datasets should be replicated on this cluster.
+
+    When `None`, this defaults to the top-level config's `datasets_path`.
+
+    This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
+    """
+
 
 class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
@@ -26,6 +35,12 @@ class CluvConfig(BaseModel):
 
     !!! info
         On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.
+    """
+
+    datasets_path: str
+    """Path to a dataset directory, for example, `'$SCRATCH/my_dataset'`
+
+    This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
     env: dict[str, str] = {}

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import simple_parsing
+from torchvision.datasets import CIFAR10
 
 SLURM_JOB_ID = int(os.environ["SLURM_JOB_ID"])
 SCRATCH = Path(os.environ["SCRATCH"])
@@ -20,11 +21,13 @@ SLURM_TMPDIR = Path(os.environ["SLURM_TMPDIR"])
 
 @dataclass(frozen=True)
 class Args:
+    """Command-line arguments for this example."""
+
     # NOTE: This should be the same as the `results_path` in the Cluv config.
     results_path: Path = SCRATCH / "logs" / "cluv" / str(SLURM_JOB_ID)
 
     # NOTE: This should be the same as the `datasets_path` in the Cluv config.
-    datasets_path: Path = Path("tests/data/dataset.csv")
+    datasets_path: Path = SCRATCH / "data" / "cifar10"
 
     # Time to wait before producing the result.
     # Can be useful to test and simulate preemption or cancelling jobs.
@@ -35,8 +38,8 @@ def main(args: Args | None = None):
     args = args or simple_parsing.parse(Args, description=__doc__)
     print(f"Job {SLURM_JOB_ID} starts.")
 
-    dataset = args.datasets_path.read_text()
-    assert dataset.strip() == 'This is a dummy "dataset".'
+    dataset = CIFAR10(args.datasets_path)
+    print(dataset)
 
     time.sleep(args.wait_duration_seconds)
 

@@ -82,16 +82,16 @@ source = ["cluv"]
 show_missing = true
 
 [tool.cluv]
-# Where to store results on all clusters. TODO: Can be overridden in each cluster's config.
-results_path = "logs"
+# Where to store results of jobs all clusters.
+# TODO: Can be overridden in each cluster's config.
+# If this is a simple path (like 'logs'), then on Slurm clusters a symlink is created in $SCRATCH/logs/<project_name>.
+results_path = "$SCRATCH/logs/cluv/$SLURM_JOB_ID"
 
-# Which cluster to get the data from. When unset, assumes the current cluster is the source.
-data_source_cluster = "mila"
-# Where to read the data from on the source cluster.
-data_source_path = "/network/datasets/cifar10"
+# Where to read the data from, when synchronizing data to all clusters.
+data_source = "mila:/network/datasets/cifar10"
 
 # Where the dataset should be replicated on all clusters.
-# On the source cluster (ex Mila), the folder could contain symlinks, to avoid duplicating the data.
+# On the source cluster (ex Mila), the folder will only contain symlinks, to avoid duplicating the data.
 datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.env]
@@ -100,21 +100,20 @@ SBATCH_TIME = "3:00:00"
 SBATCH_REQUEUE = "1"
 
 [tool.cluv.clusters.mila]
+# Overrides specific to the Mila cluster.
 env = {UV_OFFLINE="0", WANDB_MODE="online"}
-datasets_path = "$SCRATCH/data/cifar10"
 
 # PAICE clusters.
 [tool.cluv.clusters.tamia]
 env = {UV_OFFLINE="1", WANDB_MODE="offline"}
-datasets_path = "$SCRATCH/data/cifar10"
 
 [tool.cluv.clusters.killarney]
 env = {UV_OFFLINE="1", WANDB_MODE="offline"}
-datasets_path = "$SCRATCH/data/cifar10"
+# For example, no $SCRATCH by default on Killarney, so we overwrite this here.
+datasets_path = "$HOME/data/cifar10"
 
 [tool.cluv.clusters.vulcan]
 env = {UV_OFFLINE="1", WANDB_MODE="offline"}
-datasets_path = "$SCRATCH/data/cifar10"
 
 # DRAC clusters.
 [tool.cluv.clusters.rorqual]

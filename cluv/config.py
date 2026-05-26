@@ -9,6 +9,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from cluv.utils import current_cluster, resolve_env_vars
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +20,10 @@ class ClusterConfig(BaseModel):
     env: dict[str, str] = {}
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    datasets_path: str | None
+    results_path: str | None  # TODO: Change to `Path` instead. Fix any pydantic errors.
+    """Path to the results directory for a specific cluster."""
+
+    datasets_path: str | None  # TODO: Change to `Path` instead. Fix any pydantic errors.
     """Different path where the datasets should be replicated on this cluster.
 
     When `None`, this defaults to the top-level config's `datasets_path`.
@@ -30,8 +35,11 @@ class ClusterConfig(BaseModel):
 class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
+    env: dict[str, str] = {}
+    """Global environment variables set on all clusters when running Slurm commands."""
+
     results_path: str
-    """Path to the results directory, relative to the project root.
+    """Default path to the results directory for all clusters.
 
     !!! info
         On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.
@@ -42,9 +50,6 @@ class CluvConfig(BaseModel):
 
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
-
-    env: dict[str, str] = {}
-    """Global environment variables set on all clusters when running Slurm commands."""
 
     clusters: dict[str, ClusterConfig] = {}
     """Configuration options for each cluster.
@@ -97,3 +102,17 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
 def get_cluster_choices() -> list[str]:
     """Return configured clusters or the defaults when config is missing/invalid."""
     return get_config().clusters_names
+
+
+def current_cluster_config() -> ClusterConfig | None:
+    """Returns the `ClusterConfig` of the current cluster, or None if not currently on a cluster."""
+    cluster = current_cluster()
+    if not cluster:
+        return None  # not on a cluster.
+    cluv_config = load_cluv_config(find_pyproject())
+    cluster_config = cluv_config.clusters[cluster]
+    return ClusterConfig(
+        env=cluv_config.env | cluster_config.env,
+        results_path=resolve_env_vars(cluster_config.results_path or cluv_config.results_path),
+        datasets_path=resolve_env_vars(cluster_config.datasets_path or cluv_config.datasets_path),
+    )

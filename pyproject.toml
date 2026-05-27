@@ -86,7 +86,7 @@ show_missing = true
 # TODO: Can be overridden in each cluster's config.
 results_path = "$SCRATCH/logs/cluv"
 
-# Where to read the data from, when synchronizing data to all clusters.
+# Where to read the data from when synchronizing data to all clusters.
 data_source = "mila:/network/datasets/cifar10"
 
 # Where the dataset should be replicated on all clusters.

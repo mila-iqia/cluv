@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import logging
 import tomllib
+from dataclasses import field
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -19,13 +20,13 @@ logger = logging.getLogger(__name__)
 class PartialClusterConfig:
     """Per-cluster configuration options."""
 
-    env: dict[str, str]
+    env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    results_path: str | None  # TODO: Change to `Path` instead. Fix any pydantic errors.
+    results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
     """Path to the results directory for a specific cluster."""
 
-    datasets_path: str | None  # TODO: Change to `Path` instead. Fix any pydantic errors.
+    datasets_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
     """Different path where the datasets should be replicated on this cluster.
 
     When `None`, this defaults to the top-level config's `datasets_path`.
@@ -73,7 +74,7 @@ class CluvConfig(BaseModel):
         On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.
     """
 
-    datasets_path: str
+    datasets_path: str | None
     """Path to a dataset directory, for example, `'$SCRATCH/my_dataset'`
 
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.

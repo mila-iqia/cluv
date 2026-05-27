@@ -194,7 +194,9 @@ async def clone_project(remote: Remote):
         git_remote_name = "origin"
     if not git_remote_name:
         git_remote_name = "origin"
-    github_repo_url = subprocess.getoutput(f"git config --get remote.{git_remote_name}.url").strip()
+    github_repo_url = subprocess.getoutput(
+        f"git config --get remote.{git_remote_name}.url"
+    ).strip()
     if not github_repo_url:
         raise RuntimeError(
             f"Could not determine Git remote URL from remote '{git_remote_name}'. "
@@ -205,7 +207,9 @@ async def clone_project(remote: Remote):
     # Or configure the config credential-helper to store first?
 
     # Get the path to the root of the git repository
-    git_root_path = PurePosixPath(subprocess.getoutput("git rev-parse --show-toplevel").strip()).relative_to(Path.home())
+    git_root_path = PurePosixPath(
+        subprocess.getoutput("git rev-parse --show-toplevel").strip()
+    ).relative_to(Path.home())
 
     # If the project isn't cloned yet, clone it.
     _is_cloned_on_cluster = (

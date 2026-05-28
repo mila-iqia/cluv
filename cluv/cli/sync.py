@@ -65,22 +65,22 @@ async def sync(
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
     # TODO: Figure out which Slurm cluster we're currently on. Assuming mila for now.
-    this_cluster = current_cluster()
+    here = current_cluster()
+    if clusters and here in clusters:
+        clusters.remove(here)
+
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     if not clusters:
         clusters = get_config().clusters_names
-        if this_cluster and this_cluster in clusters:
-            clusters.remove(this_cluster)
         connections = await asyncio.gather(
             *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
         )
-        remotes = [conn for conn in connections if conn]
-        if not remotes:
-            console.log(
+        if not any(connections):
+            raise RuntimeError(
                 "[red]Not currently connected to any Slurm cluster.[/red] "
                 "Use `cluv login` to login and create reusable connections."
             )
-            return []
+        remotes = [conn for conn in connections if conn]  # keep the active connections.
         clusters = [remote.hostname for remote in remotes]
     else:
         remotes = await login(clusters)
@@ -97,7 +97,7 @@ async def sync(
     task_descriptions: list[str] = []
     for remote in remotes:
         tasks.append(functools.partial(sync_task_function, remote=remote))
-        task_descriptions.append(f"{this_cluster or 'local'} -> {remote.hostname}")
+        task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
 
     await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,

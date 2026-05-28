@@ -16,7 +16,8 @@ async def test_cluv_sync_with_data_path():
 
     Need to check that rsync happens from `datasets_path` (the source) to the `datasets_path` (the dest) on all the clusters.
     """
-    assert current_cluster() == "mila"
+    # assert current_cluster() == "mila"
+    assert current_cluster() is None
     other_cluster = "tamia"
     other_cluster_remote = await Remote.connect(other_cluster)
 
@@ -28,6 +29,8 @@ async def test_cluv_sync_with_data_path():
     await sync([other_cluster], uv_sync_args=None)
 
     # Dataset is synced
-    this_cluster_files = subprocess.getoutput("ls $SCRATCH/data/cifar10")
-    other_cluster_files = await other_cluster_remote.get_output("ls $SCRATCH/data/cifar10")
+    this_cluster_files = subprocess.getoutput("ls $SCRATCH/data/cifar10").strip().splitlines()
+    other_cluster_files = (
+        (await other_cluster_remote.get_output("ls $SCRATCH/data/cifar10")).strip().splitlines()
+    )
     assert this_cluster_files == other_cluster_files

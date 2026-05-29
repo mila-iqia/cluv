@@ -34,7 +34,7 @@ def main(args: Args | None = None):
 
     job_info = current_job_info()
     cluster_info = current_cluster_config()
-    assert job_info and cluster_info, "example should be run in a slurm job."
+    assert job_info and cluster_info, "This example should be run in a slurm job."
 
     print(f"Job {job_info.run_id} starts.")
     wandb.init(
@@ -49,6 +49,7 @@ def main(args: Args | None = None):
     torch.manual_seed(args.seed)
 
     # Test that we can load a dataset from the dataset_path (that was synced by Cluv)
+    assert cluster_info.datasets_path, "This example requires a datasets_path to be set."
     dataset = CIFAR10(cluster_info.datasets_path, download=False)
     print(dataset)
 

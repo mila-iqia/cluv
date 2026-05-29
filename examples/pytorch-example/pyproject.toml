@@ -20,7 +20,7 @@ build-backend = "hatchling.build"
 
 [tool.cluv]
 # Where to store job results by default. Can be overridden per cluster.
-results_path = "$SCRATCH/logs/cluv"
+results_path = "$SCRATCH/logs/pytorch_example"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
 results_symlink = "logs"
@@ -29,7 +29,7 @@ data_source = "mila:/network/datasets/cifar10"
 # Where the dataset should be replicated on all clusters.
 # TODO?: On the source cluster (ex Mila), the folder will only contain symlinks, to avoid
 # duplicating the data.
-datasets_path = "datasets/cifar10"
+datasets_path = "$SCRATCH/datasets/cifar10"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.

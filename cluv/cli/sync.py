@@ -314,8 +314,7 @@ async def _sync_datasets(remotes: list[Remote], config: CluvConfig):
                 f"{source_host}:{source_path}/",
                 f"{datasets_path}/",
             ),
-            warn=True,
-            hide=False,
+            _display=True,
         )
 
     console.log(f"[green]Pushing datasets to:[/green] {[r.hostname for r in target_remotes]}")
@@ -341,11 +340,10 @@ async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: C
             "--compress",
             "--copy-links",
             "--exclude=.git",
+            "--exclude=.datalad",
             f"{local_source}/",
             f"{remote.hostname}:{resolved_path}/",
         ),
-        # warn=True,
-        hide=False,
         _display=True,
     )
 

@@ -347,11 +347,11 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
 
 def _build_legend() -> Panel:
     legend = (
+        "[green]●[/green] connected  "
+        "[red]⚠[/red] disconnected  "
         "[green]▰[/green] free GPU  "
         "[red]▱[/red] busy GPU   "
         "[green]█[/green]/[yellow]█[/yellow]/[red]█[/red] disk usage (low/med/high)   "
-        "[green]●[/green] online  "
-        "[red]⚠[/red] offline"
     )
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 

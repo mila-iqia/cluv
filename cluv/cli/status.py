@@ -257,20 +257,15 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     )
 
     table.add_column("Cluster", style="bold", ratio=1)
-    table.add_column("Status", justify="center", ratio=1)
-    table.add_column("GPU model", justify="center", ratio=1)
-    table.add_column("Free GPUs", justify="left", ratio=2)
+    table.add_column("GPU model", justify="center", ratio=2)
+    table.add_column("Free GPUs", justify="left", ratio=1)
     table.add_column("My jobs\nrun/pend", justify="center", ratio=1)
     table.add_column("All jobs\nrun/pend", justify="center", ratio=1)
     table.add_column("$HOME", justify="left", ratio=2)
     table.add_column("$SCRATCH", justify="left", ratio=2)
 
     for c in data:
-        if not c.online:
-            status_cell = Text("⚠ offline", style="bold red")
-        else:
-            status_cell = Text("● online", style="bold green")
-
+        status_cell = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
         my_jobs = Text(f"{c.jobs.my_running} / {c.jobs.my_pending}", style="cyan")
         all_jobs = Text(f"{c.jobs.running} / {c.jobs.pending}", style="white")
 
@@ -281,8 +276,7 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
         row_style = "dim" if not c.online else ""
 
         table.add_row(
-            Text(c.name, style="bold magenta" if c.online else "dim"),
-            status_cell,
+            status_cell + Text(c.name, style="bold magenta" if c.online else "bold bright_black"),
             Text(c.gpu_model, style="bright_blue"),
             _gpu_bar(c.gpu_idle, c.gpu_total),
             my_jobs,
@@ -365,7 +359,7 @@ async def status(table: str) -> None:
     clusters = get_config().clusters_names
 
     # Query clusters in parallel
-    with console.status("Fetching cluster status...",):
+    with console.status("Fetching clusters status..."):
         data: list[ClusterStatus] = [
             d for d in await asyncio.gather(*(get_real_cluster_status(c) for c in clusters))
         ]

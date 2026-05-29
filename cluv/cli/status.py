@@ -267,9 +267,9 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
 
     for c in data:
         if not c.online:
-            status_cell = Text("⚠ disconnected", style="bold red")
+            status_cell = Text("⚠ offline", style="bold red")
         else:
-            status_cell = Text("● connected", style="bold green")
+            status_cell = Text("● online", style="bold green")
 
         my_jobs = Text(f"{c.jobs.my_running} / {c.jobs.my_pending}", style="cyan")
         all_jobs = Text(f"{c.jobs.running} / {c.jobs.pending}", style="white")
@@ -347,11 +347,11 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
 
 def _build_legend() -> Panel:
     legend = (
-        "[green]●[/green] connected  "
-        "[red]⚠[/red] disconnected  "
+        "[green]●[/green] online  "
+        "[red]⚠[/red] offline  "
         "[green]▰[/green] free GPU  "
         "[red]▱[/red] busy GPU   "
-        "[green]█[/green]/[yellow]█[/yellow]/[red]█[/red] disk usage (low/med/high)   "
+        "[green]█[/green]/[yellow]█[/yellow]/[red]█[/red] disk usage (low/med/high)"
     )
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 

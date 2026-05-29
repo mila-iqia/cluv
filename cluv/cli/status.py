@@ -12,7 +12,6 @@ from rich.text import Text
 
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_config
-from cluv.remote import Remote
 from cluv.slurm import (
     StorageStats,
     parse_disk_quota,
@@ -47,6 +46,18 @@ class ClusterStatus:
     gpu_model: str
     jobs: JobStats
     storage: StorageStats
+
+
+def get_default_cluster_status(cluster: str) -> ClusterStatus:
+    return ClusterStatus(
+        name=cluster,
+        online=False,
+        gpu_idle=0,
+        gpu_total=0,
+        gpu_model="?",
+        jobs=JobStats(running=0, pending=0, my_running=0, my_pending=0),
+        storage=StorageStats(home_used=0, home_quota=0, scratch_used=0, scratch_quota=0),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -90,14 +101,20 @@ squeue -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 _MILA_CLUSTERS = {"mila"}
 
 
-async def get_real_cluster_status(remote: Remote) -> ClusterStatus:
+async def get_real_cluster_status(cluster: str) -> ClusterStatus:
     """Fetch live Slurm data from a remote cluster and return a ClusterStatus.
 
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
     """
 
-    cluster = remote.hostname
+    # Use get_remote_without_2fa_prompt directly so we never filter out the
+    # "current" cluster the way login() does. A working socket for mila is
+    # perfectly usable even when /home/mila is mounted locally.
+    remote = await get_remote_without_2fa_prompt(cluster)
+    if remote is None:
+        return get_default_cluster_status(cluster)
+
     script = _REMOTE_SCRIPT_MILA if cluster in _MILA_CLUSTERS else _REMOTE_SCRIPT_DRAC
 
     try:
@@ -109,15 +126,7 @@ async def get_real_cluster_status(remote: Remote) -> ClusterStatus:
         )
     except Exception as exc:
         logger.warning(f"[red]Could not reach {cluster}: {exc}[/red]")
-        return ClusterStatus(
-            name=cluster,
-            online=False,
-            gpu_idle=0,
-            gpu_total=0,
-            gpu_model="?",
-            jobs=JobStats(running=0, pending=0, my_running=0, my_pending=0),
-            storage=StorageStats(home_used=0, home_quota=0, scratch_used=0, scratch_quota=0),
-        )
+        return get_default_cluster_status(cluster)
 
     parts = raw.split(_SEP)
     # Pad in case some sections are missing
@@ -197,33 +206,6 @@ async def get_real_cluster_status(remote: Remote) -> ClusterStatus:
     )
 
 
-async def get_all_cluster_statuses(
-    remotes: list[Remote] | None = None,
-) -> tuple[list[ClusterStatus], bool]:
-    """Query clusters in parallel.
-
-    If *remotes* is provided, query exactly those connections.
-    Otherwise, query all clusters that already have an active SSH connection
-    (never blocks on 2FA).
-
-    Returns (statuses, any_live) where any_live is False when no cluster
-    was reachable.
-    """
-    if remotes is None:
-        clusters = get_config().clusters
-        remotes = [
-            r
-            for r in await asyncio.gather(*(get_remote_without_2fa_prompt(c) for c in clusters))
-            if r is not None
-        ]
-
-    if not remotes:
-        return [], False
-
-    statuses = list(await asyncio.gather(*(get_real_cluster_status(r) for r in remotes)))
-    return statuses, True
-
-
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
@@ -285,9 +267,9 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
 
     for c in data:
         if not c.online:
-            status_cell = Text("⚠ offline", style="bold red")
+            status_cell = Text("⚠ disconnected", style="bold red")
         else:
-            status_cell = Text("● online", style="bold green")
+            status_cell = Text("● connected", style="bold green")
 
         my_jobs = Text(f"{c.jobs.my_running} / {c.jobs.my_pending}", style="cyan")
         all_jobs = Text(f"{c.jobs.running} / {c.jobs.pending}", style="white")
@@ -381,24 +363,16 @@ async def status(table: str) -> None:
     """
     console = Console()
     clusters = get_config().clusters_names
-    clusters = list(clusters or [])
 
-    if clusters:
-        # Use get_remote_without_2fa_prompt directly so we never filter out the
-        # "current" cluster the way login() does. A working socket for mila is
-        # perfectly usable even when /home/mila is mounted locally.
-        remotes = [
-            r
-            for r in await asyncio.gather(*(get_remote_without_2fa_prompt(c) for c in clusters))
-            if r is not None
-        ]
-        data, is_live = await get_all_cluster_statuses(remotes=remotes)
-    else:
-        data, is_live = await get_all_cluster_statuses()
+    # Query clusters in parallel
+    data: list[ClusterStatus] = [
+        d for d in await asyncio.gather(*(get_real_cluster_status(c) for c in clusters))
+    ]
 
-    if not is_live:
+    # Show a tip message if all clusters are offline, which likely means the user hasn't logged in yet (no control sockets).
+    if all(not c.online for c in data):
         console.print(
-            "[yellow]No active cluster connections found. Run [bold]cluv login[/bold] first.[/yellow]"
+            "[yellow]No active connections to any clusters found. Run [bold]cluv login[/bold] first.[/yellow]"
         )
 
     console.print()

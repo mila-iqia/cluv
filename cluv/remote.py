@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import functools
 import shlex
@@ -71,17 +72,24 @@ class Remote:
             command,
         )
 
+        _display = False
         if display:
-            console.log(
-                (
-                    f"({self.hostname}) $ {command}"
-                    if input is None
-                    else f"({self.hostname}) $ {command=}\n{input=}"
-                ),
-                style="green",
-                _stack_offset=2,  # to show a link to the code calling this, instead of here.
+            # Pass what to display to `run`, which uses a lock to keep the command and its output
+            # together in the console, instead of interleaving with other commands' outputs.
+            # Commands start running (and may error out) before being shown in the terminal though.
+            _display = (
+                f"({self.hostname}) $ {command}"
+                if input is None
+                else f"({self.hostname}) $ {command=}\n{input=}"
             )
-        return await run(ssh_command, input=input, warn=warn, hide=hide, _stacklevel=3)
+        return await run(
+            ssh_command,
+            input=input,
+            warn=warn,
+            hide=hide,
+            _display=_display,
+            _stacklevel=3,
+        )
 
     async def get_output(
         self,
@@ -101,7 +109,8 @@ async def run(
     warn: bool = False,
     hide: Hide = False,
     _stacklevel: int = 2,
-    _display: bool = False,
+    _display: bool | str = False,
+    _console_lock: asyncio.Lock | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Runs the command *asynchronously* in a subprocess and returns the result.
 
@@ -122,17 +131,7 @@ async def run(
     subprocess.CalledProcessError
         If an error occurs when running the command and `warn` is `False`.
     """
-    if _display:
-        console.log(
-            (
-                f"$ {shlex.join(program_and_args)}"
-                if input is None
-                else f"$ {program_and_args=}\n{input=}"
-            ),
-            style="green",
-            _stack_offset=_stacklevel
-            - 1,  # to show a link to the code calling this, instead of here.
-        )
+
     logger.debug(f"Calling `asyncio.create_subprocess_exec` with {program_and_args=}")
     proc = await asyncio.create_subprocess_exec(
         *program_and_args,
@@ -179,14 +178,30 @@ async def run(
         stdout=stdout.decode(),
         stderr=stderr.decode(),
     )
-    if result.stdout:
-        if hide not in [True, "out", "stdout"]:
-            print(result.stdout)
-        logger.debug(result.stdout)
-    if result.stderr:
-        if hide not in [True, "err", "stderr"]:
-            print(result.stderr, file=sys.stderr)
-        logger.debug(result.stderr)
+    # IDEA: Maybe we could grab an asyncio lock for the standard output, to keep the output of
+    # commands directly below the commands themselves?
+    async with _console_lock or contextlib.nullcontext():
+        if _display:
+            console.log(
+                _display
+                if isinstance(_display, str)
+                else (
+                    f"$ {shlex.join(program_and_args)}"
+                    if input is None
+                    else f"$ {program_and_args=}\n{input=}"
+                ),
+                style="green",
+                _stack_offset=_stacklevel
+                - 1,  # to show a link to the code calling this, instead of here.
+            )
+        if result.stdout:
+            if hide not in [True, "out", "stdout"]:
+                print(result.stdout)
+            logger.debug(result.stdout)
+        if result.stderr:
+            if hide not in [True, "err", "stderr"]:
+                print(result.stderr, file=sys.stderr)
+            logger.debug(result.stderr)
     return result
 
 

@@ -9,6 +9,7 @@ import shlex
 import shutil
 import subprocess
 import textwrap
+from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -95,11 +96,19 @@ async def sync(
     # TODO: Add an --ignore flag to ignore some clusters?
     console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
+    console_lock = asyncio.Lock()
+
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
     for remote in remotes:
-        tasks.append(functools.partial(sync_task_function, remote=remote))
+        tasks.append(
+            functools.partial(sync_task_function, remote=remote, console_lock=console_lock)
+        )
         task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
+
+    config = get_config()
+    if sync_datasets and config.data_source and config.datasets_path:
+        await _pull_datasets(remotes, config, _console_lock=console_lock)
 
     await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
@@ -107,26 +116,25 @@ async def sync(
         overall_progress_task_description="[green]Syncing project",
     )
 
-    config = get_config()
-    if sync_datasets and config.data_source and config.datasets_path:
-        await _sync_datasets(remotes, config)
-
     return remotes
 
 
 async def sync_task_function(
     report_progress: ReportProgressFn,
     remote: Remote,
+    console_lock: asyncio.Lock | None = None,
 ):
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_config()
+    # for use in the sub-functions without having to pass it around everywhere?
+    ContextVar("console_lock").set(console_lock)
 
     def _update_progress(progress: int, status: str, total: int):
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    num_tasks = 4
+    num_tasks = 5 if config.data_source else 4
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
     await install_uv(remote)
@@ -140,6 +148,15 @@ async def sync_task_function(
     results_symlink = config.results_symlink or Path(config.results_path).name
     _update_progress(3, "Fetching results", num_tasks)
     await fetch_results(remote, results_symlink, config.results_path)
+
+    if config.data_source:
+        _update_progress(4, "Syncing datasets", num_tasks)
+        here = current_cluster()
+        local_dataset_path = (config.get_cluster_config(here) if here else config).datasets_path
+        if not local_dataset_path:
+            raise RuntimeError("data_source is set, so dataset_path should also be set!")
+        local_dataset_path = resolve_env_vars(local_dataset_path)
+        await _push_datasets_to_remote(local_dataset_path, remote, config)
 
     _update_progress(num_tasks, "Done", num_tasks)
 
@@ -261,7 +278,9 @@ async def clone_project(remote: Remote):
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
-async def _sync_datasets(remotes: list[Remote], config: CluvConfig):
+async def _pull_datasets(
+    remotes: list[Remote], config: CluvConfig, _console_lock: asyncio.Lock | None = None
+):
     """Pull dataset from data_source once, then push to all target remotes in parallel."""
 
     if not config.data_source:
@@ -315,12 +334,13 @@ async def _sync_datasets(remotes: list[Remote], config: CluvConfig):
                 f"{datasets_path}/",
             ),
             _display=True,
+            _console_lock=_console_lock,
         )
 
-    console.log(f"[green]Pushing datasets to:[/green] {[r.hostname for r in target_remotes]}")
-    await asyncio.gather(
-        *(_push_datasets_to_remote(datasets_path, r, config) for r in target_remotes)
-    )
+    # console.log(f"[green]Pushing datasets to:[/green] {[r.hostname for r in target_remotes]}")
+    # await asyncio.gather(
+    #     *(_push_datasets_to_remote(datasets_path, r, config) for r in target_remotes)
+    # )
 
 
 async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: CluvConfig):

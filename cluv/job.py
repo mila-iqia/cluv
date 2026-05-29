@@ -125,5 +125,5 @@ def _get_run_id():
         # the id of the first job in the array.
         return f"{cluster}_{first_job_id}"
     if doing_job_packing:
-        return f"{cluster}_{SLURM_JOB_ID}_{SLURM_PROCID}"
+        return f"{cluster}_{SLURM_JOB_ID}_task{SLURM_PROCID}"
     return f"{cluster}_{SLURM_JOB_ID}"

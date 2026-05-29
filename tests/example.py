@@ -27,7 +27,7 @@ class Args:
 
     # Time to wait before producing the result.
     # Can be useful to test and simulate preemption or cancelling jobs.
-    wait_duration_seconds: int = 0
+    wait_duration_seconds: int = 60
 
     seed: int = int(os.environ.get("SLURM_PROCID", "0"))
 
@@ -43,6 +43,7 @@ def main(args: Args | None = None):
     wandb.init(
         project="cluv-example",
         name=job_info.run_id,
+        id=job_info.run_id,
         config=vars(args)
         | {"job": dataclasses.asdict(job_info)}
         | {"env": {k: v for k, v in os.environ.items() if k.startswith("SLURM")}},

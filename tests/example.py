@@ -25,6 +25,8 @@ assert config, "Example must be run on a cluster."
 assert config.results_path
 assert config.datasets_path
 
+# TODO: datasets_path should be data_source on the source cluster, and cluster.datasets_path on others.
+
 
 @dataclass(frozen=True)
 class Args:

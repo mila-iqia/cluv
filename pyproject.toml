@@ -81,42 +81,47 @@ source = ["cluv"]
 [tool.coverage.report]
 show_missing = true
 
-[tool.cluv]
-# Where to store results of jobs all clusters.
-# TODO: Can be overridden in each cluster's config.
-results_path = "$SCRATCH/logs/cluv"
+###  --------------   CLUV CONFIG   --------------  ###
 
+[tool.cluv]
+# Where to store job results by default. Can be overridden per cluster.
+results_path = "$SCRATCH/logs/cluv"
+# On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
+# This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
+results_symlink = "logs"
 # Where to read the data from when synchronizing data to all clusters.
 data_source = "mila:/network/datasets/cifar10"
-
 # Where the dataset should be replicated on all clusters.
-# On the source cluster (ex Mila), the folder will only contain symlinks, to avoid duplicating the data.
-datasets_path = "$SCRATCH/data/cifar10"
+# TODO?: On the source cluster (ex Mila), the folder will only contain symlinks, to avoid
+# duplicating the data.
+datasets_path = "$SCRATCH/datasets/cifar10"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
 SBATCH_TIME = "3:00:00"
 SBATCH_REQUEUE = "1"
+# Assume that compute nodes don't have internet access by default. Override below when they do.
+UV_OFFLINE="1"
+WANDB_MODE="offline"
+
+
+###  --------------   Clusters Config   --------------  ###
 
 [tool.cluv.clusters.mila]
 # Overrides specific to the Mila cluster.
 env = {UV_OFFLINE="0", WANDB_MODE="online"}
 
-# PAICE clusters.
 [tool.cluv.clusters.tamia]
-env = {UV_OFFLINE="1", WANDB_MODE="offline"}
 
 [tool.cluv.clusters.killarney]
-env = {UV_OFFLINE="1", WANDB_MODE="offline"}
-# For example, no $SCRATCH by default on Killarney, so we overwrite this here.
-datasets_path = "$HOME/data/cifar10"
+# For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
+results_path = "$HOME/logs/cluv"
+datasets_path = "$HOME/datasets/cifar10"
 
 [tool.cluv.clusters.vulcan]
-env = {UV_OFFLINE="1", WANDB_MODE="offline"}
 
-# DRAC clusters.
 [tool.cluv.clusters.rorqual]
-env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.fir]
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
@@ -125,12 +130,11 @@ env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.trillium]
-env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.trillium-gpu]
-env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.
-# You can also use "def-yourusername" (the default partitions).
-env = {UV_OFFLINE="1", WANDB_MODE="offline", SBATCH_ACCOUNT="def-bengioy"}
+env = {SBATCH_ACCOUNT="def-bengioy"}

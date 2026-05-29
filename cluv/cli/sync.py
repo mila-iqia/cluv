@@ -24,15 +24,15 @@ from milatools.utils.parallel_progress import (
 )
 
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.config import find_pyproject, get_config
+from cluv.config import CluvConfig, current_cluster_config, find_pyproject, get_config
 from cluv.remote import Remote, get_ssh_options_for_host, run
-from cluv.utils import console, current_cluster
+from cluv.utils import console, current_cluster, resolve_env_vars
 
 milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
 logger = logging.getLogger(__name__)
 
-__all__ = ["sync", "install_uv", "clone_project", "fetch_results", "sync_datasets_to_remote"]
+__all__ = ["sync", "install_uv", "clone_project", "fetch_results"]
 
 
 # TODO: Control the 'hide' and 'display' / etc using the --verbose flag value, in addition to the loglevel.
@@ -98,9 +98,7 @@ async def sync(
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
     for remote in remotes:
-        tasks.append(
-            functools.partial(sync_task_function, remote=remote, sync_datasets=sync_datasets)
-        )
+        tasks.append(functools.partial(sync_task_function, remote=remote))
         task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
 
     await run_async_tasks_with_progress_bar(
@@ -108,13 +106,17 @@ async def sync(
         task_descriptions=task_descriptions,
         overall_progress_task_description="[green]Syncing project",
     )
+
+    config = get_config()
+    if sync_datasets and config.data_source and config.datasets_path:
+        await _sync_datasets(remotes, config)
+
     return remotes
 
 
 async def sync_task_function(
     report_progress: ReportProgressFn,
     remote: Remote,
-    sync_datasets: bool = True,
 ):
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
@@ -124,16 +126,7 @@ async def sync_task_function(
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    source_host = source_path = None
-    should_sync_datasets = (
-        sync_datasets and config.data_source is not None and config.datasets_path is not None
-    )
-    if should_sync_datasets:
-        assert config.data_source
-        source_host, source_path = config.data_source.split(":", 1)
-        should_sync_datasets = remote.hostname != source_host
-
-    num_tasks = 5 if should_sync_datasets else 4
+    num_tasks = 4
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
     await install_uv(remote)
@@ -144,24 +137,8 @@ async def sync_task_function(
     _update_progress(2, "Running 'uv sync'", num_tasks)
     await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
 
-    step = 3
-    if should_sync_datasets:
-        _update_progress(step, "Syncing datasets", num_tasks)
-        datasets_path_template = str(config.get_cluster_config(remote.hostname).datasets_path)
-        resolved_path = (
-            await remote.get_output(
-                f"bash --login -c 'echo {datasets_path_template}'",
-                hide=True,
-                display=False,
-            )
-        ).strip()
-        await remote.run(f"mkdir -p {resolved_path}", hide=True)
-        assert source_host and source_path
-        await sync_datasets_to_remote(source_host, source_path, remote, resolved_path)
-        step += 1
-
     results_symlink = config.results_symlink or Path(config.results_path).name
-    _update_progress(step, "Fetching results", num_tasks)
+    _update_progress(3, "Fetching results", num_tasks)
     await fetch_results(remote, results_symlink, config.results_path)
 
     _update_progress(num_tasks, "Done", num_tasks)
@@ -284,36 +261,93 @@ async def clone_project(remote: Remote):
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
-async def sync_datasets_to_remote(
-    source_host: str,
-    source_path: str,
-    target_remote: Remote,
-    target_datasets_path: str,
-):
-    """Push dataset from source_host:source_path to target_remote using source-push rsync.
+async def _sync_datasets(remotes: list[Remote], config: CluvConfig):
+    """Pull dataset from data_source once, then push to all target remotes in parallel."""
 
-    If source_host is the current cluster, rsync runs locally. Otherwise it SSHes into the
-    source cluster and runs rsync from there, avoiding the local machine as an intermediary.
-    target_datasets_path must already have env vars resolved (no $SCRATCH etc.).
-    """
-    rsync_args = (
-        "rsync",
-        "--archive",
-        "--compress",
-        "--verbose",
-        "--progress",
-        "--copy-links",  # follow symlinks (git-annex stores data behind symlinks)
-        "--exclude=.git",  # skip .git — annex internals have restricted permissions
-        f"{source_path}/",
-        f"{target_remote.hostname}:{target_datasets_path}/",
-    )
-    here = current_cluster()
-    if source_host == here:
-        await run(rsync_args, hide=False)
+    if not config.data_source:
+        logger.debug("No data_source specified in config, skipping dataset sync.")
+        return
+
+    this_cluster = current_cluster()
+    source_host, source_path = config.data_source.split(":", 1)
+
+    target_remotes = [r for r in remotes if r.hostname != source_host]
+    if not target_remotes:
+        logger.debug("No target remotes to sync datasets to, skipping dataset sync.")
+        return  # no remotes to sync to.
+
+    # First, pull the data from the data source to this machine if we are not on the source cluster.
+    if this_cluster == source_host:
+        # If we are on the source cluster, the local 'datasets_path' is the path from 'data_source'.
+        datasets_path = Path(source_path)
     else:
-        # Note: This might go though 2fa!
-        source_remote = await Remote.connect(source_host)
-        await source_remote.run(shlex.join(rsync_args), hide=False)
+        # Pull from source to the locally-resolved datasets_path, then reuse for all pushes.
+        datasets_path = (current_cluster_config() or config).datasets_path
+        if not datasets_path:
+            raise RuntimeError(
+                f"To sync datasets from {source_host}, you must set a datasets_path in the config for this cluster ({this_cluster or 'local machine'})."
+            )
+        try:
+            datasets_path = resolve_env_vars(datasets_path)
+        except KeyError as e:
+            raise RuntimeError(
+                f"Cannot resolve datasets_path '{config.datasets_path}' on this machine: "
+                f"the {e} environment variable is not set.\n"
+                f"To avoid copying the datasets from {source_host} to this machine, run "
+                f"`cluv sync` from the source cluster ({source_host}), or use the "
+                f"`--no-sync-datasets` flag when running `uv sync` from this machine."
+            ) from e
+
+        datasets_path.mkdir(parents=True, exist_ok=True)
+        console.log(
+            f"[green]Pulling datasets:[/green] {source_host}:{source_path} -> {datasets_path}"
+        )
+        await run(
+            (
+                "rsync",
+                "--archive",
+                "--verbose",
+                "--compress",
+                "--copy-links",
+                "--exclude=.git",
+                "--exclude=.datalad",
+                f"{source_host}:{source_path}/",
+                f"{datasets_path}/",
+            ),
+            warn=True,
+            hide=False,
+        )
+
+    console.log(f"[green]Pushing datasets to:[/green] {[r.hostname for r in target_remotes]}")
+    await asyncio.gather(
+        *(_push_datasets_to_remote(datasets_path, r, config) for r in target_remotes)
+    )
+
+
+async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: CluvConfig):
+    """Push dataset from a local path to the remote cluster's datasets_path."""
+    datasets_path_template = str(config.get_cluster_config(remote.hostname).datasets_path)
+    resolved_path = (
+        await remote.get_output(
+            f"bash -l -c 'echo {datasets_path_template}'", hide=True, display=False
+        )
+    ).strip()
+    await remote.run(f"mkdir -p {resolved_path}", hide=True)
+    await run(
+        (
+            "rsync",
+            "--archive",
+            "--verbose",
+            "--compress",
+            "--copy-links",
+            "--exclude=.git",
+            f"{local_source}/",
+            f"{remote.hostname}:{resolved_path}/",
+        ),
+        # warn=True,
+        hide=False,
+        _display=True,
+    )
 
 
 async def fetch_results(remote: Remote, results_symlink: str, results_path: str):
@@ -353,7 +387,7 @@ async def create_results_dir_with_symlink_to_scratch(
     # Resolve env vars (e.g. $SCRATCH) in results_path using the remote login shell.
     resolved_path = (
         await remote.get_output(
-            f"bash -l -c 'echo {results_path}'", hide=True, warn=True, display=False
+            f"bash --login -c 'echo {results_path}'", hide=True, warn=True, display=False
         )
     ).strip()
     if not resolved_path:

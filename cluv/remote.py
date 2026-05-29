@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import functools
+import shlex
 import subprocess
 import sys
 from logging import getLogger as get_logger
@@ -100,6 +101,7 @@ async def run(
     warn: bool = False,
     hide: Hide = False,
     _stacklevel: int = 2,
+    _display: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     """Runs the command *asynchronously* in a subprocess and returns the result.
 
@@ -120,7 +122,17 @@ async def run(
     subprocess.CalledProcessError
         If an error occurs when running the command and `warn` is `False`.
     """
-
+    if _display:
+        console.log(
+            (
+                f"$ {shlex.join(program_and_args)}"
+                if input is None
+                else f"$ {program_and_args=}\n{input=}"
+            ),
+            style="green",
+            _stack_offset=_stacklevel
+            - 1,  # to show a link to the code calling this, instead of here.
+        )
     logger.debug(f"Calling `asyncio.create_subprocess_exec` with {program_and_args=}")
     proc = await asyncio.create_subprocess_exec(
         *program_and_args,

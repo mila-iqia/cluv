@@ -4,13 +4,16 @@ This is a simplified job script, used to test the syncing of the 'dataset' acros
 """
 
 import dataclasses
+import math
 import os
 import random
+import sys
 import time
 from dataclasses import dataclass
 
 import simple_parsing
 import torch
+import tqdm
 import wandb
 from torchvision.datasets import CIFAR10
 
@@ -53,9 +56,12 @@ def main(args: Args | None = None):
     dataset = CIFAR10(cluster_info.datasets_path, download=False)
     print(dataset)
 
-    for i in range(args.wait_duration_seconds):
-        wandb.log({"step": i, "fake_loss": random.random()})
+    for i in tqdm.tqdm(range(args.wait_duration_seconds), disable=(not sys.stdout.isatty())):
+        # Some fake, loss that varies a bit between seeds and decreases over time.
+        fake_loss = math.exp(-i / 10) + random.random() * 0.1
         time.sleep(1)
+        wandb.log({"step": i, "loss": fake_loss})
+        print(f"Step {i}: loss={fake_loss}")
 
     print(f"Job {job_info.run_id} is about to end.")
 

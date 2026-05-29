@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from rich import box
 from rich.console import Console
@@ -38,6 +39,13 @@ class StorageStats:
     home_quota: float
     scratch_used: float
     scratch_quota: float
+
+
+@dataclass
+class LiveJobInfo:
+    state: str
+    elapsed: str | None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
+    wait_time: str | None  # formatted time from Submit to Start (or to now if still pending)
 
 
 @dataclass
@@ -90,6 +98,55 @@ squeue -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 """
 
 _MILA_CLUSTERS = {"mila"}
+
+
+async def fetch_live_job_info(
+    remote: Remote, job_ids: list[int]
+) -> dict[int, LiveJobInfo]:
+    """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
+    ids_str = ",".join(str(jid) for jid in job_ids)
+    cmd = (
+        f"sacct -j {ids_str} --format=JobID,State,Start,Submit,Elapsed"
+        f" --noheader --allocations --parsable2 2>/dev/null"
+    )
+    try:
+        raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
+    except Exception:
+        return {}
+
+    result: dict[int, LiveJobInfo] = {}
+    now = datetime.now(timezone.utc)
+    _fmt = "%Y-%m-%dT%H:%M:%S"
+    for line in raw.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) < 5:
+            continue
+        job_id_str, state, start_str, submit_str, elapsed = parts[:5]
+        try:
+            job_id = int(job_id_str.strip())
+        except ValueError:
+            continue
+
+        state = state.strip()
+        elapsed_val = elapsed.strip()
+        elapsed_out = elapsed_val if elapsed_val and elapsed_val != "00:00:00" else None
+
+        wait_time = None
+        try:
+            submit_dt = datetime.strptime(submit_str.strip(), _fmt).replace(tzinfo=timezone.utc)
+            start = start_str.strip()
+            if start and start not in ("Unknown", "None"):
+                start_dt = datetime.strptime(start, _fmt).replace(tzinfo=timezone.utc)
+                delta_s = int((start_dt - submit_dt).total_seconds())
+            else:
+                delta_s = int((now - submit_dt).total_seconds())
+            wait_time = _format_duration(max(delta_s, 0))
+        except (ValueError, OverflowError):
+            pass
+
+        result[job_id] = LiveJobInfo(state=state, elapsed=elapsed_out, wait_time=wait_time)
+
+    return result
 
 
 async def get_real_cluster_status(remote: Remote) -> ClusterStatus:
@@ -238,6 +295,29 @@ async def get_all_cluster_statuses(
 # ---------------------------------------------------------------------------
 
 
+def _format_duration(total_seconds: int) -> str:
+    h, rem = divmod(total_seconds, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m"
+    elif m:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
+
+
+def _state_text(state: str) -> Text:
+    state = state.strip().upper()
+    if state == "RUNNING":
+        return Text(state, style="green")
+    elif state == "PENDING":
+        return Text(state, style="yellow")
+    elif state in ("COMPLETED", "COMPLETING"):
+        return Text(state, style="blue")
+    elif state in ("FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"):
+        return Text(state, style="red")
+    return Text(state or "—", style="dim")
+
+
 def _bar(used: float, total: float, width: int = 10) -> Text:
     """Return a coloured block-character progress bar."""
     ratio = used / total if total else 0
@@ -371,7 +451,7 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
     return table
 
 
-def _build_cluv_jobs_table() -> Table:
+def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo] | None = None) -> Table:
     table = Table(
         title="Cluv Jobs",
         box=box.SIMPLE_HEAVY,
@@ -388,21 +468,37 @@ def _build_cluv_jobs_table() -> Table:
     table.add_column("Job script")
     table.add_column("Waiting time")
     table.add_column("Elapsed time")
-    table.add_column("Program args")
-    table.add_column("Sbatch args")
 
     for job in load_jobs():
+        info = (live_info or {}).get(job.job_id)
+
+        try:
+            submitted_str = (
+                datetime.fromisoformat(job.submitted_at)
+                .astimezone()
+                .strftime("%b %d %H:%M")
+            )
+        except (ValueError, TypeError):
+            submitted_str = job.submitted_at
+
+        if info is not None:
+            state_cell = _state_text(info.state)
+            wait_cell = info.wait_time or "—"
+            elapsed_cell = info.elapsed or "—"
+        else:
+            state_cell = Text("—", style="dim")
+            wait_cell = "—"
+            elapsed_cell = "—"
+
         table.add_row(
             str(job.job_id),
             job.cluster,
             job.git_commit[:7],
-            job.submitted_at,
-            "[yellow]Unknown[/yellow]",  # Placeholder for real status
+            submitted_str,
+            state_cell,
             job.job_script,
-            "—",  # Placeholder for waiting time
-            "—",  # Placeholder for elapsed time
-            ", ".join(job.program_args),
-            ", ".join(job.sbatch_args),
+            wait_cell,
+            elapsed_cell,
         )
 
     return table
@@ -427,18 +523,18 @@ async def status(clusters: list[str] | None = None):
     console = Console()
     clusters = list(clusters or [])
 
-    if clusters:
-        # Use get_remote_without_2fa_prompt directly so we never filter out the
-        # "current" cluster the way login() does. A working socket for mila is
-        # perfectly usable even when /home/mila is mounted locally.
-        remotes = [
-            r
-            for r in await asyncio.gather(*(get_remote_without_2fa_prompt(c) for c in clusters))
-            if r is not None
-        ]
-        data, is_live = await get_all_cluster_statuses(remotes=remotes)
-    else:
-        data, is_live = await get_all_cluster_statuses()
+    # Always build remotes explicitly so we can reuse them for job status queries.
+    # Use get_remote_without_2fa_prompt directly so we never filter out the
+    # "current" cluster the way login() does. A working socket for mila is
+    # perfectly usable even when /home/mila is mounted locally.
+    target_clusters = clusters or get_config().clusters
+    remotes = [
+        r
+        for r in await asyncio.gather(*(get_remote_without_2fa_prompt(c) for c in target_clusters))
+        if r is not None
+    ]
+    data, is_live = await get_all_cluster_statuses(remotes=remotes)
+    cluster_to_remote = {r.hostname: r for r in remotes}
 
     if not is_live:
         console.print(
@@ -455,5 +551,25 @@ async def status(clusters: list[str] | None = None):
     console.print()
     console.print(_build_legend())
     console.print()
-    console.print(_build_cluv_jobs_table())
+
+    # Fetch live job info for all cached jobs that belong to reachable clusters.
+    live_info: dict[int, LiveJobInfo] = {}
+    if is_live:
+        cached_jobs = load_jobs()
+        cluster_jobs: dict[str, list[int]] = {}
+        for job in cached_jobs:
+            if job.cluster in cluster_to_remote:
+                cluster_jobs.setdefault(job.cluster, []).append(job.job_id)
+
+        if cluster_jobs:
+            results = await asyncio.gather(
+                *(
+                    fetch_live_job_info(cluster_to_remote[c], ids)
+                    for c, ids in cluster_jobs.items()
+                )
+            )
+            for r in results:
+                live_info.update(r)
+
+    console.print(_build_cluv_jobs_table(live_info))
     console.print()

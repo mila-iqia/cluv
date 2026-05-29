@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import logging
 import tomllib
@@ -155,5 +156,11 @@ def current_cluster_config() -> ClusterConfig | None:
     if not cluster:
         return None  # not on a cluster.
     cluv_config = load_cluv_config(find_pyproject())
+    data_source = cluv_config.data_source
     config = cluv_config.get_cluster_config(cluster)
+    if data_source:
+        source_cluster, data_path = data_source.split(":", 1)
+        if cluster == source_cluster:
+            # use the dataset path from the data_source setting as the datasets_path.
+            config = dataclasses.replace(config, datasets_path=data_path)
     return config.resolve_env_vars_in_paths()

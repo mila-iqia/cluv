@@ -3,59 +3,65 @@
 This is a simplified job script, used to test the syncing of the 'dataset' across clusters.
 """
 
+import dataclasses
 import os
+import random
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 import simple_parsing
+import torch
+import wandb
 from torchvision.datasets import CIFAR10
 
-import cluv
-import cluv.config
-
-SLURM_JOB_ID = int(os.environ["SLURM_JOB_ID"])
-SCRATCH = Path(os.environ["SCRATCH"])
-SLURM_TMPDIR = Path(os.environ["SLURM_TMPDIR"])
-
-# IDEA: maybe load the cluv config and set the checkpoint_dir
-# from cluv.config import load_cluv_config
-config = cluv.config.current_cluster_config()
-assert config, "Example must be run on a cluster."
-assert config.results_path
-assert config.datasets_path
-
-# TODO: datasets_path should be data_source on the source cluster, and cluster.datasets_path on others.
+from cluv.config import current_cluster_config
+from cluv.job import current_job_info
 
 
 @dataclass(frozen=True)
 class Args:
     """Command-line arguments for this example."""
 
-    # NOTE: This should be the same as the `results_path` in the Cluv config.
-    results_path: Path = config.results_path
-
-    # NOTE: This should be the same as the `datasets_path` in the Cluv config.
-    datasets_path: Path = config.datasets_path
-
     # Time to wait before producing the result.
     # Can be useful to test and simulate preemption or cancelling jobs.
     wait_duration_seconds: int = 0
 
+    seed: int = int(os.environ.get("SLURM_PROCID", "0"))
+
 
 def main(args: Args | None = None):
     args = args or simple_parsing.parse(Args, description=__doc__)
-    print(f"Job {SLURM_JOB_ID} starts.")
 
-    dataset = CIFAR10(args.datasets_path)
+    job_info = current_job_info()
+    cluster_info = current_cluster_config()
+    assert job_info and cluster_info, "example should be run in a slurm job."
+
+    print(f"Job {job_info.run_id} starts.")
+    wandb.init(
+        project="cluv-example",
+        name=job_info.run_id,
+        config=vars(args)
+        | {"job": dataclasses.asdict(job_info)}
+        | {"env": {k: v for k, v in os.environ.items() if k.startswith("SLURM")}},
+        resume="allow",
+    )
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+
+    # Test that we can load a dataset from the dataset_path (that was synced by Cluv)
+    dataset = CIFAR10(cluster_info.datasets_path, download=False)
     print(dataset)
 
-    time.sleep(args.wait_duration_seconds)
+    for i in range(args.wait_duration_seconds):
+        wandb.log({"step": i, "fake_loss": random.random()})
+        time.sleep(1)
 
-    print(f"Job {SLURM_JOB_ID} is about to end.")
-    results_file = args.results_path / "results.txt"
+    print(f"Job {job_info.run_id} is about to end.")
+
+    job_info.results_path.mkdir(parents=True, exist_ok=True)
+    results_file = job_info.results_path / "results.txt"
     with results_file.open("a") as f:
-        f.write(f"This is the result of job {SLURM_JOB_ID}\n")
+        f.write(f"This is the result of job {job_info.run_id}\n")
 
 
 if __name__ == "__main__":

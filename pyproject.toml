@@ -29,8 +29,6 @@ dev = [
     "pytest-timeout>=2.3.1",
     "ruff",
     "pytest-skip-slow>=0.0.5",
-    "torchvision>=0.25.0",
-    "wandb>=0.27.0",
 ]
 
 [tool.pytest.ini_options]
@@ -47,7 +45,7 @@ managed = true
 
 [tool.uv.workspace]
 members = [
-    "examples/pytorch-setup",
+    "examples/pytorch-example",
 ]
 
 
@@ -90,12 +88,12 @@ results_path = "$SCRATCH/logs/cluv"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
 results_symlink = "logs"
-# Where to read the data from when synchronizing data to all clusters.
-data_source = "mila:/network/datasets/cifar10"
-# Where the dataset should be replicated on all clusters.
-# TODO?: On the source cluster (ex Mila), the folder will only contain symlinks, to avoid
-# duplicating the data.
-datasets_path = "$SCRATCH/datasets/cifar10"
+## Where to read the data from when synchronizing data to all clusters.
+# data_source = "mila:/network/datasets/cifar10"
+## Where the dataset should be replicated on all clusters.
+## TODO?: On the source cluster (ex Mila), the folder will only contain symlinks, to avoid
+## duplicating the data.
+# datasets_path = "datasets/cifar10"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
@@ -117,7 +115,7 @@ env = {UV_OFFLINE="0", WANDB_MODE="online"}
 [tool.cluv.clusters.killarney]
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
 results_path = "$HOME/logs/cluv"
-datasets_path = "$HOME/datasets/cifar10"
+# datasets_path = "$HOME/datasets/cifar10"
 
 [tool.cluv.clusters.vulcan]
 

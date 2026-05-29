@@ -5,7 +5,7 @@ requires-python = ">=3.13"
 [manifest]
 members = [
     "cluv",
-    "pytorch-setup",
+    "pytorch-example",
 ]
 
 [[package]]
@@ -272,9 +272,7 @@ dev = [
     { name = "pytest-skip-slow" },
     { name = "pytest-timeout" },
     { name = "ruff" },
-    { name = "torchvision" },
     { name = "uv-dynamic-versioning" },
-    { name = "wandb" },
 ]
 
 [package.metadata]
@@ -297,9 +295,7 @@ dev = [
     { name = "pytest-skip-slow", specifier = ">=0.0.5" },
     { name = "pytest-timeout", specifier = ">=2.3.1" },
     { name = "ruff" },
-    { name = "torchvision", specifier = ">=0.25.0" },
     { name = "uv-dynamic-versioning", specifier = ">=0.2.0" },
-    { name = "wandb", specifier = ">=0.27.0" },
 ]
 
 [[package]]
@@ -1432,18 +1428,24 @@ wheels = [
 ]
 
 [[package]]
-name = "pytorch-setup"
+name = "pytorch-example"
 version = "0.1.0"
-source = { editable = "examples/pytorch-setup" }
+source = { editable = "examples/pytorch-example" }
 dependencies = [
+    { name = "cluv" },
     { name = "numpy" },
     { name = "torch" },
+    { name = "torchvision" },
+    { name = "wandb" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "cluv", editable = "." },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "torch", specifier = ">=2.7.0,<2.11.0" },
+    { name = "torchvision", specifier = ">=0.25.0" },
+    { name = "wandb", specifier = ">=0.27.0" },
 ]
 
 [[package]]

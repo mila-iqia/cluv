@@ -46,7 +46,7 @@ class ClusterConfig:
     results_path: Path
     """Path to the results directory for a specific cluster."""
 
-    datasets_path: Path
+    datasets_path: Path | None
     """Different path where the datasets should be replicated on this cluster.
 
     When `None`, this defaults to the top-level config's `datasets_path`.
@@ -58,7 +58,7 @@ class ClusterConfig:
         return ClusterConfig(
             env=self.env,
             results_path=resolve_env_vars(self.results_path),
-            datasets_path=resolve_env_vars(self.datasets_path),
+            datasets_path=resolve_env_vars(self.datasets_path) if self.datasets_path else None,
         )
 
 
@@ -75,20 +75,19 @@ class CluvConfig(BaseModel):
         On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.
     """
 
+    data_source: str | None
+    """`hostname:/path` of where to get the data from."""
+
     datasets_path: str | None
     """Path to a dataset directory, for example, `'$SCRATCH/my_dataset'`
 
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
-    data_source: str | None
-    """`hostname:/path` of where to get the data from."""
-
     clusters: dict[str, PartialClusterConfig] = {}
     """Configuration options for each cluster.
 
-    The keys are cluster names; each value is a `ClusterConfig` whose `env` dict contains
-    environment variables to set when running Slurm commands on that cluster.
+    The keys are cluster names, and values are configs that override options for that cluster.
     """
 
     @property
@@ -102,10 +101,11 @@ class CluvConfig(BaseModel):
         """
         cluv_config = load_cluv_config(find_pyproject())
         cluster_config = cluv_config.clusters[cluster]
+        datasets_path = cluster_config.datasets_path or cluv_config.datasets_path
         return ClusterConfig(
             env=cluv_config.env | cluster_config.env,
             results_path=Path(cluster_config.results_path or cluv_config.results_path),
-            datasets_path=Path(cluster_config.datasets_path or cluv_config.datasets_path),
+            datasets_path=Path(datasets_path) if datasets_path else None,
         )
 
 

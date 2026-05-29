@@ -32,7 +32,7 @@ milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
 logger = logging.getLogger(__name__)
 
-__all__ = ["sync", "install_uv", "clone_project", "fetch_results"]
+__all__ = ["sync", "install_uv", "clone_project", "fetch_results", "sync_datasets_to_remote"]
 
 
 # TODO: Control the 'hide' and 'display' / etc using the --verbose flag value, in addition to the loglevel.
@@ -41,7 +41,9 @@ __all__ = ["sync", "install_uv", "clone_project", "fetch_results"]
 
 
 async def sync(
-    clusters: list[str] | None = None, uv_sync_args: list[str] | None = None
+    clusters: list[str] | None = None,
+    uv_sync_args: list[str] | None = None,
+    sync_datasets: bool = True,
 ) -> list[Remote]:
     """Synchronizes the current project across clusters.
 
@@ -96,7 +98,9 @@ async def sync(
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
     for remote in remotes:
-        tasks.append(functools.partial(sync_task_function, remote=remote))
+        tasks.append(
+            functools.partial(sync_task_function, remote=remote, sync_datasets=sync_datasets)
+        )
         task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
 
     await run_async_tasks_with_progress_bar(
@@ -110,6 +114,7 @@ async def sync(
 async def sync_task_function(
     report_progress: ReportProgressFn,
     remote: Remote,
+    sync_datasets: bool = True,
 ):
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
@@ -119,7 +124,16 @@ async def sync_task_function(
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    num_tasks = 4
+    source_host = source_path = None
+    should_sync_datasets = (
+        sync_datasets and config.data_source is not None and config.datasets_path is not None
+    )
+    if should_sync_datasets:
+        assert config.data_source
+        source_host, source_path = config.data_source.split(":", 1)
+        should_sync_datasets = remote.hostname != source_host
+
+    num_tasks = 5 if should_sync_datasets else 4
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
     await install_uv(remote)
@@ -128,10 +142,27 @@ async def sync_task_function(
     await clone_project(remote)
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
-    await remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
+    await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
 
-    _update_progress(3, "Fetching results", num_tasks)
-    await fetch_results(remote, config.results_path)
+    step = 3
+    if should_sync_datasets:
+        _update_progress(step, "Syncing datasets", num_tasks)
+        datasets_path_template = str(config.get_cluster_config(remote.hostname).datasets_path)
+        resolved_path = (
+            await remote.get_output(
+                f"bash --login -c 'echo {datasets_path_template}'",
+                hide=True,
+                display=False,
+            )
+        ).strip()
+        await remote.run(f"mkdir -p {resolved_path}", hide=True)
+        assert source_host and source_path
+        await sync_datasets_to_remote(source_host, source_path, remote, resolved_path)
+        step += 1
+
+    results_symlink = config.results_symlink or Path(config.results_path).name
+    _update_progress(step, "Fetching results", num_tasks)
+    await fetch_results(remote, results_symlink, config.results_path)
 
     _update_progress(num_tasks, "Done", num_tasks)
 
@@ -253,70 +284,90 @@ async def clone_project(remote: Remote):
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
-async def fetch_results(remote: Remote, results_path: Path | str):
-    """Fetches results from all remote clusters to the current (mila for now) cluster using rsync."""
-    results_path = Path(results_path)
-    assert not results_path.is_absolute()
+async def sync_datasets_to_remote(
+    source_host: str,
+    source_path: str,
+    target_remote: Remote,
+    target_datasets_path: str,
+):
+    """Push dataset from source_host:source_path to target_remote using source-push rsync.
+
+    If source_host is the current cluster, rsync runs locally. Otherwise it SSHes into the
+    source cluster and runs rsync from there, avoiding the local machine as an intermediary.
+    target_datasets_path must already have env vars resolved (no $SCRATCH etc.).
+    """
+    rsync_args = (
+        "rsync",
+        "--archive",
+        "--compress",
+        "--verbose",
+        "--progress",
+        "--copy-links",  # follow symlinks (git-annex stores data behind symlinks)
+        "--exclude=.git",  # skip .git — annex internals have restricted permissions
+        f"{source_path}/",
+        f"{target_remote.hostname}:{target_datasets_path}/",
+    )
+    here = current_cluster()
+    if source_host == here:
+        await run(rsync_args, hide=False)
+    else:
+        # Note: This might go though 2fa!
+        source_remote = await Remote.connect(source_host)
+        await source_remote.run(shlex.join(rsync_args), hide=False)
+
+
+async def fetch_results(remote: Remote, results_symlink: str, results_path: str):
+    """Fetches results from a remote cluster to local using rsync via the results symlink."""
     project_dir = find_pyproject().parent
+    symlink_relative_to_home = project_dir.relative_to(Path.home()) / results_symlink
+    local_results_dir = project_dir / results_symlink
+    local_results_dir.mkdir(parents=True, exist_ok=True)
 
-    results_path_relative_to_home = (project_dir / results_path).relative_to(Path.home())
-
-    # TODO: to simplify, for now we assume that the results are stored in a directory directly under the project directory.
-    # A directory with the same name (e.g. logs) is created in $SCRATCH.
-    # This could cause some confusion if there are multiple projects with a `logs` directory, since we'd see the logs
-    # from different projects in the same place. To fix this, for now we use `$SCRATCH/logs/{project_name}` as the `logs` dir.
-
-    # Create the results directory if it doesn't exist.
-    # TODO: Create that result directory as a symlink to a dir in $SCRATCH?
-
-    results_path.mkdir(parents=True, exist_ok=True)
-
-    await create_results_dir_with_symlink_to_scratch(remote, results_path)
+    await create_results_dir_with_symlink_to_scratch(remote, results_symlink, results_path)
     await run(
-        # Using --full-form flags (not -avz) for better readability.
         (
             "rsync",
             "--archive",
             "--verbose",
             "--compress",
             "--copy-links",
-            f"{remote.hostname}:{results_path_relative_to_home}",
-            str((Path.home() / results_path_relative_to_home).parent),
-            # shlex.split(
-            #     f"rsync --archive --verbose --compress --copy-links "
-            #     f"{remote.hostname}:{results_path_relative_to_home} {(Path.home() / results_path_relative_to_home).parent}"
-            # )
+            f"{remote.hostname}:{symlink_relative_to_home}",
+            str(local_results_dir.parent),
         ),
         warn=True,
         hide=False,
     )
 
 
-async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_path: Path):
-    """On the remote, symlink ~/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>.
+async def create_results_dir_with_symlink_to_scratch(
+    remote: Remote, results_symlink: str, results_path: str
+):
+    """On the remote, create results_path and symlink project/<results_symlink> -> results_path.
 
-    This keeps large outputs out of $HOME and in $SCRATCH where storage limits are more generous.
+    results_path may contain env vars (e.g. $SCRATCH); they are resolved via the remote login shell.
     """
     project_dir = find_pyproject().parent
     project_dir_relative_to_home = project_dir.relative_to(Path.home())
-    symlink_path = project_dir_relative_to_home / results_path
+    symlink_path = project_dir_relative_to_home / results_symlink
 
-    # On some clusters (e.g. Vulcan), $SCRATCH is only defined in login shells.
-    scratch = (
-        await remote.get_output("bash -l -c 'echo $SCRATCH'", hide=True, warn=True, display=False)
+    # Resolve env vars (e.g. $SCRATCH) in results_path using the remote login shell.
+    resolved_path = (
+        await remote.get_output(
+            f"bash -l -c 'echo {results_path}'", hide=True, warn=True, display=False
+        )
     ).strip()
-    if not scratch:
-        logger.warning(f"Remote {remote.hostname} does not have $SCRATCH defined.")
+    if not resolved_path:
+        logger.warning(
+            f"Could not resolve results_path '{results_path}' on {remote.hostname}. Skipping symlink."
+        )
         return
 
-    scratch_dir = f"{scratch}/{results_path}/{project_dir.name}"
-
-    # Create the target directory in $SCRATCH if it doesn't already exist.
-    if not await remote_test("-d", scratch_dir, remote):
-        result = await remote.run(f"mkdir -p {scratch_dir}", warn=True, hide=True)
+    # Create the target directory if it doesn't already exist.
+    if not await remote_test("-d", resolved_path, remote):
+        result = await remote.run(f"mkdir -p {resolved_path}", warn=True, hide=True)
         if result.returncode != 0:
             logger.warning(
-                f"Failed to create {scratch_dir} on {remote.hostname}. "
+                f"Failed to create {resolved_path} on {remote.hostname}. "
                 f"Results will be stored in {symlink_path}, which may fill up $HOME."
             )
             await remote.run(f"mkdir -p {symlink_path}", warn=True, hide=True)
@@ -329,20 +380,20 @@ async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_pat
     # If a real file/directory exists there, warn — the user may be filling up $HOME.
     if await remote_test("-e", symlink_path, remote):
         logger.warning(
-            f"{symlink_path} on {remote.hostname} is a real directory, not a symlink to $SCRATCH. "
-            f"You may end up filling up $HOME. Consider replacing it with a symlink to {scratch_dir}."
+            f"{symlink_path} on {remote.hostname} is a real directory, not a symlink. "
+            f"You may end up filling up $HOME. Consider replacing it with a symlink to {resolved_path}."
         )
         return
 
     # Nothing at the path yet — create the symlink.
     result = await remote.run(
-        f"ln -s -T {scratch_dir} {symlink_path}",
+        f"ln -s -T {resolved_path} {symlink_path}",
         warn=True,
         hide=True,
     )
     if result.returncode != 0:
         logger.warning(
-            f"Failed to create symlink {symlink_path} -> {scratch_dir} on {remote.hostname}."
+            f"Failed to create symlink {symlink_path} -> {resolved_path} on {remote.hostname}."
         )
 
 

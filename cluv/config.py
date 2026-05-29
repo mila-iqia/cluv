@@ -69,16 +69,18 @@ class CluvConfig(BaseModel):
     """Global environment variables set on all clusters when running Slurm commands."""
 
     results_path: str
-    """Default path to the results directory for all clusters.
+    """Default path to the results directory for all clusters (may contain env vars like $SCRATCH)."""
 
-    !!! info
-        On Slurm clusters, this will be a symlink to a folder in `$SCRATCH/<results_path>/<project_name>`.
+    results_symlink: str | None = None
+    """Name of the symlink created in the project directory pointing to results_path.
+
+    When None, defaults to Path(results_path).name (the last component of results_path).
     """
 
-    data_source: str | None
+    data_source: str | None = None
     """`hostname:/path` of where to get the data from."""
 
-    datasets_path: str | None
+    datasets_path: str | None = None
     """Path to a dataset directory, for example, `'$SCRATCH/my_dataset'`
 
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.

@@ -173,6 +173,13 @@ def add_sync_args(
             "Use a comma to separate multiple clusters."
         ),
     )
+    sync_parser.add_argument(
+        "--sync-datasets",
+        dest="sync_datasets",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Push datasets from data_source to each cluster. Requires data_source in config.",
+    )
     # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
     # sync_parser.add_argument(
     #     "--",

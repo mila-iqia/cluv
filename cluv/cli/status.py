@@ -365,9 +365,10 @@ async def status(table: str) -> None:
     clusters = get_config().clusters_names
 
     # Query clusters in parallel
-    data: list[ClusterStatus] = [
-        d for d in await asyncio.gather(*(get_real_cluster_status(c) for c in clusters))
-    ]
+    with console.status("Fetching cluster status...",):
+        data: list[ClusterStatus] = [
+            d for d in await asyncio.gather(*(get_real_cluster_status(c) for c in clusters))
+        ]
 
     # Show a tip message if all clusters are offline, which likely means the user hasn't logged in yet (no control sockets).
     if all(not c.online for c in data):

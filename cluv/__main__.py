@@ -139,20 +139,15 @@ def add_submit_args(
 def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser(
         "status",
-        help="Get the status of available clusters.",
+        help="Get the status of clusters and jobs.",
         formatter_class=rich_argparse.RichHelpFormatter,
     )
     status_parser.add_argument(
-        "clusters",
-        nargs="*",
-        default=None,
-        metavar="<cluster>",
-        help=("Cluster(s) to query. Leave empty to query all clusters with an active connection."),
-    )
-    status_parser.add_argument(
-        "--show",
+        "table",
+        nargs="?",
         choices=["clusters", "jobs", "all"],
         default="all",
+        metavar="<table>",
         help="Which table to display: cluster overview, jobs overview, or both (default: all).",
     )
     status_parser.set_defaults(func=status)

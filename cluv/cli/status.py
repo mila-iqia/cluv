@@ -13,6 +13,14 @@ from rich.text import Text
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_config
 from cluv.remote import Remote
+from cluv.slurm import (
+    StorageStats,
+    parse_disk_quota,
+    parse_diskusage_report,
+    parse_partition_stats,
+    parse_savail,
+    parse_sinfo_nodes,
+)
 
 logger = logging.getLogger(__name__)
 __all__ = ["status"]
@@ -28,15 +36,6 @@ class JobStats:
     cancelled: int | None = None
     completed: int | None = None
     my_completed: int | None = None  # recently completed jobs for the current user
-
-
-@dataclass
-class StorageStats:
-    """Disk usage as (used_gib, quota_gib) for $HOME and $SCRATCH."""
-    home_used: float
-    home_quota: float
-    scratch_used: float
-    scratch_quota: float
 
 
 @dataclass
@@ -97,13 +96,6 @@ async def get_real_cluster_status(remote: Remote) -> ClusterStatus:
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
     """
-    from cluv.slurm import (
-        parse_disk_quota,
-        parse_diskusage_report,
-        parse_partition_stats,
-        parse_savail,
-        parse_sinfo_nodes,
-    )
 
     cluster = remote.hostname
     script = _REMOTE_SCRIPT_MILA if cluster in _MILA_CLUSTERS else _REMOTE_SCRIPT_DRAC

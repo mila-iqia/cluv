@@ -9,7 +9,6 @@ import shlex
 import shutil
 import subprocess
 import textwrap
-from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
@@ -27,7 +26,7 @@ from milatools.utils.parallel_progress import (
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import CluvConfig, current_cluster_config, find_pyproject, get_config
 from cluv.remote import Remote, get_ssh_options_for_host, run
-from cluv.utils import console, current_cluster, resolve_env_vars
+from cluv.utils import console, console_lock, current_cluster, resolve_env_vars
 
 milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
@@ -96,39 +95,34 @@ async def sync(
     # TODO: Add an --ignore flag to ignore some clusters?
     console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
-    console_lock = asyncio.Lock()
-
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
     for remote in remotes:
-        tasks.append(
-            functools.partial(sync_task_function, remote=remote, console_lock=console_lock)
-        )
+        tasks.append(functools.partial(sync_task_function, remote=remote))
         task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
 
     config = get_config()
-    if sync_datasets and config.data_source and config.datasets_path:
-        await _pull_datasets(remotes, config, _console_lock=console_lock)
 
-    await run_async_tasks_with_progress_bar(
-        async_task_fns=tasks,
-        task_descriptions=task_descriptions,
-        overall_progress_task_description="[green]Syncing project",
-    )
+    token = console_lock.set(asyncio.Lock())
+    try:
+        if sync_datasets and config.data_source and config.datasets_path:
+            await _pull_datasets(remotes, config)
+
+        await run_async_tasks_with_progress_bar(
+            async_task_fns=tasks,
+            task_descriptions=task_descriptions,
+            overall_progress_task_description="[green]Syncing project",
+        )
+    finally:
+        console_lock.reset(token)
 
     return remotes
 
 
-async def sync_task_function(
-    report_progress: ReportProgressFn,
-    remote: Remote,
-    console_lock: asyncio.Lock | None = None,
-):
+async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_config()
-    # for use in the sub-functions without having to pass it around everywhere?
-    ContextVar("console_lock").set(console_lock)
 
     def _update_progress(progress: int, status: str, total: int):
         info = textwrap.shorten(status, 50, placeholder="...")
@@ -278,9 +272,7 @@ async def clone_project(remote: Remote):
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
-async def _pull_datasets(
-    remotes: list[Remote], config: CluvConfig, _console_lock: asyncio.Lock | None = None
-):
+async def _pull_datasets(remotes: list[Remote], config: CluvConfig):
     """Pull dataset from data_source once, then push to all target remotes in parallel."""
 
     if not config.data_source:
@@ -334,7 +326,6 @@ async def _pull_datasets(
                 f"{datasets_path}/",
             ),
             _display=True,
-            _console_lock=_console_lock,
         )
 
     # console.log(f"[green]Pushing datasets to:[/green] {[r.hostname for r in target_remotes]}")

@@ -10,7 +10,7 @@ import sys
 from logging import getLogger as get_logger
 from typing import Callable, Literal, Self, TypeVar
 
-from cluv.utils import console
+from cluv.utils import console, console_lock
 
 logger = get_logger(__name__)
 
@@ -110,7 +110,6 @@ async def run(
     hide: Hide = False,
     _stacklevel: int = 2,
     _display: bool | str = False,
-    _console_lock: asyncio.Lock | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Runs the command *asynchronously* in a subprocess and returns the result.
 
@@ -178,9 +177,7 @@ async def run(
         stdout=stdout.decode(),
         stderr=stderr.decode(),
     )
-    # IDEA: Maybe we could grab an asyncio lock for the standard output, to keep the output of
-    # commands directly below the commands themselves?
-    async with _console_lock or contextlib.nullcontext():
+    async with console_lock.get() or contextlib.nullcontext():
         if _display:
             console.log(
                 _display

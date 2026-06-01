@@ -460,8 +460,8 @@ def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo] | None = None) -> T
         expand=True,
     )
 
-    table.add_column("Job ID", style="bold magenta")
     table.add_column("Cluster", style="bold magenta")
+    table.add_column("Job ID", style="bold magenta")
     table.add_column("Git commit")
     table.add_column("Submitted at")
     table.add_column("Job status")
@@ -491,8 +491,8 @@ def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo] | None = None) -> T
             elapsed_cell = "—"
 
         table.add_row(
-            str(job.job_id),
             job.cluster,
+            str(job.job_id),
             job.git_commit[:7],
             submitted_str,
             state_cell,

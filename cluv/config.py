@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import functools
 import logging
+import os
 import tomllib
 from dataclasses import field
 from pathlib import Path
@@ -12,7 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from pydantic.dataclasses import dataclass
 
-from cluv.utils import current_cluster, resolve_env_vars
+from cluv.utils import current_cluster
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +58,10 @@ class ClusterConfig:
     def resolve_env_vars_in_paths(self):
         return ClusterConfig(
             env=self.env,
-            results_path=resolve_env_vars(self.results_path),
-            datasets_path=resolve_env_vars(self.datasets_path) if self.datasets_path else None,
+            results_path=Path(os.path.expandvars(self.results_path)),
+            datasets_path=Path(os.path.expandvars(self.datasets_path))
+            if self.datasets_path
+            else None,
         )
 
 

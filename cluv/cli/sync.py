@@ -26,7 +26,7 @@ from milatools.utils.parallel_progress import (
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import CluvConfig, current_cluster_config, find_pyproject, get_config
 from cluv.remote import Remote, get_ssh_options_for_host, run
-from cluv.utils import console, console_lock, current_cluster, resolve_env_vars
+from cluv.utils import console, console_lock, current_cluster
 
 milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
@@ -149,7 +149,8 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
         local_dataset_path = (config.get_cluster_config(here) if here else config).datasets_path
         if not local_dataset_path:
             raise RuntimeError("data_source is set, so dataset_path should also be set!")
-        local_dataset_path = resolve_env_vars(local_dataset_path)
+        local_dataset_path = Path(os.path.expandvars(local_dataset_path))
+
         await _push_datasets_to_remote(local_dataset_path, remote, config)
 
     _update_progress(num_tasks, "Done", num_tasks)
@@ -299,7 +300,7 @@ async def _pull_datasets(remotes: list[Remote], config: CluvConfig):
                 f"To sync datasets from {source_host}, you must set a datasets_path in the config for this cluster ({this_cluster or 'local machine'})."
             )
         try:
-            datasets_path = resolve_env_vars(datasets_path)
+            datasets_path = Path(os.path.expandvars(datasets_path))
         except KeyError as e:
             raise RuntimeError(
                 f"Cannot resolve datasets_path '{config.datasets_path}' on this machine: "

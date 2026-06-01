@@ -3,7 +3,6 @@ import contextvars
 import os
 import socket
 import sys
-from pathlib import Path
 
 import rich.console
 
@@ -21,12 +20,3 @@ def current_cluster() -> str | None:
     if "CC_CLUSTER" in os.environ:
         return os.environ["CC_CLUSTER"]
     return None
-
-
-def resolve_env_vars(string_or_path: str | Path):
-    path = Path(string_or_path)
-    parts = path.parts
-    new_parts = [
-        os.environ[part.removeprefix("$")] if part.startswith("$") else part for part in parts
-    ]
-    return Path(*new_parts)

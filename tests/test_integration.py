@@ -141,6 +141,8 @@ async def test_status_online(cluster_status: ClusterStatus, cluster: str):
     assert cluster_status.online is True
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
 @pytest.mark.asyncio
 async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
@@ -149,6 +151,8 @@ async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
     assert cluster_status.gpu_total > 0, "Expected cluster to report GPU nodes"
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
 @pytest.mark.asyncio
 async def test_status_gpu_model(cluster_status: ClusterStatus, cluster: str):
@@ -157,6 +161,8 @@ async def test_status_gpu_model(cluster_status: ClusterStatus, cluster: str):
     assert cluster_status.gpu_model != "?", f"GPU model not detected: {cluster_status.gpu_model!r}"
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
 @pytest.mark.asyncio
 async def test_status_jobs(cluster_status: ClusterStatus, cluster: str):
@@ -169,6 +175,8 @@ async def test_status_jobs(cluster_status: ClusterStatus, cluster: str):
     assert cluster_status.jobs.my_pending >= 0
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
 @pytest.mark.asyncio
 async def test_status_storage(cluster_status: ClusterStatus):
@@ -244,7 +252,9 @@ async def test_submit(remote: Remote):
         should_cancel_job = False
         await sync(clusters=[remote.hostname])
         output_file = Path(DEFAULT_RESULTS_PATH) / str(job_id) / f"slurm-{job_id}.out"
-        assert output_file.is_file(), f"Expected job output file to be synced locally: {output_file}"
+        assert output_file.is_file(), (
+            f"Expected job output file to be synced locally: {output_file}"
+        )
         output_text = output_file.read_text(errors="replace")
         assert re.search(r"Python \d+\.\d+(\.\d+)?", output_text), (
             f"Expected python version output in {output_file}, got:\n{output_text}"
@@ -328,11 +338,11 @@ def test_init(
             assert job_script.stat().st_mode & stat.S_IXUSR, "Job script is not executable!"
 
     if scratch:
-        assert (project_dir / generated_config.results_path).exists()
-        assert (project_dir / generated_config.results_path).is_symlink()
-        assert (
-            project_dir / generated_config.results_path
-        ).resolve() == scratch / DEFAULT_RESULTS_PATH / project_name
+        results_symlink = project_dir / generated_config.results_symlink
+        results_path = Path(os.path.expandvars(generated_config.results_path))
+        assert generated_config.results_path and results_path.exists()
+        assert results_symlink.is_symlink()
+        assert results_symlink.resolve() == results_path
 
     expected_config = load_cluv_config(REPO_ROOT / "pyproject.toml")
     assert generated_config.clusters_names == expected_config.clusters_names

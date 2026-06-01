@@ -8,10 +8,9 @@ import sys
 from pathlib import Path
 
 from cluv.cli.sync import sync
-from cluv.config import ClusterConfig, find_pyproject, get_config
+from cluv.config import find_pyproject, get_config
 from cluv.remote import Remote
 from cluv.utils import console
-
 
 RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
 FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
@@ -173,7 +172,7 @@ async def submit_first(
                     return None
 
                 await asyncio.sleep(wait_time)
-                wait_time = min(wait_time*2, 20)
+                wait_time = min(wait_time * 2, 20)
         console.log(
             f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs...\n",
             f"Use `ssh {start_cluster} sacct -j {start_job_id}` to view its status.",
@@ -239,7 +238,7 @@ def get_sbatch_command(
     # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
     config = get_config()
     env_vars: dict[str, str] = {**config.env}
-    env_vars.update(config.clusters.get(cluster, ClusterConfig()).env)
+    env_vars.update(config.get_cluster_config(cluster).env)
 
     # Prefix the job name with "cluv-" so it is easy to identify cluv-submitted jobs in sacct.
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
@@ -266,9 +265,7 @@ async def sbatch(
     """Submit the job via sbatch on the remote cluster, and return the job id."""
     cluster = remote.hostname
 
-    remote_cmd = get_sbatch_command(
-        cluster, job_script, sbatch_args, program_args, git_commit
-    )
+    remote_cmd = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
     return await remote.run(remote_cmd, display=True, warn=True, hide=True)
 
 

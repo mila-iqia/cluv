@@ -19,7 +19,7 @@ build-backend = "hatchling.build"
 ###  --------------   CLUV CONFIG   --------------  ###
 
 [tool.cluv]
-# Where to store job results by default. Can be overridden per cluster.
+# Where to store job results by default.
 results_path = "$SCRATCH/logs/pytorch_example"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
@@ -51,7 +51,6 @@ results_path = "$SCRATCH/logs/cluv"
 
 [tool.cluv.clusters.killarney]
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
-results_path = "$HOME/logs/cluv"
 datasets_path = "$HOME/datasets/cifar10"
 
 [tool.cluv.clusters.vulcan]

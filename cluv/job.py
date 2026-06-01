@@ -82,7 +82,7 @@ def current_job_info() -> JobInfo | None:
     if not SLURM_JOB_ID:
         return None  # not in a Slurm job.
     cluster = current_cluster()
-    run_id = _get_run_id()
+    run_id = get_run_id()
     # IDEA: maybe load the cluv config and set the checkpoint_dir
     # from cluv.config import load_cluv_config
     assert cluster, "Example must be run on a cluster."
@@ -119,7 +119,7 @@ def _in_job_chunking() -> bool:
     return in_job_array and _get_max_active_jobs() == 1
 
 
-def _get_run_id():
+def get_run_id():
     cluster = current_cluster()
     doing_job_packing = "SLURM_NTASKS_PER_GPU" in os.environ
     doing_job_chunking = _in_job_chunking()

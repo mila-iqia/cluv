@@ -25,8 +25,8 @@ class PartialClusterConfig:
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
-    """Path to the results directory for a specific cluster."""
+    # results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
+    # """Path to the results directory for a specific cluster."""
 
     datasets_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
     """Different path where the datasets should be replicated on this cluster.
@@ -55,13 +55,13 @@ class ClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
-    def resolve_env_vars_in_paths(self):
+    def expandvars(self):
         return ClusterConfig(
             env=self.env,
             results_path=Path(os.path.expandvars(self.results_path)),
-            datasets_path=Path(os.path.expandvars(self.datasets_path))
-            if self.datasets_path
-            else None,
+            datasets_path=(
+                Path(os.path.expandvars(self.datasets_path)) if self.datasets_path else None
+            ),
         )
 
 
@@ -74,11 +74,8 @@ class CluvConfig(BaseModel):
     results_path: str
     """Default path to the results directory for all clusters (may contain env vars like $SCRATCH)."""
 
-    results_symlink: str | None = None
-    """Name of the symlink created in the project directory pointing to results_path.
-
-    When None, defaults to Path(results_path).name (the last component of results_path).
-    """
+    results_symlink: str = "logs"
+    """Name of the symlink created in the project directory pointing to `results_path`."""
 
     data_source: str | None = None
     """`hostname:/path` of where to get the data from."""
@@ -109,7 +106,8 @@ class CluvConfig(BaseModel):
         datasets_path = cluster_config.datasets_path or cluv_config.datasets_path
         return ClusterConfig(
             env=cluv_config.env | cluster_config.env,
-            results_path=Path(cluster_config.results_path or cluv_config.results_path),
+            # TODO: Use the cluster-specific results_path if we add that option back in the future.
+            results_path=Path(cluv_config.results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
         )
 
@@ -168,4 +166,4 @@ def current_cluster_config() -> ClusterConfig | None:
         if cluster == source_cluster:
             # use the dataset path from the data_source setting as the datasets_path.
             config = dataclasses.replace(config, datasets_path=data_path)
-    return config.resolve_env_vars_in_paths()
+    return config.expandvars()

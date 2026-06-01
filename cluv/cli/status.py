@@ -60,10 +60,6 @@ def get_default_cluster_status(cluster: str) -> ClusterStatus:
     )
 
 
-# ---------------------------------------------------------------------------
-# Real data layer
-# ---------------------------------------------------------------------------
-
 # All commands are separated by a sentinel so we can split a single SSH output.
 _SEP = "---CLUV-SEP---"
 
@@ -341,8 +337,8 @@ def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
 
 def _build_legend() -> Panel:
     legend = (
-        "[green]●[/green] online  "
-        "[red]⚠[/red] offline  "
+        "[green]●[/green] connected  "
+        "[red]⚠[/red] disconnected  "
         "[green]▰[/green] free GPU  "
         "[red]▱[/red] busy GPU   "
         "[green]█[/green]/[yellow]█[/yellow]/[red]█[/red] disk usage (low/med/high)"

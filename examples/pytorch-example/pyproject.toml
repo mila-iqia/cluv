@@ -25,7 +25,7 @@ results_path = "$SCRATCH/logs/pytorch_example"
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
 results_symlink = "logs"
 # Where to read the data from when synchronizing data to all clusters.
-data_source = "mila:/network/datasets/cifar10"
+data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
 # Where the dataset should be replicated on all clusters.
 # TODO?: On the source cluster (ex Mila), the folder will only contain symlinks, to avoid
 # duplicating the data.
@@ -56,8 +56,8 @@ datasets_path = "$HOME/datasets/cifar10"
 
 [tool.cluv.clusters.vulcan]
 
-[tool.cluv.clusters.rorqual]
-env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
+# [tool.cluv.clusters.rorqual]
+# env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.fir]
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}

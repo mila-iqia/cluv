@@ -10,6 +10,7 @@ import random
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import simple_parsing
 import torch
@@ -18,9 +19,9 @@ import tqdm
 import wandb
 from torchvision.datasets import CIFAR10
 
-from cluv.config import current_cluster_config
+from cluv.config import current_cluster_config, find_pyproject, load_cluv_config
 from cluv.job import current_job_info
-from cluv.utils import current_cluster
+from cluv.utils import current_cluster, resolve_env_vars
 
 
 @dataclass(frozen=True)
@@ -29,7 +30,7 @@ class Args:
 
     # Time to wait before producing the result.
     # Can be useful to test and simulate preemption or cancelling jobs.
-    wait_duration_seconds: int = 60
+    job_duration_seconds: int = 60
 
     seed: int = int(os.environ.get("SLURM_PROCID", "0"))
 
@@ -53,25 +54,34 @@ def main(args: Args | None = None):
     args = args or simple_parsing.parse(Args, description=__doc__)
 
     job_info = current_job_info()
-    cluster_info = current_cluster_config()
-    assert job_info and cluster_info, "This example should be run in a slurm job."
+    datasets_path = (current_cluster_config() or load_cluv_config(find_pyproject())).datasets_path
 
-    print(f"Job {job_info.run_id} starts.")
-    wandb.init(
+    assert datasets_path, "A datasets_path must be set in the config for this example to work."
+    datasets_path = resolve_env_vars(datasets_path)
+    print(f"Datasets path: {datasets_path}")
+
+    run_id = job_info.run_id if job_info else None
+    run = wandb.init(
         project="cluv-example",
-        name=job_info.run_id,
-        id=job_info.run_id,
+        name=run_id,
+        id=run_id,
+        dir=job_info.results_path if job_info else None,
         config=vars(args)
-        | {"job": dataclasses.asdict(job_info)}
+        | ({"job": dataclasses.asdict(job_info)} if job_info else {})
         | {"env": {k: v for k, v in os.environ.items() if k.startswith("SLURM")}},
         resume="allow",
     )
+    run_id = run.id
+    run_dir = Path(run.dir)
+
+    print(f"Job {run_id} starts.")
+
     random.seed(args.seed)
     torch.manual_seed(args.seed)
 
     # Test that we can load a dataset from the dataset_path (that was synced by Cluv)
-    assert cluster_info.datasets_path, "This example requires a datasets_path to be set."
-    dataset = CIFAR10(cluster_info.datasets_path, download=False)
+    assert datasets_path, "This example requires a datasets_path to be set."
+    dataset = CIFAR10(datasets_path, download=False)
     print(dataset)
 
     # model = torchvision.models.resnet18(num_classes=10)
@@ -82,19 +92,19 @@ def main(args: Args | None = None):
     # from torch.nn.parallel import DistributedDataParallel
     # model = DistributedDataParallel(model)
 
-    for i in tqdm.tqdm(range(args.wait_duration_seconds), disable=(not sys.stdout.isatty())):
+    for i in tqdm.tqdm(range(args.job_duration_seconds), disable=(not sys.stdout.isatty())):
         # Some fake, loss that varies a bit between seeds and decreases over time.
         fake_loss = math.exp(-i / 10) + random.random() * 0.1
         time.sleep(1)
         wandb.log({"step": i, "loss": fake_loss})
-        print(f"Step {i}: loss={fake_loss}")
+        # print(f"Step {i}: loss={fake_loss}")
 
-    print(f"Job {job_info.run_id} is about to end.")
+    print(f"Job {run_id} is about to end.")
 
-    job_info.results_path.mkdir(parents=True, exist_ok=True)
-    results_file = job_info.results_path / "results.txt"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    results_file = run_dir / "results.txt"
     with results_file.open("a") as f:
-        f.write(f"This is the result of job {job_info.run_id}\n")
+        f.write(f"This is the result of job {run_id}\n")
 
 
 if __name__ == "__main__":

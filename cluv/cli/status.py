@@ -97,7 +97,7 @@ squeue -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 _MILA_CLUSTERS = {"mila"}
 
 
-async def get_real_cluster_status(cluster: str) -> ClusterStatus:
+async def get_cluster_status(cluster: str) -> ClusterStatus:
     """Fetch live Slurm data from a remote cluster and return a ClusterStatus.
 
     Uses a single SSH round-trip. Falls back gracefully when commands are
@@ -357,7 +357,7 @@ async def status(table: str) -> None:
     # Query clusters in parallel
     with console.status("Fetching clusters status..."):
         data: list[ClusterStatus] = [
-            d for d in await asyncio.gather(*(get_real_cluster_status(c) for c in clusters))
+            d for d in await asyncio.gather(*(get_cluster_status(c) for c in clusters))
         ]
 
     # Show a tip message if all clusters are offline, which likely means the user hasn't logged in yet (no control sockets).

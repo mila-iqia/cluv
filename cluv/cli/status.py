@@ -261,7 +261,7 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     table.add_column("$SCRATCH", justify="left", ratio=2)
 
     for c in data:
-        status_cell = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
+        status = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
         my_jobs = Text(f"{c.jobs.my_running} / {c.jobs.my_pending}", style="cyan")
         all_jobs = Text(f"{c.jobs.running} / {c.jobs.pending}", style="white")
 
@@ -272,7 +272,7 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
         row_style = "dim" if not c.online else ""
 
         table.add_row(
-            status_cell + Text(c.name, style="bold magenta" if c.online else "bold bright_black"),
+            status + Text(c.name, style="bold magenta" if c.online else "bold bright_black"),
             Text(c.gpu_model, style="bright_blue"),
             _gpu_bar(c.gpu_idle, c.gpu_total),
             my_jobs,

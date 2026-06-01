@@ -40,9 +40,14 @@ class JobInfo:
 
     This will usually just be {cluster}_{SLURM_JOB_ID}, but can also vary based on whether
     the job is doing job packing (with --ntasks-per-gpu) or job chunking (with --array=...%1) or
-    both.
+    both:
 
-    Use this as the run_id for `wandb.init` or whenever you need a unique run identifier.
+    - Normal job:                        `${SLURM_JOB_ID}`
+    - Packing (with --ntasks-per-gpu>1): `${SLURM_JOB_ID}_${SLURM_PROCID}`
+    - Chunking (with --array=0-N%1):     `${SLURM_ARRAY_JOB_ID}`
+    - Chunking + Packing:                `${SLURM_ARRAY_JOB_ID}_${SLURM_PROCID}`
+
+    Tip: Use this as the run_id for `wandb.init` or whenever you need a unique run identifier.
     """
 
     results_path: Path
@@ -51,8 +56,18 @@ class JobInfo:
     def datasets_path(self) -> Path | None:
         """The path where the datasets are located for this job (based on which cluster it runs on.)"""
         cluster_info = cluv.config.current_cluster_config()
-        assert cluster_info
+        if not cluster_info:
+            return None
         return cluster_info.datasets_path
+
+
+def get_datasets_path() -> Path | None:
+    """Returns the resolved 'datasets_path' from the Cluv config."""
+    datasets_path = (
+        cluv.config.current_cluster_config()
+        or cluv.config.load_cluv_config(cluv.config.find_pyproject())
+    ).datasets_path
+    return Path(os.path.expandvars(datasets_path)) if datasets_path else None
 
 
 def current_job_info() -> JobInfo | None:

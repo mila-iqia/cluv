@@ -89,15 +89,15 @@ results_path = "$SCRATCH/logs/cluv"
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
 results_symlink = "logs"
 ## Where to read the data from when synchronizing data to all clusters.
-# data_source = "mila:/network/datasets/cifar10"
+#data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
 ## Where the dataset should be replicated on all clusters.
 ## TODO?: On the source cluster (ex Mila), the folder will only contain symlinks, to avoid
 ## duplicating the data.
-# datasets_path = "datasets/cifar10"
+#datasets_path = "$SCRATCH/datasets/cifar10"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
-SBATCH_TIME = "3:00:00"
+SBATCH_TIMELIMIT = "3:00:00"
 SBATCH_REQUEUE = "1"
 # Assume that compute nodes don't have internet access by default. Override below when they do.
 UV_OFFLINE="1"
@@ -126,7 +126,7 @@ env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.nibi]
-env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="def-normandf", SBATCH_TIMELIMIT="0:05:00", SBATCH_MEM_PER_NODE="6G"}
 
 [tool.cluv.clusters.trillium]
 env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}

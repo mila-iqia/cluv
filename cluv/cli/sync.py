@@ -26,10 +26,10 @@ from milatools.utils.parallel_progress import (
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import (
     CluvConfig,
-    current_cluster_config,
     find_pyproject,
     get_config,
 )
+from cluv.job import get_datasets_path
 from cluv.remote import Remote, get_ssh_options_for_host, run
 from cluv.utils import console, console_lock, current_cluster
 
@@ -77,20 +77,17 @@ async def sync(
         clusters.remove(here)
 
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
-    if not clusters:
-        clusters = get_config().clusters_names
-        connections = await asyncio.gather(
-            *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
-        )
-        if not any(connections):
-            raise RuntimeError(
-                "[red]Not currently connected to any Slurm cluster.[/red] "
-                "Use `cluv login` to login and create reusable connections."
-            )
-        remotes = [conn for conn in connections if conn]  # keep the active connections.
-        clusters = [remote.hostname for remote in remotes]
-    else:
+    all_remotes = await get_active_remotes()
+    if clusters:
         remotes = await login(clusters)
+    elif not all_remotes:
+        raise RuntimeError(
+            "[red]Not currently connected to any Slurm cluster.[/red] "
+            "Use `cluv login` to login and create reusable connections."
+        )
+    else:
+        remotes = all_remotes.copy()
+        clusters = [remote.hostname for remote in all_remotes]
 
     if "GITHUB_ACTIONS" not in os.environ:
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
@@ -109,18 +106,46 @@ async def sync(
     config = get_config()
 
     token = console_lock.set(asyncio.Lock())
-    try:
-        if sync_datasets and config.data_source and config.datasets_path:
-            await _pull_datasets(remotes, config)
+    if (
+        sync_datasets
+        and config.data_source  # cluster:path
+        and (source_cluster := config.data_source.split(":", 1)[0]) != here
+    ):
+        _source_host, _, source_path = config.data_source.partition(":")
+        # Fetch the data from the source cluster and copy it to the local datasets_path.
+        source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
+        if not source_remote:
+            raise RuntimeError(
+                f"[red]Unable to sync datasets, need a connection to the source cluster "
+                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
+                f"Use `cluv login {source_cluster}` to create a reusable connection to the "
+                f"source cluster."
+            )
+        local_datasets_path = get_datasets_path()
+        if not local_datasets_path:
+            raise RuntimeError(
+                "`cluv.datasets_path` must be set in the Cluv config section of pyproject.toml to "
+                "sync datasets between clusters."
+            )
+        await _pull_datasets(source_remote, source_path, local_datasets_path)
 
-        await run_async_tasks_with_progress_bar(
-            async_task_fns=tasks,
-            task_descriptions=task_descriptions,
-            overall_progress_task_description="[green]Syncing project",
-        )
-    finally:
-        console_lock.reset(token)
+    await run_async_tasks_with_progress_bar(
+        async_task_fns=tasks,
+        task_descriptions=task_descriptions,
+        overall_progress_task_description="[green]Syncing project",
+    )
+    console_lock.reset(token)
 
+    return remotes
+
+
+async def get_active_remotes() -> list[Remote]:
+    """Returns the Remotes for each cluster which has an active SSH connection."""
+    clusters = get_config().clusters_names
+    connections = await asyncio.gather(
+        *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
+    )
+    remotes = [conn for conn in connections if conn]  # keep the active connections.
     return remotes
 
 
@@ -145,7 +170,7 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
     await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
 
     _update_progress(3, "Fetching results", num_tasks)
-    await fetch_results(remote.hostname, config)
+    await fetch_results(remote, config)
 
     if config.data_source:
         _update_progress(4, "Syncing datasets", num_tasks)
@@ -277,67 +302,42 @@ async def clone_project(remote: Remote):
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
-async def _pull_datasets(remotes: list[Remote], config: CluvConfig):
-    """Pull dataset from data_source once, then push to all target remotes in parallel."""
-
-    if not config.data_source:
-        logger.debug("No data_source specified in config, skipping dataset sync.")
-        return
-
-    this_cluster = current_cluster()
-    source_host, source_path = config.data_source.split(":", 1)
-
-    target_remotes = [r for r in remotes if r.hostname != source_host]
-    if not target_remotes:
-        logger.debug("No target remotes to sync datasets to, skipping dataset sync.")
-        return  # no remotes to sync to.
-
-    # First, pull the data from the data source to this machine if we are not on the source cluster.
-    if this_cluster == source_host:
-        # If we are on the source cluster, the local 'datasets_path' is the path from 'data_source'.
-        datasets_path = Path(source_path)
-    else:
-        # Pull from source to the locally-resolved datasets_path, then reuse for all pushes.
-        datasets_path = (current_cluster_config() or config).datasets_path
-        if not datasets_path:
-            raise RuntimeError(
-                f"To sync datasets from {source_host}, you must set a datasets_path in the config for this cluster ({this_cluster or 'local machine'})."
-            )
-        try:
-            datasets_path = Path(os.path.expandvars(datasets_path))
-        except KeyError as e:
-            raise RuntimeError(
-                f"Cannot resolve datasets_path '{config.datasets_path}' on this machine: "
-                f"the {e} environment variable is not set.\n"
-                f"To avoid copying the datasets from {source_host} to this machine, run "
-                f"`cluv sync` from the source cluster ({source_host}), or use the "
-                f"`--no-sync-datasets` flag when running `uv sync` from this machine."
-            ) from e
-
-        datasets_path.mkdir(parents=True, exist_ok=True)
-        console.log(
-            f"[green]Pulling datasets:[/green] {source_host}:{source_path} -> {datasets_path}"
-        )
-        await run(
-            (
-                "rsync",
-                "--archive",
-                "--verbose",
-                "--compress",
-                "--copy-links",
-                "--chmod=u+w",
-                "--exclude=.git",
-                "--exclude=.datalad",
-                f"{source_host}:{source_path}/",
-                f"{datasets_path}/",
-            ),
-            _display=True,
+async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):
+    """Pull from source to the locally-resolved datasets_path."""
+    # Resolve the env vars on the remote.
+    source_host = source_remote.hostname
+    source_path = await source_remote.get_output(f"echo {source_path}")
+    if "$" in str(local_datasets_path):
+        # Important to stop here if there is $SCRATCH in the datasets_path and it is not set on
+        # this machine.
+        raise RuntimeError(
+            f"Cannot resolve datasets_path '{local_datasets_path}' on this machine: "
+            f"there are unknown environment variables in the path.\n"
+            f"To avoid copying the datasets from {source_remote.hostname} to this machine, run "
+            f"`cluv sync` from {source_remote.hostname}, or use the "
+            f"`--no-sync-datasets` flag when running `uv sync` from this machine."
         )
 
-    # console.log(f"[green]Pushing datasets to:[/green] {[r.hostname for r in target_remotes]}")
-    # await asyncio.gather(
-    #     *(_push_datasets_to_remote(datasets_path, r, config) for r in target_remotes)
-    # )
+    local_datasets_path.mkdir(parents=True, exist_ok=True)
+    console.log(
+        f"[green]Pulling datasets:[/green] {source_host}:{source_path} -> {local_datasets_path}"
+    )
+    source_path = await source_remote.get_output(f"echo {source_path}")
+    await run(
+        (
+            "rsync",
+            "--archive",
+            "--verbose",
+            "--compress",
+            "--copy-links",
+            "--chmod=u+w",
+            "--exclude=.git",
+            "--exclude=.datalad",
+            f"{source_host}:{source_path}/",
+            f"{local_datasets_path}/",
+        ),
+        _display=True,
+    )
 
 
 async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: CluvConfig):
@@ -366,13 +366,15 @@ async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: C
     )
 
 
-async def fetch_results(remote_hostname: str, config: CluvConfig):
+async def fetch_results(remote: Remote, config: CluvConfig):
     """Fetches results from a remote cluster to local using rsync via the results symlink."""
     results_path_here = Path(os.path.expandvars(config.results_path))
     results_path_here.mkdir(parents=True, exist_ok=True)
     # Keep it as a string since it might contain env vars that have to be resolved on the remote.
-    results_path_on_cluster = str(config.get_cluster_config(remote_hostname).results_path)
-
+    results_path_on_cluster = str(config.get_cluster_config(remote.hostname).results_path)
+    results_path_on_cluster = remote.get_output(
+        f"echo {results_path_on_cluster}", hide=False, display=True
+    )
     await run(
         (
             "rsync",
@@ -381,7 +383,7 @@ async def fetch_results(remote_hostname: str, config: CluvConfig):
             "--compress",
             "--copy-links",
             "--chmod=u+w",
-            f"{remote_hostname}:{results_path_on_cluster}",
+            f"{remote.hostname}:{results_path_on_cluster}",
             str(results_path_here),
         ),
         warn=True,

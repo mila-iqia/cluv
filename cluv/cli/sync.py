@@ -24,7 +24,12 @@ from milatools.utils.parallel_progress import (
 )
 
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.config import CluvConfig, current_cluster_config, find_pyproject, get_config
+from cluv.config import (
+    CluvConfig,
+    current_cluster_config,
+    find_pyproject,
+    get_config,
+)
 from cluv.remote import Remote, get_ssh_options_for_host, run
 from cluv.utils import console, console_lock, current_cluster
 
@@ -139,9 +144,8 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
     _update_progress(2, "Running 'uv sync'", num_tasks)
     await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
 
-    results_symlink = config.results_symlink or Path(config.results_path).name
     _update_progress(3, "Fetching results", num_tasks)
-    await fetch_results(remote, results_symlink, config.results_path)
+    await fetch_results(remote.hostname, config)
 
     if config.data_source:
         _update_progress(4, "Syncing datasets", num_tasks)
@@ -362,14 +366,13 @@ async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: C
     )
 
 
-async def fetch_results(remote: Remote, results_symlink: str, results_path: str):
+async def fetch_results(remote_hostname: str, config: CluvConfig):
     """Fetches results from a remote cluster to local using rsync via the results symlink."""
-    project_dir = find_pyproject().parent
-    symlink_relative_to_home = project_dir.relative_to(Path.home()) / results_symlink
-    local_results_dir = project_dir / results_symlink
-    local_results_dir.mkdir(parents=True, exist_ok=True)
+    results_path_here = Path(os.path.expandvars(config.results_path))
+    results_path_here.mkdir(parents=True, exist_ok=True)
+    # Keep it as a string since it might contain env vars that have to be resolved on the remote.
+    results_path_on_cluster = str(config.get_cluster_config(remote_hostname).results_path)
 
-    await create_results_dir_with_symlink_to_scratch(remote, results_symlink, results_path)
     await run(
         (
             "rsync",
@@ -378,8 +381,8 @@ async def fetch_results(remote: Remote, results_symlink: str, results_path: str)
             "--compress",
             "--copy-links",
             "--chmod=u+w",
-            f"{remote.hostname}:{symlink_relative_to_home}",
-            str(local_results_dir.parent),
+            f"{remote_hostname}:{results_path_on_cluster}",
+            str(results_path_here),
         ),
         warn=True,
         hide=False,

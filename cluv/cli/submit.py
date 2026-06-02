@@ -256,6 +256,16 @@ def get_sbatch_command(
     env_vars: dict[str, str] = {**config.env}
     env_vars.update(config.clusters.get(cluster, ClusterConfig()).env)
 
+    # SBATCH_MEM / SBATCH_TIME are not real sbatch env vars (the real names are
+    # SBATCH_MEM_PER_NODE / SBATCH_TIMELIMIT), so SLURM silently ignores them and
+    # the job runs on the cluster default. Warn instead of losing the request.
+    for bad, flag in {"SBATCH_MEM": "--mem", "SBATCH_TIME": "--time"}.items():
+        if bad in env_vars:
+            console.print(
+                f"[yellow]Warning: {bad} is not a recognized sbatch env var (SLURM ignores it); "
+                f"pass {flag}={env_vars[bad]} as a sbatch flag instead.[/yellow]"
+            )
+
     # Prefix the job name with "cluv-" so it is easy to identify cluv-submitted jobs in sacct.
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"

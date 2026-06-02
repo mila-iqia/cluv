@@ -25,8 +25,8 @@ class PartialClusterConfig:
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    # results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
-    # """Path to the results directory for a specific cluster."""
+    results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
+    """Path to the results directory for a specific cluster."""
 
     datasets_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
     """Different path where the datasets should be replicated on this cluster.
@@ -146,7 +146,7 @@ def load_cluv_config(pyproject_path: Path | None = None) -> CluvConfig:
     if not cluv:
         raise RuntimeError(f"No cluv config in {pyproject_path} file.")
 
-    return CluvConfig.model_validate(cluv)
+    return CluvConfig.model_validate(cluv, extra="forbid")
 
 
 def get_cluster_choices() -> list[str]:

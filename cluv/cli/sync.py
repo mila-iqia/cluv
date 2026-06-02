@@ -28,6 +28,7 @@ from cluv.config import (
     CluvConfig,
     find_pyproject,
     get_config,
+    load_cluv_config,
 )
 from cluv.job import get_datasets_path
 from cluv.remote import Remote, get_ssh_options_for_host, run
@@ -76,6 +77,8 @@ async def sync(
     if clusters and here in clusters:
         clusters.remove(here)
 
+    config = load_cluv_config()
+
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     all_remotes = await get_active_remotes()
     if clusters:
@@ -102,8 +105,6 @@ async def sync(
     for remote in remotes:
         tasks.append(functools.partial(sync_task_function, remote=remote))
         task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
-
-    config = get_config()
 
     token = console_lock.set(asyncio.Lock())
     if (

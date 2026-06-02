@@ -5,9 +5,10 @@ import subprocess
 import pytest
 
 from cluv.cli.sync import sync
-from cluv.config import current_cluster_config, load_cluv_config
+from cluv.config import load_cluv_config
 from cluv.job import get_datasets_path
 from cluv.remote import Remote
+from cluv.utils import current_cluster
 
 from .test_integration import IN_GITHUB_CLOUD_CI
 
@@ -27,6 +28,7 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch):
     Need to check that rsync happens from `data_source` (the source) to the `datasets_path` here and
     on all the clusters where we have a connection.
     """
+    assert not current_cluster(), "test needs to run locally for now."
     other_cluster = "tamia"
     other_cluster_remote = await Remote.connect(other_cluster)
 
@@ -37,9 +39,12 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch):
     assert config
     assert config.datasets_path
 
-    here_config = current_cluster_config()
-    here_datasets_path = get_datasets_path() if here_config else None
+    here_datasets_path = get_datasets_path()
     assert here_datasets_path
+
+    if here_datasets_path.exists():
+        # Clean up any existing dataset here. It will be fetched from the source cluster.
+        subprocess.run(f"rm -r {here_datasets_path}", shell=True, check=True)
 
     other_cluster_datasets_path = config.get_cluster_config(other_cluster).datasets_path
     assert other_cluster_datasets_path
@@ -66,3 +71,7 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch):
         .splitlines()
     )
     assert this_cluster_files == other_cluster_files
+
+    from torchvision.datasets import CIFAR10
+
+    print(CIFAR10(here_datasets_path))

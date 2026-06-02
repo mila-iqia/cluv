@@ -19,6 +19,8 @@ import rich.logging
 import rich_argparse
 import simple_parsing
 
+from .cli.estimate import estimate
+from .cli.history import history
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run
@@ -37,15 +39,22 @@ def main(argv: list[str] | None = None) -> None:
         argv = sys.argv[1:]
 
     # argparse consumes '--' before REMAINDER sees it, so we extract program
-    # args (everything after the first '--' following 'submit') before parsing.
+    # args (everything after the first '--' following 'submit' or 'estimate')
+    # before parsing.
     submit_program_args: list[str] = []
-    try:
-        sub_idx = argv.index("submit")
-        sep_idx = argv.index("--", sub_idx + 1)
-        submit_program_args = list(argv[sep_idx + 1 :])
-        argv = list(argv[:sep_idx])
-    except ValueError:
-        pass
+    estimate_program_args: list[str] = []
+    for cmd_name, sink in (("submit", "submit"), ("estimate", "estimate")):
+        try:
+            sub_idx = argv.index(cmd_name)
+            sep_idx = argv.index("--", sub_idx + 1)
+            extracted = list(argv[sep_idx + 1 :])
+            argv = list(argv[:sep_idx])
+            if sink == "submit":
+                submit_program_args = extracted
+            else:
+                estimate_program_args = extracted
+        except ValueError:
+            continue
 
     parser = simple_parsing.ArgumentParser(
         description=__doc__,
@@ -75,6 +84,12 @@ def main(argv: list[str] | None = None) -> None:
     status_parser = add_status_args(subparsers)
     _add_v_arg(status_parser)
 
+    estimate_parser = add_estimate_args(subparsers)
+    _add_v_arg(estimate_parser)
+
+    history_parser = add_history_args(subparsers)
+    _add_v_arg(history_parser)
+
     args = parser.parse_args(argv)
     args_dict = vars(args)
 
@@ -85,6 +100,8 @@ def main(argv: list[str] | None = None) -> None:
 
     if subcommand == "submit":
         args_dict["program_args"] = submit_program_args
+    elif subcommand == "estimate":
+        args_dict["program_args"] = estimate_program_args
 
     try:
         if inspect.iscoroutinefunction(function):
@@ -134,6 +151,66 @@ def add_submit_args(
     )
     submit_parser.set_defaults(func=submit)
     return submit_parser
+
+
+def add_estimate_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+    estimate_parser = subparsers.add_parser(
+        "estimate",
+        help="Dry-run the memory estimator for a job script on a cluster.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+        usage="cluv estimate <cluster> <job.sh> [-- program-args...]",
+    )
+    estimate_parser.add_argument(
+        "cluster",
+        metavar="<cluster>",
+        help="The cluster whose history cache to read.",
+    )
+    estimate_parser.add_argument(
+        "job_script",
+        metavar="<job.sh>",
+        help="Path to the sbatch job script (relative to project root).",
+    )
+    estimate_parser.add_argument(
+        "--no-backfill",
+        dest="backfill",
+        action="store_false",
+        help="Skip the sacct backfill on a cold cache.",
+    )
+    estimate_parser.set_defaults(func=estimate, backfill=True)
+    return estimate_parser
+
+
+def add_history_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+    history_parser = subparsers.add_parser(
+        "history",
+        help="Inspect or manage the local sacct memory history cache.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    history_parser.add_argument(
+        "action",
+        choices=("list", "backfill", "clear"),
+        help="What to do with the cache.",
+    )
+    history_parser.add_argument(
+        "cluster",
+        nargs="?",
+        default=None,
+        metavar="<cluster>",
+        help="Cluster name. Required for `backfill`. Optional filter for `list` and `clear`.",
+    )
+    history_parser.add_argument(
+        "--key",
+        default=None,
+        help="Spec key to target with `clear` (requires <cluster>).",
+    )
+    history_parser.add_argument(
+        "--since-days",
+        type=int,
+        default=30,
+        help="How many days of sacct to pull for `backfill`. Default: 30.",
+    )
+    history_parser.set_defaults(func=history)
+    return history_parser
 
 
 def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:

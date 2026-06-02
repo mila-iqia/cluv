@@ -18,6 +18,49 @@ class ClusterConfig(BaseModel):
     """Environment variables to set when running Slurm commands on this cluster."""
 
 
+class RetryConfig(BaseModel):
+    """Opt-in OOM-aware resubmit policy.
+
+    DSL strings in `on_oom` are parsed by `salvo.policy.parse` at first use, not at
+    config load. Keeps `cluv.config` free of a pysalvo import and lets users see a
+    clear error pointing at the bad step.
+    """
+
+    on_oom: list[str] = []
+    """Ordered policy steps tried on `OUT_OF_MEMORY`. First applicable step wins.
+
+    Example: `["bump_mem(1.5x, max=128G)", "fail"]`.
+    """
+
+    max_hops: int = 5
+    """Hard ceiling on resubmits per top-level invocation."""
+
+
+class EstimateConfig(BaseModel):
+    """Opt-in memory estimator driven by past sacct observations.
+
+    When enabled, `cluv submit` looks up the local history cache for the (script,
+    git_commit, program_args) key and, if there are enough samples, overrides
+    `SBATCH_MEM` with `estimate_mem(...).mem_mb`. The retry loop still runs as a
+    safety net if the estimate underpredicts.
+    """
+
+    enabled: bool = False
+    """Master switch. When false the estimator is bypassed and submit is unchanged."""
+
+    safety: float = 1.2
+    """Multiplier applied to the P95 of past MaxRSS observations."""
+
+    window: int = 20
+    """Maximum number of recent records considered per submit."""
+
+    min_samples: int = 3
+    """Minimum learnable observations before the estimator overrides SBATCH_MEM."""
+
+    backfill: bool = True
+    """On a cold-cache key, run a single `sacct` query to backfill from cluster history."""
+
+
 class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
@@ -37,6 +80,12 @@ class CluvConfig(BaseModel):
     The keys are cluster names; each value is a `ClusterConfig` whose `env` dict contains
     environment variables to set when running Slurm commands on that cluster.
     """
+
+    retry: RetryConfig | None = None
+    """Optional OOM-aware resubmit policy. When absent, `cluv submit` is unchanged."""
+
+    estimate: EstimateConfig | None = None
+    """Optional memory estimator. When absent or disabled, `cluv submit` is unchanged."""
 
     @property
     def clusters_names(self) -> list[str]:

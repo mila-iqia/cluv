@@ -2,7 +2,12 @@ import textwrap
 import subprocess
 from pathlib import Path
 
-from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command, get_config
+from cluv.cli.submit import (
+    TERMINAL_JOB_STATES,
+    ensure_clean_git_state,
+    get_config,
+    get_sbatch_command,
+)
 
 import pytest
 
@@ -47,7 +52,7 @@ class TestGetSbatchCommand:
 
         assert (
             sbatch_command
-            == "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project --account=my_account --mem=8G ~/my_project/scripts/my_script.sh program_arg_1 program_arg_2'"
+            == "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project --job-name=cluv-my_script --account=my_account --mem=8G ~/my_project/scripts/my_script.sh program_arg_1 program_arg_2'"
         )
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
@@ -77,8 +82,83 @@ class TestGetSbatchCommand:
 
         assert (
             sbatch_command
-            == "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
+            == "bash --login -c 'MY_VAR=2 GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project --job-name=cluv-my_script  ~/my_project/scripts/my_script.sh '"
         )
+
+    def test_sbatch_env_vars_are_translated_to_cli_flags(self, project_dir: Path) -> None:
+        """SBATCH_* env vars must reach sbatch as CLI flags, not as env vars.
+
+        DRAC clusters re-source their site profile inside `bash --login -c`,
+        which clobbers SBATCH_* defaults before sbatch reads them. Flags are
+        parsed by sbatch directly and survive the login shell.
+        """
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.env]
+            SBATCH_MEM = "2G"
+            SBATCH_TIME = "00:05:00"
+            SBATCH_CPUS_PER_TASK = "1"
+            [tool.cluv.clusters.mila.env]
+            SBATCH_ACCOUNT = "rrg-foo"
+            """
+            )
+        )
+
+        sbatch_command = get_sbatch_command(
+            cluster="mila",
+            job_script=Path("scripts/my_script.sh"),
+            sbatch_args=[],
+            program_args=[],
+            git_commit="abecdef",
+        )
+
+        # Resource requests must appear as `--flag=value` between `sbatch --parsable
+        # --chdir=...` and the job script path, not as a `SBATCH_*=...` env prefix.
+        assert "SBATCH_MEM=" not in sbatch_command
+        assert "SBATCH_TIME=" not in sbatch_command
+        assert "SBATCH_CPUS_PER_TASK=" not in sbatch_command
+        assert "SBATCH_ACCOUNT=" not in sbatch_command
+        assert "--mem=2G" in sbatch_command
+        assert "--time=00:05:00" in sbatch_command
+        assert "--cpus-per-task=1" in sbatch_command
+        assert "--account=rrg-foo" in sbatch_command
+        # SBATCH_JOB_NAME injected by get_sbatch_command is also a flag.
+        assert "--job-name=cluv-my_script" in sbatch_command
+        # Non-SBATCH vars stay as env vars.
+        assert "GIT_COMMIT=abecdef" in sbatch_command
+
+
+class TestTerminalJobStates:
+    """The wait-loop in submit_first uses `state not in TERMINAL_JOB_STATES`.
+
+    Sanity-check the predicate: known terminal states stop the loop, transient
+    states (including ones absent from old `RUNNING_JOB_STATES`) keep it going,
+    and an empty/unknown state defaults to keep-polling.
+    """
+
+    @pytest.mark.parametrize(
+        "state",
+        ["COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL"],
+    )
+    def test_terminal_states_stop_polling(self, state: str) -> None:
+        assert state in TERMINAL_JOB_STATES
+
+    @pytest.mark.parametrize(
+        "state",
+        ["PENDING", "RUNNING", "COMPLETING", "CONFIGURING", "SUSPENDED", "REQUEUED", "RESIZING"],
+    )
+    def test_transient_states_keep_polling(self, state: str) -> None:
+        assert state not in TERMINAL_JOB_STATES
+
+    @pytest.mark.parametrize("state", ["", "FUTURE_SLURM_STATE"])
+    def test_empty_or_unknown_state_keeps_polling(self, state: str) -> None:
+        # The submit_first call site is `if job_status and job_status not in TERMINAL_JOB_STATES`,
+        # so an empty string short-circuits to "still running" via the truthiness guard.
+        assert state not in TERMINAL_JOB_STATES
 
 
 class TestEnsureCleanGitState:

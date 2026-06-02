@@ -225,11 +225,11 @@ async def test_submit(remote: Remote):
             "DEADLINE",
         }
         final_status = "UNKNOWN"
-        MAX_POLL_ATTEMPTS = 75
-        POLL_INTERVAL_SECONDS = 2
-        # Poll up to ~150s (75 * 2s) for terminal state, leaving a bit of room in the
+        max_poll_attempts = 5
+        poll_interval_seconds = 5
+        # Poll for terminal state, leaving a bit of room in the
         # 180s test timeout for sync + output validation.
-        for _ in range(MAX_POLL_ATTEMPTS):
+        for _ in range(max_poll_attempts):
             status_output = await remote.get_output(
                 f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
                 warn=True,
@@ -240,18 +240,24 @@ async def test_submit(remote: Remote):
             final_status = status_output.strip().partition("|")[0].strip()
             if final_status in TERMINAL_STATUSES:
                 break
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(poll_interval_seconds)
+            poll_interval_seconds *= 2
         if final_status not in TERMINAL_STATUSES:
             pytest.fail(
                 f"Job {job_id} did not reach terminal status within "
-                f"{MAX_POLL_ATTEMPTS * POLL_INTERVAL_SECONDS}s "
+                f"{max_poll_attempts * poll_interval_seconds}s "
                 f"(last status: {final_status!r})"
             )
         if final_status != "COMPLETED":
             pytest.fail(f"Submitted job {job_id} ended with unexpected status: {final_status!r}")
         should_cancel_job = False
         await sync(clusters=[remote.hostname])
-        output_file = Path(DEFAULT_RESULTS_PATH) / str(job_id) / f"slurm-{job_id}.out"
+
+        output_file = (
+            Path(os.path.expandvars(load_cluv_config().results_path))
+            / str(job_id)
+            / f"slurm-{job_id}.out"
+        )
         assert output_file.is_file(), (
             f"Expected job output file to be synced locally: {output_file}"
         )

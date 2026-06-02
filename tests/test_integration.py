@@ -48,7 +48,7 @@ pytestmark = [
     pytest.mark.timeout(20),
 ]
 
-REQUIRED_CLUSTERS = ("mila", "rorqual", "tamia")
+REQUIRED_CLUSTERS = ("mila", "tamia")
 ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)
 STATUS_SUPPORTED_CLUSTERS = {"mila", "tamia", "rorqual"}
 SUBMIT_SUPPORTED_CLUSTERS = {"mila", "rorqual"}

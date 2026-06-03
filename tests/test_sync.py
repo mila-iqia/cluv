@@ -49,21 +49,33 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
     other_cluster_datasets_path = await other_cluster_remote.get_output(
         f"echo {other_cluster_datasets_path}", hide=False, display=True
     )
-    other_cluster_files = await other_cluster_remote.get_output(
-        f"ls {other_cluster_datasets_path}", warn=True, hide=True
+    other_cluster_files = (
+        (
+            await other_cluster_remote.get_output(
+                f"ls {other_cluster_datasets_path}", warn=True, hide=True
+            )
+        )
+        .strip()
+        .splitlines()
     )
     if other_cluster_files:
         # Clean up any existing dataset on the other cluster
         await other_cluster_remote.run(f"rm -r {other_cluster_datasets_path}")
-        other_cluster_files = ""
+        other_cluster_files = []
 
-    # Dataset isn't synced to begin with.
+    # Dataset shouldn't be present on either the local machine or the remote.
+    # TODO: This is a bit inefficient, but for such a small dataset, it's not a big deal.
     this_cluster_files = subprocess.getoutput(f"ls {here_datasets_path}").strip().splitlines()
     assert this_cluster_files != other_cluster_files
 
     await sync([other_cluster], uv_sync_args=None)
 
-    # Dataset is synced
+    # Check that we now have the files for that dataset in the datasets_path on this machine.
+    from torchvision.datasets import CIFAR10
+
+    print(CIFAR10(here_datasets_path))
+
+    # Dataset is synced on the remote as well.
     this_cluster_files = subprocess.getoutput(f"ls {here_datasets_path}").strip().splitlines()
     other_cluster_files = (
         (await other_cluster_remote.get_output(f"ls {other_cluster_datasets_path}"))
@@ -71,7 +83,3 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
         .splitlines()
     )
     assert this_cluster_files == other_cluster_files
-
-    from torchvision.datasets import CIFAR10
-
-    print(CIFAR10(here_datasets_path))

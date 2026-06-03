@@ -371,6 +371,7 @@ async def fetch_results(remote: Remote, config: CluvConfig):
     """Fetches results from a remote cluster to local using rsync via the results symlink."""
     results_path_here = Path(os.path.expandvars(config.results_path))
     results_path_here.mkdir(parents=True, exist_ok=True)
+
     # Keep it as a string since it might contain env vars that have to be resolved on the remote.
     results_path_on_cluster = str(config.get_cluster_config(remote.hostname).results_path)
     results_path_on_cluster = await remote.get_output(
@@ -384,8 +385,8 @@ async def fetch_results(remote: Remote, config: CluvConfig):
             "--compress",
             "--copy-links",
             "--chmod=u+w",
-            f"{remote.hostname}:{results_path_on_cluster}",
-            str(results_path_here),
+            f"{remote.hostname}:{results_path_on_cluster}/",
+            f"{results_path_here}/",
         ),
         warn=True,
         hide=False,

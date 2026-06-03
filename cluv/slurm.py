@@ -9,7 +9,6 @@ import re
 
 from cluv.cli.status import StorageStats
 
-
 # ---------------------------------------------------------------------------
 # partition-stats (DRAC-only)
 # ---------------------------------------------------------------------------
@@ -169,7 +168,7 @@ def parse_sinfo_nodes(output: str) -> tuple[int, int, list[str]]:
         parts = line.split(None, 2)
         if len(parts) < 3:
             continue
-        _node, state, gres_field = parts[0], parts[1].lower(), parts[2]
+        _, state, gres_field = parts[0], parts[1].lower(), parts[2]
 
         matches = _GRES_RE.findall(gres_field)
         if not matches:

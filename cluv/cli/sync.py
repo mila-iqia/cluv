@@ -373,7 +373,7 @@ async def fetch_results(remote: Remote, config: CluvConfig):
     results_path_here.mkdir(parents=True, exist_ok=True)
     # Keep it as a string since it might contain env vars that have to be resolved on the remote.
     results_path_on_cluster = str(config.get_cluster_config(remote.hostname).results_path)
-    results_path_on_cluster = remote.get_output(
+    results_path_on_cluster = await remote.get_output(
         f"echo {results_path_on_cluster}", hide=False, display=True
     )
     await run(

@@ -402,55 +402,6 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     return table
 
 
-def _build_my_jobs_table(data: list[ClusterStatus]) -> Table:
-    table = Table(
-        title="[bold cyan]Your Jobs Summary[/bold cyan]",
-        box=box.SIMPLE_HEAVY,
-        header_style="bold white on #1a1a2e",
-        expand=True,
-    )
-    table.add_column("Cluster", style="bold magenta")
-    table.add_column("Running", justify="right", style="green")
-    table.add_column("Pending", justify="right", style="yellow")
-    table.add_column("Cancelled", justify="right", style="red")
-    table.add_column("Completed", justify="right", style="blue")
-
-    total_run = total_pend = total_can = total_comp = 0
-    for c in data:
-        if not c.online:
-            continue
-        # Approximate user's cancelled count proportionally to their share of running jobs.
-        if c.jobs.cancelled is not None:
-            my_can = max(0, int(c.jobs.cancelled * c.jobs.my_running / max(c.jobs.running, 1)))
-            my_can_str = str(my_can)
-        else:
-            my_can = 0
-            my_can_str = "—"
-        my_comp_str = str(c.jobs.my_completed) if c.jobs.my_completed is not None else "—"
-        my_comp = c.jobs.my_completed or 0
-        table.add_row(
-            c.name, str(c.jobs.my_running), str(c.jobs.my_pending), my_can_str, my_comp_str
-        )
-        total_run += c.jobs.my_running
-        total_pend += c.jobs.my_pending
-        total_can += my_can
-        total_comp += my_comp
-
-    table.add_section()
-    table.add_row(
-        "[bold]TOTAL[/bold]",
-        f"[bold green]{total_run}[/bold green]",
-        f"[bold yellow]{total_pend}[/bold yellow]",
-        f"[bold red]{total_can}[/bold red]"
-        if any(c.jobs.cancelled is not None for c in data if c.online)
-        else "—",
-        f"[bold blue]{total_comp}[/bold blue]"
-        if any(c.jobs.my_completed is not None for c in data if c.online)
-        else "—",
-    )
-    return table
-
-
 def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo] | None = None) -> Table:
     table = Table(
         title="Cluv Jobs",
@@ -546,8 +497,6 @@ async def status(clusters: list[str] | None = None):
     console.print()
 
     console.print(_build_cluster_table(data))
-    console.print()
-    console.print(_build_my_jobs_table(data))
     console.print()
     console.print(_build_legend())
     console.print()

@@ -1,6 +1,5 @@
 """Tests for `cluv sync`"""
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -24,7 +23,7 @@ pytestmark = [
 
 
 @pytest.mark.asyncio
-async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_scratch: Path):
     """Test for `cluv sync` with a project that has a 'datasets_path'.
 
     Need to check that rsync happens from `data_source` (the source) to the `datasets_path` here and
@@ -34,24 +33,15 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, tmp_pat
     other_cluster = "tamia"
     other_cluster_remote = await Remote.connect(other_cluster)
 
-    if "SCRATCH" not in os.environ:
-        SCRATCH = tmp_path / "scratch"
-        SCRATCH.mkdir()
-        os.environ["SCRATCH"] = str(SCRATCH)
-
     monkeypatch.chdir("examples/pytorch-example")
-    # assert current_cluster() == "mila"
 
     config = load_cluv_config()
     assert config
     assert config.datasets_path
 
     here_datasets_path = get_datasets_path()
-    assert here_datasets_path
-
-    if here_datasets_path.exists():
-        # Clean up any existing dataset here. It will be fetched from the source cluster.
-        subprocess.run(f"rm -r {here_datasets_path}", shell=True, check=True)
+    assert here_datasets_path and here_datasets_path.is_relative_to(fake_scratch)
+    assert not here_datasets_path.exists(), "Datasets path should not exist before sync."
 
     other_cluster_datasets_path = config.get_cluster_config(other_cluster).datasets_path
     assert other_cluster_datasets_path

@@ -272,6 +272,7 @@ dev = [
     { name = "pytest-skip-slow" },
     { name = "pytest-timeout" },
     { name = "ruff" },
+    { name = "torchvision" },
     { name = "uv-dynamic-versioning" },
 ]
 
@@ -295,6 +296,7 @@ dev = [
     { name = "pytest-skip-slow", specifier = ">=0.0.5" },
     { name = "pytest-timeout", specifier = ">=2.3.1" },
     { name = "ruff" },
+    { name = "torchvision", specifier = ">=0.25.0" },
     { name = "uv-dynamic-versioning", specifier = ">=0.2.0" },
 ]
 

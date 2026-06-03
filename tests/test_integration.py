@@ -188,7 +188,7 @@ async def test_status_storage(cluster_status: ClusterStatus):
 
 @pytest.mark.slow
 @pytest.mark.timeout(180)
-async def test_submit(remote: Remote, tmp_path: Path):
+async def test_submit(remote: Remote, fake_scratch: Path):
     """End-to-end: actually submit scripts/job.sh to a slurm cluster via sbatch.
 
     Requires an active SSH connection to the cluster and a clean git tree.
@@ -199,10 +199,6 @@ async def test_submit(remote: Remote, tmp_path: Path):
     """
     if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
-    if "SCRATCH" not in os.environ:
-        SCRATCH = tmp_path / "scratch"
-        SCRATCH.mkdir()
-        os.environ["SCRATCH"] = str(SCRATCH)
 
     should_cancel_job = True
     job_id = await submit(

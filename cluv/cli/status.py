@@ -396,7 +396,7 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     return table
 
 
-def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo] | None = None) -> Table:
+def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo]) -> Table:
     table = Table(
         title="Cluv Jobs",
         box=box.SIMPLE_HEAVY,
@@ -415,7 +415,7 @@ def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo] | None = None) -> T
     table.add_column("Elapsed time")
 
     for job in load_jobs():
-        info = (live_info or {}).get(job.job_id)
+        info = live_info.get(job.job_id)
 
         try:
             submitted_str = (
@@ -428,12 +428,12 @@ def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo] | None = None) -> T
 
         if info is not None:
             state_cell = _state_text(info.state)
-            wait_cell = info.wait_time or "—"
-            elapsed_cell = info.elapsed or "—"
+            wait_cell = info.wait_time or "?"
+            elapsed_cell = info.elapsed or "?"
         else:
-            state_cell = Text("—", style="dim")
-            wait_cell = "—"
-            elapsed_cell = "—"
+            state_cell = Text("?", style="dim")
+            wait_cell = "?"
+            elapsed_cell = "?"
 
         table.add_row(
             job.cluster,

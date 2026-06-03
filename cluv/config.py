@@ -10,7 +10,7 @@ import tomllib
 from dataclasses import field
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
 
 from cluv.utils import current_cluster, find_pyproject
@@ -92,6 +92,14 @@ class ClusterConfig:
 
 class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
+
+    # Pydantic Model configuration.
+    model_config = ConfigDict(
+        extra="forbid",  # throw an error if extra fields are provided
+        validate_default=True,  # validate default values
+        use_attribute_docstrings=True,  # for field descriptions
+        revalidate_instances="always",
+    )
 
     env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""

@@ -1,0 +1,5 @@
+defaults:
+  - hydra: default.yaml
+  - _self_
+lr: 0.01
+job_duration_seconds: 5

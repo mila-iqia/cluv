@@ -10,12 +10,9 @@ from typing import Any, ClassVar
 
 import hydra_zen
 from hydra.core.config_store import ConfigStore
-from hydra.core.plugins import Plugins
 from hydra.core.singleton import Singleton
 from hydra.core.utils import JobReturn, filter_overrides
-from hydra.plugins.plugin import Plugin
 from hydra.types import HydraContext, TaskFunction
-from hydra.utils import instantiate
 from hydra_plugins.hydra_submitit_launcher.submitit_launcher import BaseSubmititLauncher
 from omegaconf import DictConfig
 from remote_slurm_executor.slurm_remote import RemoteSlurmExecutor
@@ -24,39 +21,39 @@ from remote_slurm_executor.utils import LoginNode
 logger = logging.getLogger(__name__)
 
 
-def _instantiate(self: Plugins, config: DictConfig) -> Plugin:
-    """FIX annoying Hydra thing: plugins have to be in an "approved" `hydra_plugins` namespace?!"""
-    from hydra._internal import utils as internal_utils
+# def _instantiate(self: Plugins, config: DictConfig) -> Plugin:
+#     """FIX annoying Hydra thing: plugins have to be in an "approved" `hydra_plugins` namespace?!"""
+#     from hydra._internal import utils as internal_utils
 
-    classname = internal_utils._get_cls_name(config, pop=False)
-    try:
-        if classname is None:
-            raise ImportError("class not configured")
+#     classname = internal_utils._get_cls_name(config, pop=False)
+#     try:
+#         if classname is None:
+#             raise ImportError("class not configured")
 
-        if not self.is_in_toplevel_plugins_module(classname):
-            # NOTE: This is the weirdly strict thing we're patching:
-            # "All plugins must be defined inside the approved top level modules."
-            # "For plugins outside of hydra-core, the approved module is hydra_plugins."
-            # raise RuntimeError(f"Invalid plugin '{classname}': not the hydra_plugins package")
-            plugin = instantiate(config)
-            assert isinstance(plugin, Plugin)
-            return plugin
+#         if not self.is_in_toplevel_plugins_module(classname):
+#             # NOTE: This is the weirdly strict thing we're patching:
+#             # "All plugins must be defined inside the approved top level modules."
+#             # "For plugins outside of hydra-core, the approved module is hydra_plugins."
+#             # raise RuntimeError(f"Invalid plugin '{classname}': not the hydra_plugins package")
+#             plugin = instantiate(config)
+#             assert isinstance(plugin, Plugin)
+#             return plugin
 
-        if classname not in self.class_name_to_class.keys():
-            raise RuntimeError(f"Unknown plugin class : '{classname}'")
-        clazz = self.class_name_to_class[classname]
-        plugin = instantiate(config=config, _target_=clazz)
-        assert isinstance(plugin, Plugin)
+#         if classname not in self.class_name_to_class.keys():
+#             raise RuntimeError(f"Unknown plugin class : '{classname}'")
+#         clazz = self.class_name_to_class[classname]
+#         plugin = instantiate(config=config, _target_=clazz)
+#         assert isinstance(plugin, Plugin)
 
-    except ImportError as e:
-        raise ImportError(
-            f"Could not instantiate plugin {classname} : {str(e)}\n\n\tIS THE PLUGIN INSTALLED?\n\n"
-        )
+#     except ImportError as e:
+#         raise ImportError(
+#             f"Could not instantiate plugin {classname} : {str(e)}\n\n\tIS THE PLUGIN INSTALLED?\n\n"
+#         )
 
-    return plugin
+#     return plugin
 
 
-Plugins._instantiate = _instantiate
+# Plugins._instantiate = _instantiate
 
 
 # Made this a dataclass to avoid having an ugly default repr, but it causes issues with

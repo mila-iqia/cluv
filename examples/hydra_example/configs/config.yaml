@@ -1,5 +1,6 @@
 defaults:
   - hydra: default.yaml
+  - launcher: default.yaml
   - _self_
 lr: 0.01
 job_duration_seconds: 5

@@ -1,0 +1,22 @@
+job_script: scripts/safe_job.sh
+resources:
+  --mem: 16g
+  --time: 15:00:00
+  vram: 4GB
+checkpointing: true
+command: python src/pytorch_example/main.py
+arguments:
+  --lr:
+    - 0.01
+    - 0.02
+  --seed:
+    - 1
+    - 2
+    - 3
+# This could generate a multi-prog file like this:
+# 0 python train.py --seed=1 --lr=0.01
+# 1 python train.py --seed=2 --lr=0.01
+# 2 python train.py --seed=3 --lr=0.01
+# 0 python train.py --seed=1 --lr=0.02
+# 1 python train.py --seed=2 --lr=0.02
+# 2 python train.py --seed=3 --lr=0.02

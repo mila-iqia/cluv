@@ -69,7 +69,7 @@ requires = ["hatchling", "uv-dynamic-versioning"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["cluv", "hydra_plugins.cluv"]
+packages = ["cluv", "hydra_plugins.cluv", "hydra_plugins.remote_launcher"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "scripts" = "cluv/templates/scripts"

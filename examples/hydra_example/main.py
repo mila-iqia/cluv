@@ -18,10 +18,28 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 from torchvision.datasets import CIFAR10
 
-from cluv.job import current_job_info, get_datasets_path
+from cluv.job import JobInfo, current_job_info, get_datasets_path
 
-job = current_job_info()
-OmegaConf.register_new_resolver("cluv", lambda attr: getattr(job, attr))
+job: JobInfo | None = None
+
+
+def cluv_resolver(attr: str, default: str | None = None) -> str | None:
+    """OmegaConf resolver to access Cluv job info in Hydra configs.
+
+    Usage in Hydra config: ${cluv:attr, default} where `attr` is an attribute of the current job (e.g. "results_path")
+    and `default` is an optional default value to return if the attribute is not set in the current job.
+    """
+    global job
+    if job is None:
+        job = current_job_info()
+
+    if default is not None:
+        return getattr(job, attr, default)
+    return getattr(job, attr)
+
+
+OmegaConf.register_new_resolver("cluv", cluv_resolver)
+
 # OmegaConf.register_new_resolver("eval", eval)
 logger = logging.getLogger(__name__)
 

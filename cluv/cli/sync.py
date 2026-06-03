@@ -378,6 +378,13 @@ async def fetch_results(remote: Remote, config: CluvConfig):
     results_path_on_cluster = await remote.get_output(
         f"echo {results_path_on_cluster}", hide=False, display=True
     )
+    # Optional, but useful if it isn't already set up: Create a symlink at project_root/<symlink_name>
+    # that points to the results_path (usually in $SCRATCH). This works with the example job script
+    # templates, which have `--output=logs/%j/slurm-%j.out` (relative to the project root).
+    await create_results_dir_with_symlink_to_scratch(
+        remote, config.results_symlink, results_path_on_cluster
+    )
+
     await run(
         (
             "rsync",

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-JOBS_CACHE_PATH = Path.home() / ".cache" / "cluv" / "jobs.jsonl"
+from cluv.utils import find_pyproject
+
+
+@functools.cache
+def get_cache_path() -> Path:
+    """Should be like : ~/.cache/cluv/<PROJECT_NAME>/jobs.jsonl"""
+    project_name = find_pyproject().parent.name
+    return Path.home() / ".cache" / "cluv" / project_name / "jobs.jsonl"
 
 
 @dataclass
@@ -36,16 +44,19 @@ def save_job(
         sbatch_args=sbatch_args,
         program_args=program_args,
     )
-    JOBS_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with JOBS_CACHE_PATH.open("a") as f:
+    path = get_cache_path()
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
         f.write(json.dumps(asdict(job)) + "\n")
 
 
 def load_jobs() -> list[CachedJob]:
-    if not JOBS_CACHE_PATH.exists():
+    path = get_cache_path()
+    if not path.exists():
         return []
     jobs = []
-    for line in JOBS_CACHE_PATH.read_text().splitlines():
+    for line in path.read_text().splitlines():
         try:
             jobs.append(CachedJob(**json.loads(line)))
         except Exception:

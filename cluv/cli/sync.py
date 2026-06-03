@@ -283,10 +283,11 @@ async def clone_project(remote: Remote):
             display=False,
         )
     ).returncode == 0
+    gitenv = {"GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new"}
     if not _is_cloned_on_cluster:
         logger.debug(f"Project isn't cloned yet on {remote.hostname}.")
-        await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True)
-    await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True)
+        await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True, env=gitenv)
+    await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True, env=gitenv)
     if detached_head:
         github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
         if github_head_ref:
@@ -303,7 +304,7 @@ async def clone_project(remote: Remote):
                 hide=False,
             )
             await remote.run(
-                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}", hide=False
+                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}", hide=False, env=gitenv
             )
             return
         current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
@@ -313,7 +314,7 @@ async def clone_project(remote: Remote):
         )
     else:
         await remote.run(f"git -C {git_root_path} checkout {safe_current_git_branch}", hide=False)
-        await remote.run(f"git -C {git_root_path} pull", hide=False)
+        await remote.run(f"git -C {git_root_path} pull", hide=False, env=gitenv)
 
 
 async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):

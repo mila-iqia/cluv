@@ -439,7 +439,7 @@ async def create_results_dir_with_symlink_to_scratch(
     if await remote_test("-L", symlink_path, remote):
         return
 
-    # If a real file/directory exists there, warn — the user may be filling up $HOME.
+    # If a real file/directory exists there, warn, the user may be filling up $HOME.
     if await remote_test("-e", symlink_path, remote):
         logger.warning(
             f"{symlink_path} on {remote.hostname} is a real directory, not a symlink. "
@@ -447,7 +447,7 @@ async def create_results_dir_with_symlink_to_scratch(
         )
         return
 
-    # Nothing at the path yet — create the symlink.
+    # Nothing at the path yet, create the symlink.
     result = await remote.run(
         f"ln -s -T {resolved_path} {symlink_path}",
         warn=True,

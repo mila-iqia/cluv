@@ -59,10 +59,6 @@ class ClusterStatus:
     storage: StorageStats
 
 
-# ---------------------------------------------------------------------------
-# Real data layer
-# ---------------------------------------------------------------------------
-
 # All commands are separated by a sentinel so we can split a single SSH output.
 _SEP = "---CLUV-SEP---"
 
@@ -293,8 +289,6 @@ async def get_all_cluster_statuses(
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
-
-
 def _format_duration(total_seconds: int) -> str:
     h, rem = divmod(total_seconds, 3600)
     m, s = divmod(rem, 60)
@@ -510,15 +504,13 @@ async def status(clusters: list[str] | None = None):
             if job.cluster in cluster_to_remote:
                 cluster_jobs.setdefault(job.cluster, []).append(job.job_id)
 
-        if cluster_jobs:
-            results = await asyncio.gather(
-                *(
-                    fetch_live_job_info(cluster_to_remote[c], ids)
-                    for c, ids in cluster_jobs.items()
-                )
+        results = await asyncio.gather(
+            *(
+                fetch_live_job_info(cluster_to_remote[c], ids)
+                for c, ids in cluster_jobs.items()
             )
-            for r in results:
-                live_info.update(r)
+        )
+        live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
 
     console.print(_build_cluv_jobs_table(live_info))
     console.print()

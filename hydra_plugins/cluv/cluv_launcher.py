@@ -1,7 +1,9 @@
 # https://github.com/facebookresearch/hydra/blob/main/examples/plugins/example_launcher_plugin/hydra_plugins/example_launcher_plugin/example_launcher.py
 
+import asyncio
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Callable, ClassVar
 
 import hydra_zen
@@ -9,6 +11,9 @@ from hydra.core.utils import JobReturn
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
+
+from cluv.cli.submit import submit
+from cluv.job import JobInfo
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,7 @@ class CluvLauncher(Launcher):
     # same signature as the submitit plugin to make it easier for people to transition.
     def __init__(
         self,
+        vram_gb: int | None = None,
         # executor: Callable[[], RemoteSlurmExecutor],
         account: str | None = None,
         array_parallelism: int = 256,
@@ -66,6 +72,9 @@ class CluvLauncher(Launcher):
         tasks_per_node: int | None = None,
         mem_gb: int | None = None,
     ) -> None:
+        super().__init__()
+        self.vram_gb = vram_gb
+
         setup = setup or []
         additional_parameters = additional_parameters or {}
 
@@ -77,7 +86,6 @@ class CluvLauncher(Launcher):
             ntasks_per_node = tasks_per_node
         if ntasks_per_node is not None:
             additional_parameters["ntasks-per-node"] = ntasks_per_node
-        super().__init__()
         params = dict(
             account=account,
             array_parallelism=array_parallelism,
@@ -134,17 +142,38 @@ class CluvLauncher(Launcher):
     def launch(
         self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
     ) -> Sequence[JobReturn]:
-        # lazy import to ensure plugin discovery remains fast
-
+        return asyncio.run(self.launch_jobs(job_overrides, initial_job_idx))
         raise NotImplementedError(
             f"This launcher is not implemented yet. ({job_overrides=}, {initial_job_idx=})"
         )
+
+    async def launch_jobs(
+        self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
+    ) -> list[JobReturn]:
+        job_script = "scripts/job.sh"
+        cluster = "mila"  # todo: find the right cluster for these jobs (maybe even multiple?)
+        if self.vram_gb:
+            _packing_factor = 5
+            # self.params["ntasks_per_gpu"] = 5
+        # pack the jobs based on their VRAM requirements and the packing factor
+        # job_specs = job_packing(job_overrides, packing_factor)
+
+        jobs: list[JobInfo] = []
+        for override in job_overrides:
+            job_info = await submit(
+                cluster, Path(job_script), [], ["python", "main.py", *override]
+            )
+            jobs.append(job_info)  # type: ignore
+        return jobs
 
 
 @hydra_zen.hydrated_dataclass(
     target=CluvLauncher, populate_full_signature=True, hydra_convert="object"
 )
-class CluvLauncherConfig: ...
+class CluvLauncherConfig:
+    ...
+
+    # cluster: str
 
 
 # CluvLauncherConfig = hydra_zen.builds(

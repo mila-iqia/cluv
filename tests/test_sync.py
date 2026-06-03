@@ -1,6 +1,8 @@
 """Tests for `cluv sync`"""
 
+import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +24,7 @@ pytestmark = [
 
 
 @pytest.mark.asyncio
-async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch):
+async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """Test for `cluv sync` with a project that has a 'datasets_path'.
 
     Need to check that rsync happens from `data_source` (the source) to the `datasets_path` here and
@@ -31,6 +33,11 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch):
     assert not current_cluster(), "test needs to run locally for now."
     other_cluster = "tamia"
     other_cluster_remote = await Remote.connect(other_cluster)
+
+    if "SCRATCH" not in os.environ:
+        SCRATCH = tmp_path / "scratch"
+        SCRATCH.mkdir()
+        os.environ["SCRATCH"] = str(SCRATCH)
 
     monkeypatch.chdir("examples/pytorch-example")
     # assert current_cluster() == "mila"

@@ -11,6 +11,7 @@ from hydra.core.utils import JobReturn
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
+import submitit
 
 from cluv.cli.submit import submit
 from cluv.config import load_cluv_config
@@ -178,7 +179,7 @@ class CluvLauncher(Launcher):
             )
             results_path = cluster_results_dir / run_id
             jobs.append(JobInfo(cluster=cluster, run_id=run_id, results_path=results_path))
-
+        submitit.helpers.monitor_jobs
         return jobs
 
 

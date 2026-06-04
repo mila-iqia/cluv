@@ -193,7 +193,29 @@ class CluvLauncher(Launcher):
         )
         local_results_dir = get_results_path()
 
-        self.remote_dir_sync = RemoteDirSync(
+        class FakeRemoteDirSync(RemoteDirSync):
+            login_node: Remote  # type: ignore
+            remote_dir: PurePosixPath
+            local_dir: Path
+
+            def copy_to_remote(self, local_path: Path) -> PurePosixPath:
+                raise NotImplementedError("Cluv syncs stuff.")
+                return self._get_remote_path(local_path)
+
+            def get_from_remote(
+                self, remote_path: PurePosixPath | None = None, local_path: Path | None = None
+            ) -> Path:
+                # Pretend to sync, but it is done already.
+                assert bool(remote_path) ^ bool(local_path), (
+                    "Exactly one of remote_path or local_path should be passed."
+                )
+                if remote_path:
+                    return self._get_local_path(remote_path)
+                assert local_path
+                remote_path = self._get_remote_path(local_path)
+                return local_path
+
+        remote_dir_sync = FakeRemoteDirSync(
             LoginNode(cluster),
             local_dir=local_results_dir,
             remote_dir=cluster_results_dir,
@@ -238,14 +260,21 @@ class CluvLauncher(Launcher):
                 JobInfo(cluster=cluster, run_id=run_id, results_path=local_job_results_path)
             )
 
+            class PatchedRemoteSlurmJob(RemoteSlurmJob):
+                def wait(self) -> None:
+                    SubmititJob.wait(self)
+                    # TODO: Super ugly. Avoid doing the rsync per-job, do it with cluv instead.
+                    # Comment out
+                    # logger.info(f"Copying folder {self.paths.folder} from the remote.")
+
             # Trying to reuse this here that I made for the 'remote slurm executor' package.
             # It allows fetching the status of the job via SSH.
-            submitit_job = RemoteSlurmJob(
+            submitit_job = PatchedRemoteSlurmJob(
                 cluster,
                 folder=local_job_results_path,  # not really used for anything, but required by the interface.
                 job_id=str(job_id),
                 tasks=[0],
-                remote_dir_sync=self.remote_dir_sync,
+                remote_dir_sync=remote_dir_sync,
             )
             submitit_jobs.append(submitit_job)
 

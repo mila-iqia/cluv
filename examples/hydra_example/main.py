@@ -77,21 +77,21 @@ def main(config_dict: DictConfig):
         run_id = job_info.run_id
         run_dir = Path(os.path.expandvars(job_info.results_path))
 
-    run = wandb.init(
+    wandb_run = wandb.init(
         project="cluv-example",
         name=run_id,
         id=run_id,
-        dir=run_dir,
+        # dir=run_dir,
         config={"config": dataclasses.asdict(config)}
         | ({"job": dataclasses.asdict(job_info)} if job_info else {})
         | {"env": {k: v for k, v in os.environ.items() if k.startswith("SLURM")}},
         resume="allow",
         # if using Hydra multirun to run multiple jobs in sequence, create a new run for each.
         reinit="create_new",
-        settings=wandb.Settings(),
+        # settings=wandb.Settings(),
     )
-    run_id = run.id
-    run_dir = Path(run.dir)
+    run_id = wandb_run.id
+    run_dir = Path(wandb_run.dir)
 
     print(f"Job {run_id} starts.")
 
@@ -115,7 +115,7 @@ def main(config_dict: DictConfig):
         # Some fake, loss that varies a bit between seeds and decreases over time.
         fake_loss = math.exp(-i / 10) + random.random() * 0.1
         time.sleep(1)
-        wandb.log({"step": i, "loss": fake_loss})
+        wandb_run.log({"step": i, "loss": fake_loss})
         # print(f"Step {i}: loss={fake_loss}")
 
     print(f"Job {run_id} is about to end.")
@@ -124,6 +124,8 @@ def main(config_dict: DictConfig):
     results_file = run_dir / "results.txt"
     with results_file.open("a") as f:
         f.write(f"This is the result of job {run_id}\n")
+
+    wandb_run.finish()
 
 
 if __name__ == "__main__":

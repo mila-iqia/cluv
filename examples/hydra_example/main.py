@@ -60,6 +60,7 @@ class Config:
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="config")
 def main(config_dict: DictConfig):
+    print("Config: ", config_dict)
     config = Config(**hydra.utils.instantiate(config_dict))
     rich.print(config)
 

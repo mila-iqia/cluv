@@ -13,7 +13,6 @@ from cluv.config import ClusterConfig, find_pyproject, get_config
 from cluv.remote import Remote
 from cluv.utils import console
 
-
 RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
 FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
@@ -269,10 +268,8 @@ async def sbatch(
     git_commit: str,
 ) -> subprocess.CompletedProcess[str]:
     """Submit the job via sbatch on the remote cluster, and return the job id."""
-    cluster = remote.hostname
-
     remote_cmd = get_sbatch_command(
-        cluster, job_script, sbatch_args, program_args, git_commit
+        remote.hostname, job_script, sbatch_args, program_args, git_commit
     )
     return await remote.run(remote_cmd, display=True, warn=True, hide=True)
 

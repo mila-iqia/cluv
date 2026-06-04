@@ -31,12 +31,12 @@ __all__ = ["status"]
 class JobStats:
     running: int
     pending: int
+
     # subset of the above that belong to the current user
     my_running: int
     my_pending: int
-    cancelled: int | None = None
-    completed: int | None = None
-    my_completed: int | None = None  # recently completed jobs for the current user
+    my_cancelled: int
+    my_completed: int
 
 
 @dataclass
@@ -64,7 +64,7 @@ def get_default_cluster_status(cluster: str) -> ClusterStatus:
         gpu_idle=0,
         gpu_total=0,
         gpu_model="?",
-        jobs=JobStats(running=0, pending=0, my_running=0, my_pending=0),
+        jobs=JobStats(running=0, pending=0, my_running=0, my_cancelled=0, my_completed=0, my_pending=0),
         storage=StorageStats(home_used=0, home_quota=0, scratch_used=0, scratch_quota=0),
     )
 
@@ -79,10 +79,13 @@ _SACCT_MY_COMPLETED = (
     f" --state=CD --format=JobID 2>/dev/null | wc -l; echo {_SEP}"
 )
 
+
+LIST_GPUS = 'sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu'
+
 # Script for DRAC clusters (partition-stats + diskusage_report, no savail/disk-quota)
 _REMOTE_SCRIPT_DRAC = f"""
 partition-stats 2>/dev/null; echo {_SEP}
-sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu; echo {_SEP}
+{LIST_GPUS}; echo {_SEP}
 squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
@@ -111,6 +114,8 @@ async def fetch_live_job_info(
     cluster: str, job_ids: list[int]
 ) -> dict[int, LiveJobInfo]:
     """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
+    import time
+    start_time = time.time()
     ids_str = ",".join(str(jid) for jid in job_ids)
     cmd = (
         f"sacct -j {ids_str} --format=JobID,State,Start,Submit,Elapsed"
@@ -156,6 +161,8 @@ async def fetch_live_job_info(
 
         result[job_id] = LiveJobInfo(state=state, elapsed=elapsed_out, wait_time=wait_time)
 
+    print(f"(fetch_live_job_info) Fetched info for {len(result)} jobs on {remote.hostname}/{cluster} in {time.time() - start_time:.1f}s")
+
     return result
 
 
@@ -165,6 +172,8 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
     """
+    import time
+    start_time = time.time()
 
     # Use get_remote_without_2fa_prompt directly so we never filter out the
     # "current" cluster the way login() does. A working socket for mila is
@@ -200,9 +209,6 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
         all_running_out,
         all_pending_out,
     ) = parts[:9]
-    # sacct completed count is appended at the end of both scripts:
-    # index 5 for DRAC (after diskusage), index 9 for Mila (after all_pending).
-    my_completed_out = parts[9] if cluster in _MILA_CLUSTERS else parts[5]
 
     # --- GPU info: prefer savail (Mila) over sinfo (DRAC) ---
     savail_idle, savail_total, savail_models = parse_savail(savail_out)
@@ -236,16 +242,13 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     except ValueError:
         my_running = my_pending = 0
 
-    try:
-        my_completed: int | None = int(my_completed_out.strip())
-    except ValueError:
-        my_completed = None
-
     # --- Storage: prefer diskusage_report (DRAC, per-user quotas);
     #     fall back to disk-quota (Mila: lfs for $HOME, beegfs for $SCRATCH) ---
     storage = parse_diskusage_report(diskusage_out)
     if storage.home_quota == 0:
         storage = parse_disk_quota(disk_quota_out)
+
+    print(f"(get_real_cluster_status) Fetched status for {cluster} in {time.time() - start_time:.1f}s")
 
     return ClusterStatus(
         name=cluster,
@@ -258,7 +261,8 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
             pending=jobs_pending,
             my_running=my_running,
             my_pending=my_pending,
-            my_completed=my_completed,
+            my_cancelled=0,
+            my_completed=0,
         ),
         storage=storage,
     )
@@ -323,8 +327,6 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 # ---------------------------------------------------------------------------
 # Main display
 # ---------------------------------------------------------------------------
-
-
 def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     table = Table(
         title="Cluster Overview",
@@ -338,15 +340,16 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     table.add_column("Cluster", style="bold", ratio=1)
     table.add_column("GPU model", justify="center", ratio=2)
     table.add_column("Free GPUs", justify="left", ratio=1)
-    table.add_column("My jobs\nrun/pend", justify="center", ratio=1)
-    table.add_column("All jobs\nrun/pend", justify="center", ratio=1)
+    table.add_column("My jobs\nrun / pend / fail / comp", justify="center", ratio=1)
+    # table.add_column("All jobs\nrun / pend", justify="center", ratio=1)
     table.add_column("$HOME", justify="left", ratio=2)
     table.add_column("$SCRATCH", justify="left", ratio=2)
 
     for c in data:
         status = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
         my_jobs = Text(f"{c.jobs.my_running} / {c.jobs.my_pending}", style="cyan")
-        all_jobs = Text(f"{c.jobs.running} / {c.jobs.pending}", style="white")
+        my_jobs = Text(f"{c.jobs.my_running} / {c.jobs.my_pending} / {c.jobs.my_cancelled} / {c.jobs.my_completed}", style="cyan")  # TODO
+        # all_jobs = Text(f"{c.jobs.running} / {c.jobs.pending}", style="white")
 
         home_bar = _bar(c.storage.home_used, c.storage.home_quota)
         scratch_bar = _bar(c.storage.scratch_used, c.storage.scratch_quota)
@@ -359,7 +362,7 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
             Text(c.gpu_model, style="bright_blue"),
             _gpu_bar(c.gpu_idle, c.gpu_total),
             my_jobs,
-            all_jobs,
+            # all_jobs,
             home_bar,
             scratch_bar,
             style=row_style,
@@ -437,6 +440,8 @@ async def status(table: str) -> None:
     - Gives you an overview of the state of each cluster, and displays an overview of the state of your jobs across the clusters.
     - Displays the number of idle nodes, or the number of idle GPUs, or something similar, for each cluster
     """
+    import time
+    start_time = time.time()
     console = Console()
     clusters = get_config().clusters_names
 
@@ -464,13 +469,13 @@ async def status(table: str) -> None:
         if job.cluster in clusters:
             cluster_jobs.setdefault(job.cluster, []).append(job.job_id)
 
-        results = await asyncio.gather(
+    results = await asyncio.gather(
             *(
                 fetch_live_job_info(c, ids)
                 for c, ids in cluster_jobs.items()
             )
-        )
-        live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
+    )
+    live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
 
     if table in ("clusters", "all"):
         console.print(_build_cluster_table(data))
@@ -479,3 +484,5 @@ async def status(table: str) -> None:
     if table in ("jobs", "all"):
         console.print(_build_cluv_jobs_table(live_info))
         console.print()
+
+    print(f"Total fetch time: {time.time() - start_time:.1f}s")

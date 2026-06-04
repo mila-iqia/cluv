@@ -11,6 +11,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from cluv.alliance_status import ServiceStatus as AllianceServiceStatus
+from cluv.alliance_status import fetch_alliance_status_async
 from cluv.cache import load_jobs
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_config
@@ -320,12 +322,37 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
     return Text(f"{bar_str} {idle:>5}/{total}", style=colour)
 
 
+def _alliance_text(status: str | None) -> Text:
+    if status == "operational":
+        return Text("ok", style="green")
+    if status == "degraded":
+        return Text("partial", style="yellow")
+    if status == "outage":
+        return Text("down", style="bold red")
+    if status == "scheduled":
+        return Text("planned", style="blue")
+    if status == "decommissioned":
+        return Text("decommissioned", style="dim")
+    return Text("—", style="dim")
+
+
+async def _fetch_alliance_safe() -> list[AllianceServiceStatus]:
+    try:
+        return await fetch_alliance_status_async()
+    except Exception as exc:
+        logger.warning(f"Could not fetch Alliance status: {exc}")
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Main display
 # ---------------------------------------------------------------------------
 
 
-def _build_cluster_table(data: list[ClusterStatus]) -> Table:
+def _build_cluster_table(
+    data: list[ClusterStatus],
+    alliance_map: dict[str, AllianceServiceStatus] | None = None,
+) -> Table:
     table = Table(
         title="Cluster Overview",
         box=box.ROUNDED,
@@ -336,6 +363,7 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     )
 
     table.add_column("Cluster", style="bold", ratio=1)
+    table.add_column("Alliance", justify="center", ratio=1)
     table.add_column("GPU model", justify="center", ratio=2)
     table.add_column("Free GPUs", justify="left", ratio=1)
     table.add_column("My jobs\nrun/pend", justify="center", ratio=1)
@@ -344,18 +372,19 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     table.add_column("$SCRATCH", justify="left", ratio=2)
 
     for c in data:
-        status = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
+        conn = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
+        svc = alliance_map.get(c.name.lower()) if alliance_map else None
         my_jobs = Text(f"{c.jobs.my_running} / {c.jobs.my_pending}", style="cyan")
         all_jobs = Text(f"{c.jobs.running} / {c.jobs.pending}", style="white")
 
         home_bar = _bar(c.storage.home_used, c.storage.home_quota)
         scratch_bar = _bar(c.storage.scratch_used, c.storage.scratch_quota)
 
-        # Dim the whole row if the cluster is offline
         row_style = "dim" if not c.online else ""
 
         table.add_row(
-            status + Text(c.name, style="bold magenta" if c.online else "bold bright_black"),
+            conn + Text(c.name, style="bold magenta" if c.online else "bold bright_black"),
+            _alliance_text(svc.status if svc else None),
             Text(c.gpu_model, style="bright_blue"),
             _gpu_bar(c.gpu_idle, c.gpu_total),
             my_jobs,
@@ -427,9 +456,52 @@ def _build_legend() -> Panel:
         "[red]⚠[/red] disconnected  "
         "[green]▰[/green] free GPU  "
         "[red]▱[/red] busy GPU   "
-        "[green]█[/green]/[yellow]█[/yellow]/[red]█[/red] disk usage (low/med/high)"
+        "[green]█[/green]/[yellow]█[/yellow]/[red]█[/red] disk usage (low/med/high)  "
+        "Alliance: [green]ok[/green] / [yellow]partial[/yellow] / [bold red]down[/bold red] / [blue]planned[/blue]"
     )
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
+
+
+def _build_alliance_incidents_table(
+    data: list[ClusterStatus],
+    alliance_map: dict[str, AllianceServiceStatus],
+) -> Table | None:
+    rows = [
+        (c.name, alliance_map[c.name.lower()])
+        for c in data
+        if c.name.lower() in alliance_map
+        and alliance_map[c.name.lower()].status != "operational"
+        and alliance_map[c.name.lower()].incidents
+    ]
+    if not rows:
+        return None
+
+    table = Table(
+        title="Alliance Incidents",
+        box=box.SIMPLE_HEAVY,
+        header_style="bold white on #1a1a2e",
+        title_style="bold cyan",
+        expand=True,
+    )
+    table.add_column("Cluster", style="bold magenta")
+    table.add_column("Status", justify="center")
+    table.add_column("Incident")
+    table.add_column("Start", justify="center")
+    table.add_column("End", justify="center")
+
+    for cluster_name, svc in rows:
+        for i, inc in enumerate(svc.incidents):
+            start = inc.start.strftime("%b %d %H:%M") if inc.start else "—"
+            end = inc.end.strftime("%b %d %H:%M") if inc.end else "—"
+            table.add_row(
+                cluster_name if i == 0 else "",
+                _alliance_text(svc.status) if i == 0 else Text(""),
+                inc.title,
+                start,
+                end,
+            )
+
+    return table
 
 
 async def status(table: str) -> None:
@@ -440,11 +512,14 @@ async def status(table: str) -> None:
     console = Console()
     clusters = get_config().clusters_names
 
-    # Query clusters in parallel
+    # Query clusters and Alliance status page in parallel
     with console.status("Fetching clusters status..."):
-        data: list[ClusterStatus] = [
-            d for d in await asyncio.gather(*(get_cluster_status(c) for c in clusters))
-        ]
+        cluster_statuses, alliance_statuses = await asyncio.gather(
+            asyncio.gather(*(get_cluster_status(c) for c in clusters)),
+            _fetch_alliance_safe(),
+        )
+    data: list[ClusterStatus] = list(cluster_statuses)
+    alliance_map = {s.name.lower(): s for s in alliance_statuses}
 
     # Show a tip message if all clusters are offline, which likely means the user hasn't logged in yet (no control sockets).
     if all(not c.online for c in data):
@@ -473,8 +548,12 @@ async def status(table: str) -> None:
         live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
 
     if table in ("clusters", "all"):
-        console.print(_build_cluster_table(data))
+        console.print(_build_cluster_table(data, alliance_map))
         console.print(_build_legend())
+        incidents_table = _build_alliance_incidents_table(data, alliance_map)
+        if incidents_table:
+            console.print()
+            console.print(incidents_table)
         console.print()
     if table in ("jobs", "all"):
         console.print(_build_cluv_jobs_table(live_info))

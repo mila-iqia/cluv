@@ -3,6 +3,7 @@
 import asyncio
 import collections
 import logging
+import pickle
 import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
@@ -283,6 +284,9 @@ class CluvLauncher(Launcher):
 
         await fetch_results(cluster_remote, config)
 
+        # Pretend like we made some pickle file.
+        for job_info, job in zip(jobs, submitit_jobs):
+            job.paths.result_pickle.write_bytes(pickle.dumps(f"Job {job_info.run_id} is done!"))
         # TODO: What is the 'results' in our case? We don't want to pickle/unpickle stuff.
         # return [
         #     # job.results()

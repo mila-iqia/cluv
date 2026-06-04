@@ -1,9 +1,11 @@
 # https://github.com/facebookresearch/hydra/blob/main/examples/plugins/example_launcher_plugin/hydra_plugins/example_launcher_plugin/example_launcher.py
 
 import asyncio
+import collections
 import logging
+import time
 from collections.abc import Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, ClassVar
 
 import hydra_zen
@@ -11,11 +13,16 @@ from hydra.core.utils import JobReturn
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
-import submitit
+from remote_slurm_executor.slurm_remote import RemoteSlurmJob
+from remote_slurm_executor.utils import LoginNode, RemoteDirSync
+from submitit.core.core import Job as SubmititJob
+from submitit.helpers import _default_custom_logging
 
 from cluv.cli.submit import submit
+from cluv.cli.sync import fetch_results
 from cluv.config import load_cluv_config
-from cluv.job import JobInfo, get_run_id
+from cluv.job import JobInfo, get_results_path, get_run_id
+from cluv.remote import Remote
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +43,10 @@ class CluvLauncher(Launcher):
     # same signature as the submitit plugin to make it easier for people to transition.
     def __init__(
         self,
-        vram_gb: int | None = None,
+        ## NEW args:
+        cluster: str = "first",  # which cluster to submit to.
+        vram_gb: int | None = None,  # Enables job packing!
+        checkpointing: bool = True,  # Enables job chunking (via job arrays!)
         # executor: Callable[[], RemoteSlurmExecutor],
         account: str | None = None,
         array_parallelism: int = 256,
@@ -75,7 +85,9 @@ class CluvLauncher(Launcher):
         mem_gb: int | None = None,
     ) -> None:
         super().__init__()
+        self.cluster = cluster
         self.vram_gb = vram_gb
+        self.checkpointing = checkpointing
 
         setup = setup or []
         additional_parameters = additional_parameters or {}
@@ -157,18 +169,46 @@ class CluvLauncher(Launcher):
         chunking = False
         packing = False
         config = load_cluv_config()
+        cluster_remote = await Remote.connect(cluster)
+
+        # TODO: Remove any 'launcher'-related configs!
+        assert all("launcher=cluv" in override for override in job_overrides), (
+            "TODO: remove the launcher-related overrides from all the commands!"
+        )
+        new_job_overrides = []
+        for overrides in job_overrides:
+            new_job_override = list(overrides)
+            new_job_override.remove("launcher=cluv")
+            new_job_overrides.append(new_job_override)
+        job_overrides = new_job_overrides
+
         # if self.vram_gb:
         # _packing_factor = 5
         # self.params["ntasks_per_gpu"] = 5
         # pack the jobs based on their VRAM requirements and the packing factor
         # job_specs = job_packing(job_overrides, packing_factor)
+        cluster_results_dir = config.get_cluster_config(cluster).results_path
+        cluster_results_dir = PurePosixPath(
+            await cluster_remote.get_output(f"echo {cluster_results_dir}")
+        )
+        local_results_dir = get_results_path()
 
+        self.remote_dir_sync = RemoteDirSync(
+            LoginNode(cluster),
+            local_dir=local_results_dir,
+            remote_dir=cluster_results_dir,
+        )
+        submitit_jobs: list[RemoteSlurmJob] = []
         jobs: list[JobInfo] = []
         for override in job_overrides:
-            job_id = await submit(cluster, Path(job_script), [], ["python", "main.py", *override])
+            job_id = await submit(
+                cluster=cluster,
+                job_script=Path(job_script),
+                sbatch_args=[f"--output={cluster_results_dir}/{cluster}_%j/slurm-%j.out"],
+                program_args=["python", "main.py", *override],
+            )
             assert job_id is not None
             assert not chunking and not packing  # jobid is the "run id" for now.
-            cluster_results_dir = config.get_cluster_config(cluster).results_path
             run_id = get_run_id(
                 cluster=cluster,
                 job_id=job_id,
@@ -177,10 +217,103 @@ class CluvLauncher(Launcher):
                 doing_job_packing=False,
                 doing_job_chunking=False,
             )
-            results_path = cluster_results_dir / run_id
-            jobs.append(JobInfo(cluster=cluster, run_id=run_id, results_path=results_path))
-        submitit.helpers.monitor_jobs
-        return jobs
+
+            _cluster_job_results_path = cluster_results_dir / run_id
+            # The path where the remote results will be synced locally.
+            local_job_results_path = local_results_dir / run_id
+
+            jobs.append(
+                JobInfo(cluster=cluster, run_id=run_id, results_path=local_job_results_path)
+            )
+
+            # Trying to reuse this here that I made for the 'remote slurm executor' package.
+            # It allows fetching the status of the job via SSH.
+            submitit_job = RemoteSlurmJob(
+                cluster,
+                folder=local_job_results_path,  # not really used for anything, but required by the interface.
+                job_id=str(job_id),
+                tasks=[0],
+                remote_dir_sync=self.remote_dir_sync,
+            )
+            submitit_jobs.append(submitit_job)
+
+        await monitor_jobs_async(submitit_jobs, poll_interval_seconds=30)
+        # await asyncio.gather(*(job.awaitable().wait(poll_interval=30) for job in submitit_jobs))
+
+        await fetch_results(cluster_remote, config)
+
+        # TODO: What is the 'results' in our case? We don't want to pickle/unpickle stuff.
+        # return [
+        #     # job.results()
+        #     JobReturn(
+        #         overrides=overrides,
+        #         working_dir=str(job_info.results_path),
+        #         status=JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED,
+        #     )
+        #     for job_info, job, overrides in zip(jobs, submitit_jobs, job_overrides)
+        # ]
+
+        # potentially unpack the results of the jobs.
+        if packing:
+            return sum((job.results() for job in submitit_jobs), [])
+        return [job.results()[0] for job in submitit_jobs]
+
+
+async def monitor_jobs_async(
+    jobs: Sequence[SubmititJob],
+    poll_interval_seconds: float = 30,
+    test_mode: bool = False,
+    custom_logging: Callable = _default_custom_logging,
+) -> None:
+    """Async version of `monitor_jobs` from submitit.
+
+    Continuously monitors given jobs until they are all done or failed.
+
+    Parameters
+    ----------
+    jobs: List[Jobs]
+        A list of jobs to monitor
+    poll_frequency: int
+        The time (in seconds) between two refreshes of the monitoring.
+        Can't be inferior to 30s.
+    test_mode: bool
+        If in test mode, we do not check the length of poll_frequency
+    """
+
+    if not test_mode:
+        assert poll_interval_seconds >= 30, (
+            "You can't refresh too often (>= 30s) to avoid overloading squeue"
+        )
+
+    n_jobs = len(jobs)
+    if n_jobs == 0:
+        print("There are no jobs to monitor")
+        return
+
+    job_arrays = ", ".join(sorted(set(str(job.job_id).split("_", 1)[0] for job in jobs)))
+    print(f"Monitoring {n_jobs} jobs from job arrays {job_arrays} \n")
+
+    monitoring_start_time = time.time()
+    while True:
+        if not test_mode:
+            jobs[0].get_info(mode="force")  # Force update once to sync the state
+        state_jobs = collections.defaultdict(set)
+        for i, job in enumerate(jobs):
+            state_jobs[job.state.upper()].add(i)
+            if job.done():
+                state_jobs["DONE"].add(i)
+
+        failed_job_indices = sorted(state_jobs["FAILED"])
+        if len(state_jobs["DONE"]) == len(jobs):
+            print(f"All jobs finished, jobs with indices {failed_job_indices} failed", flush=True)
+            break
+
+        custom_logging(monitoring_start_time, n_jobs, state_jobs)
+        await asyncio.sleep(poll_interval_seconds)
+
+    print(
+        f"Whole process is finished, took {int((time.time() - monitoring_start_time) / 60)} minutes"
+    )
 
 
 @hydra_zen.hydrated_dataclass(

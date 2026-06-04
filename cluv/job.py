@@ -61,6 +61,14 @@ class JobInfo:
         return cluster_info.datasets_path
 
 
+def get_results_path() -> Path:
+    """Returns the resolved 'results_path' from the Cluv config."""
+    results_path = (
+        cluv.config.current_cluster_config() or cluv.config.load_cluv_config()
+    ).results_path
+    return Path(os.path.expandvars(results_path))
+
+
 def get_datasets_path() -> Path | None:
     """Returns the resolved 'datasets_path' from the Cluv config."""
     datasets_path = (
@@ -123,7 +131,7 @@ def current_run_id():
     doing_job_packing = "SLURM_NTASKS_PER_GPU" in os.environ
     doing_job_chunking = _in_job_chunking()
     task_index = int(os.environ["SLURM_PROCID"])
-    array_job_id = int(os.environ["SLURM_ARRAY_JOB_ID"])
+    array_job_id = os.environ.get("SLURM_ARRAY_JOB_ID")  # not set when not in a job array.
     job_id = int(os.environ["SLURM_JOB_ID"])
     assert cluster is not None
     return get_run_id(
@@ -138,9 +146,9 @@ def current_run_id():
 
 def get_run_id(
     cluster: str,
-    job_id: int,
-    task_index: int = 0,
-    array_job_id: int | None = None,
+    job_id: int | str,
+    task_index: int | str = 0,
+    array_job_id: str | None = None,
     doing_job_packing: bool = False,
     doing_job_chunking: bool = False,
 ) -> str:

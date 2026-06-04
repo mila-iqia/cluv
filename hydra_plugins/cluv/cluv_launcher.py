@@ -13,7 +13,8 @@ from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
 
 from cluv.cli.submit import submit
-from cluv.job import JobInfo
+from cluv.config import load_cluv_config
+from cluv.job import JobInfo, get_run_id
 
 logger = logging.getLogger(__name__)
 
@@ -152,18 +153,32 @@ class CluvLauncher(Launcher):
     ) -> list[JobReturn]:
         job_script = "scripts/job.sh"
         cluster = "mila"  # todo: find the right cluster for these jobs (maybe even multiple?)
-        if self.vram_gb:
-            _packing_factor = 5
-            # self.params["ntasks_per_gpu"] = 5
+        chunking = False
+        packing = False
+        config = load_cluv_config()
+        # if self.vram_gb:
+        # _packing_factor = 5
+        # self.params["ntasks_per_gpu"] = 5
         # pack the jobs based on their VRAM requirements and the packing factor
         # job_specs = job_packing(job_overrides, packing_factor)
 
         jobs: list[JobInfo] = []
         for override in job_overrides:
-            job_info = await submit(
-                cluster, Path(job_script), [], ["python", "main.py", *override]
+            job_id = await submit(cluster, Path(job_script), [], ["python", "main.py", *override])
+            assert job_id is not None
+            assert not chunking and not packing  # jobid is the "run id" for now.
+            cluster_results_dir = config.get_cluster_config(cluster).results_path
+            run_id = get_run_id(
+                cluster=cluster,
+                job_id=job_id,
+                task_index=0,
+                array_job_id=None,
+                doing_job_packing=False,
+                doing_job_chunking=False,
             )
-            jobs.append(job_info)  # type: ignore
+            results_path = cluster_results_dir / run_id
+            jobs.append(JobInfo(cluster=cluster, run_id=run_id, results_path=results_path))
+
         return jobs
 
 

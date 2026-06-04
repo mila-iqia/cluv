@@ -81,7 +81,7 @@ def current_job_info() -> JobInfo | None:
     if not SLURM_JOB_ID:
         return None  # not in a Slurm job.
     cluster = current_cluster()
-    run_id = get_run_id()
+    run_id = current_run_id()
     # IDEA: maybe load the cluv config and set the checkpoint_dir
     # from cluv.config import load_cluv_config
     assert cluster, "Example must be run on a cluster."
@@ -118,14 +118,36 @@ def _in_job_chunking() -> bool:
     return in_job_array and _get_max_active_jobs() == 1
 
 
-def get_run_id():
+def current_run_id():
     cluster = current_cluster()
     doing_job_packing = "SLURM_NTASKS_PER_GPU" in os.environ
     doing_job_chunking = _in_job_chunking()
     task_index = int(os.environ["SLURM_PROCID"])
+    array_job_id = int(os.environ["SLURM_ARRAY_JOB_ID"])
+    job_id = int(os.environ["SLURM_JOB_ID"])
+    assert cluster is not None
+    return get_run_id(
+        cluster=cluster,
+        job_id=job_id,
+        task_index=task_index,
+        array_job_id=array_job_id,
+        doing_job_packing=doing_job_packing,
+        doing_job_chunking=doing_job_chunking,
+    )
+
+
+def get_run_id(
+    cluster: str,
+    job_id: int,
+    task_index: int = 0,
+    array_job_id: int | None = None,
+    doing_job_packing: bool = False,
+    doing_job_chunking: bool = False,
+) -> str:
     if doing_job_chunking:
         # IF we have --array=...%1, use the id of the first job.
-        first_job_id = int(os.environ["SLURM_ARRAY_JOB_ID"])
+        assert array_job_id is not None, "Must provide array_job_id when doing job chunking"
+        first_job_id = array_job_id
         if doing_job_packing:
             # Running with --array=0-5%1 for chunking and --ntasks-per-gpu for packing! Awesome!!
             return f"{cluster}_{first_job_id}_task{task_index}"
@@ -139,5 +161,5 @@ def get_run_id():
         # the id of the first job in the array.
         return f"{cluster}_{first_job_id}"
     if doing_job_packing:
-        return f"{cluster}_{SLURM_JOB_ID}_task{SLURM_PROCID}"
-    return f"{cluster}_{SLURM_JOB_ID}"
+        return f"{cluster}_{job_id}_task{task_index}"
+    return f"{cluster}_{job_id}"

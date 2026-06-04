@@ -11,11 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import hydra
+import omegaconf
 import rich
 import torch
 import tqdm
 import wandb
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from torchvision.datasets import CIFAR10
 
 from cluv.job import JobInfo, current_job_info, get_datasets_path
@@ -38,7 +39,7 @@ def cluv_resolver(attr: str, default: str | None = None) -> str | None:
     return getattr(job, attr)
 
 
-OmegaConf.register_new_resolver("cluv", cluv_resolver)
+omegaconf.OmegaConf.register_new_resolver("cluv", cluv_resolver)
 
 # OmegaConf.register_new_resolver("eval", eval)
 logger = logging.getLogger(__name__)

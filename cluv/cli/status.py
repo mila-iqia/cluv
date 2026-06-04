@@ -72,14 +72,6 @@ def get_default_cluster_status(cluster: str) -> ClusterStatus:
 # All commands are separated by a sentinel so we can split a single SSH output.
 _SEP = "---CLUV-SEP---"
 
-# sacct command to count the current user's recently completed jobs (last 24 h).
-# --allocations skips job-step rows (.batch, .0, …) so we count whole jobs only.
-_SACCT_MY_COMPLETED = (
-    f"sacct -u $(whoami) --noheader --allocations -S yesterday"
-    f" --state=CD --format=JobID 2>/dev/null | wc -l; echo {_SEP}"
-)
-
-
 LIST_GPUS = 'sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu'
 
 # Script for DRAC clusters (partition-stats + diskusage_report, no savail/disk-quota)
@@ -89,7 +81,6 @@ partition-stats 2>/dev/null; echo {_SEP}
 squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
-{_SACCT_MY_COMPLETED}
 """
 
 # Script for the Mila cluster (savail + disk-quota, no partition-stats/diskusage_report)
@@ -103,7 +94,6 @@ savail 2>/dev/null; echo {_SEP}
 disk-quota 2>/dev/null; echo {_SEP}
 squeue -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 squeue -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
-{_SACCT_MY_COMPLETED}
 """
 
 _MILA_CLUSTERS = {"mila"}

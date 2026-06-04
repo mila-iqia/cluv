@@ -17,12 +17,12 @@ import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
-from cluv.config import load_cluv_config
 from cluv.cli.init import DEFAULT_RESULTS_PATH, init
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.cli.status import ClusterStatus, get_real_cluster_status
+from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
 from cluv.cli.sync import sync
+from cluv.config import load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -127,8 +127,8 @@ async def test_login(remote: Remote):
 
 
 @pytest_asyncio.fixture(scope="session")
-async def cluster_status(remote: Remote):
-    return await get_real_cluster_status(remote)
+async def cluster_status(cluster: str) -> ClusterStatus:
+    return await get_cluster_status(cluster)
 
 
 @pytest.mark.slow

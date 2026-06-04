@@ -6,8 +6,16 @@ All functions are free of I/O and can be unit-tested against fixture strings.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
-from cluv.cli.status import StorageStats
+
+@dataclass
+class StorageStats:
+    """Disk usage as (used_gib, quota_gib) for $HOME and $SCRATCH."""
+    home_used: float
+    home_quota: float
+    scratch_used: float
+    scratch_quota: float
 
 # ---------------------------------------------------------------------------
 # partition-stats (DRAC-only)

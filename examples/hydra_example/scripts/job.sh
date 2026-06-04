@@ -8,5 +8,4 @@
 
 # Run the job command passed as an argument when submitting the job ('python main.py' for example)
 echo "Running command: $@"
-# TODO: Hard-coded thing. Replace with some env var of some sort?
-srun --output="$SCRATCH/logs/hydra_example/mila_%j/%j_%t_log.out" uv run "$@"
+srun uv run "$@"

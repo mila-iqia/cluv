@@ -25,6 +25,10 @@ from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
 
+RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
+
+logger = logging.getLogger(__name__)
+
 __all__ = ["submit"]
 
 
@@ -542,6 +546,7 @@ def get_sbatch_command(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    extra_env_vars: dict[str, str] | None = None,
 ) -> str:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
@@ -563,6 +568,9 @@ def get_sbatch_command(
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
+    if extra_env_vars:
+        logger.debug(f"Adding extra environment variables for sbatch command: {extra_env_vars}")
+        env_vars.update(extra_env_vars)
 
     in_job_chunking = False
     in_job_packing = False

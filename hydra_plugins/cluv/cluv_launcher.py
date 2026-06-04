@@ -20,7 +20,7 @@ from submitit.helpers import _default_custom_logging
 
 from cluv.cli.submit import submit
 from cluv.cli.sync import fetch_results
-from cluv.config import load_cluv_config
+from cluv.config import get_cluv_config
 from cluv.job import JobInfo, get_results_path, get_run_id
 from cluv.remote import Remote
 
@@ -168,7 +168,7 @@ class CluvLauncher(Launcher):
         cluster = "mila"  # todo: find the right cluster for these jobs (maybe even multiple?)
         chunking = False
         packing = False
-        config = load_cluv_config()
+        config = get_cluv_config()
         cluster_remote = await Remote.connect(cluster)
 
         # TODO: Remove any 'launcher'-related configs!
@@ -200,14 +200,26 @@ class CluvLauncher(Launcher):
         )
         submitit_jobs: list[RemoteSlurmJob] = []
         jobs: list[JobInfo] = []
+
+        runid_template = get_run_id(
+            cluster=cluster,
+            job_id="%j",
+            task_index="%t",
+            array_job_id=None,
+            doing_job_packing=False,
+            doing_job_chunking=False,
+        )
+
         for override in job_overrides:
-            job_id = await submit(
+            # Use this so the output is where it would be if we used submitit.
+            job = await submit(
                 cluster=cluster,
                 job_script=Path(job_script),
-                sbatch_args=[f"--output={cluster_results_dir}/{cluster}_%j/slurm-%j.out"],
+                sbatch_args=[f"--output={cluster_results_dir}/{runid_template}/%j_%t_log.out"],
                 program_args=["python", "main.py", *override],
             )
-            assert job_id is not None
+            assert job is not None
+            job_id = job.job_id
             assert not chunking and not packing  # jobid is the "run id" for now.
             run_id = get_run_id(
                 cluster=cluster,

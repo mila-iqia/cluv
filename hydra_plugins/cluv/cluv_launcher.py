@@ -3,14 +3,13 @@
 import asyncio
 import collections
 import logging
-import pickle
 import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, ClassVar
 
 import hydra_zen
-from hydra.core.utils import JobReturn
+from hydra.core.utils import JobReturn, JobStatus
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
@@ -261,12 +260,11 @@ class CluvLauncher(Launcher):
                 JobInfo(cluster=cluster, run_id=run_id, results_path=local_job_results_path)
             )
 
+            # TODO: Super ugly. Avoid doing the rsync per-job from RemoteSlurmJob.wait,
+            # do it with cluv instead.
             class PatchedRemoteSlurmJob(RemoteSlurmJob):
                 def wait(self) -> None:
                     SubmititJob.wait(self)
-                    # TODO: Super ugly. Avoid doing the rsync per-job, do it with cluv instead.
-                    # Comment out
-                    # logger.info(f"Copying folder {self.paths.folder} from the remote.")
 
             # Trying to reuse this here that I made for the 'remote slurm executor' package.
             # It allows fetching the status of the job via SSH.
@@ -285,19 +283,30 @@ class CluvLauncher(Launcher):
         await fetch_results(cluster_remote, config)
 
         # Pretend like we made some pickle file.
-        for job_info, job in zip(jobs, submitit_jobs):
-            job.paths.result_pickle.write_bytes(pickle.dumps(f"Job {job_info.run_id} is done!"))
-        # TODO: What is the 'results' in our case? We don't want to pickle/unpickle stuff.
-        # return [
-        #     # job.results()
-        #     JobReturn(
-        #         overrides=overrides,
-        #         working_dir=str(job_info.results_path),
-        #         status=JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED,
+        # for job_info, job in zip(jobs, submitit_jobs):
+        #     job.paths.result_pickle.write_bytes(
+        #         pickle.dumps(
+        #             ("success", f"Job {job_info.run_id} is done!")
+        #             if job.state == "COMPLETED"
+        #             else ("failure", f"Job {job_info.run_id} failed!")
+        #         )
         #     )
-        #     for job_info, job, overrides in zip(jobs, submitit_jobs, job_overrides)
-        # ]
+        # TODO: What is the 'results' in our case? We don't want to pickle/unpickle stuff.
 
+        for job_info, job in zip(jobs, submitit_jobs):
+            out = job_info.results_path / f"{job.job_id}_0_log.out"
+            out = "logs" / out.relative_to(local_results_dir)
+            logger.info(f"Job {job_info.run_id} finished ({job.state}): Output: {out}")
+
+        return [
+            # job.results()
+            JobReturn(
+                overrides=overrides,
+                working_dir=str(job_info.results_path),
+                status=JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED,
+            )
+            for job_info, job, overrides in zip(jobs, submitit_jobs, job_overrides)
+        ]
         # potentially unpack the results of the jobs.
         if packing:
             return sum((job.results() for job in submitit_jobs), [])

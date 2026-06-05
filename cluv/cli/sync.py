@@ -24,9 +24,14 @@ from milatools.utils.parallel_progress import (
 )
 
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.config import find_pyproject, get_config
+from cluv.config import (
+    CluvConfig,
+    find_pyproject,
+    get_cluv_config,
+)
+from cluv.job import get_datasets_path
 from cluv.remote import Remote, get_ssh_options_for_host, run
-from cluv.utils import console, current_cluster
+from cluv.utils import console, console_lock, current_cluster
 
 milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
@@ -41,7 +46,9 @@ __all__ = ["sync", "install_uv", "clone_project", "fetch_results"]
 
 
 async def sync(
-    clusters: list[str] | None = None, uv_sync_args: list[str] | None = None
+    clusters: list[str] | None = None,
+    uv_sync_args: list[str] | None = None,
+    sync_datasets: bool = True,
 ) -> list[Remote]:
     """Synchronizes the current project across clusters.
 
@@ -64,26 +71,24 @@ async def sync(
     - Over SSH, does a git fetch on all remote clusters
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
-    # TODO: Figure out which Slurm cluster we're currently on. Assuming mila for now.
-    this_cluster = current_cluster()
+    here = current_cluster()
+    if clusters and here in clusters:
+        clusters.remove(here)
+
+    config = get_cluv_config()
+
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
-    if not clusters:
-        clusters = get_config().clusters_names
-        if this_cluster and this_cluster in clusters:
-            clusters.remove(this_cluster)
-        connections = await asyncio.gather(
-            *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
-        )
-        remotes = [conn for conn in connections if conn]
-        if not remotes:
-            console.log(
-                "[red]Not currently connected to any Slurm cluster.[/red] "
-                "Use `cluv login` to login and create reusable connections."
-            )
-            return []
-        clusters = [remote.hostname for remote in remotes]
-    else:
+    all_remotes = await get_active_remotes()
+    if clusters:
         remotes = await login(clusters)
+    elif not all_remotes:
+        raise RuntimeError(
+            "[red]Not currently connected to any Slurm cluster.[/red] "
+            "Use `cluv login` to login and create reusable connections."
+        )
+    else:
+        remotes = all_remotes.copy()
+        clusters = [remote.hostname for remote in all_remotes]
 
     if "GITHUB_ACTIONS" not in os.environ:
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
@@ -97,29 +102,62 @@ async def sync(
     task_descriptions: list[str] = []
     for remote in remotes:
         tasks.append(functools.partial(sync_task_function, remote=remote))
-        task_descriptions.append(f"{this_cluster or 'local'} -> {remote.hostname}")
+        task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
+
+    token = console_lock.set(asyncio.Lock())
+    if (
+        sync_datasets
+        and config.data_source  # cluster:path
+        and (source_cluster := config.data_source.split(":", 1)[0]) != here
+    ):
+        _source_host, _, source_path = config.data_source.partition(":")
+        # Fetch the data from the source cluster and copy it to the local datasets_path.
+        source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
+        if not source_remote:
+            raise RuntimeError(
+                f"[red]Unable to sync datasets, need a connection to the source cluster "
+                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
+                f"Use `cluv login {source_cluster}` to create a reusable connection to the "
+                f"source cluster."
+            )
+        local_datasets_path = get_datasets_path()
+        if not local_datasets_path:
+            raise RuntimeError(
+                "`cluv.datasets_path` must be set in the Cluv config section of pyproject.toml to "
+                "sync datasets between clusters."
+            )
+        await _pull_datasets(source_remote, source_path, local_datasets_path)
 
     await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
         task_descriptions=task_descriptions,
         overall_progress_task_description="[green]Syncing project",
     )
+    console_lock.reset(token)
+
     return remotes
 
 
-async def sync_task_function(
-    report_progress: ReportProgressFn,
-    remote: Remote,
-):
+async def get_active_remotes() -> list[Remote]:
+    """Returns the Remotes for each cluster which has an active SSH connection."""
+    clusters = get_cluv_config().clusters_names
+    connections = await asyncio.gather(
+        *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
+    )
+    remotes = [conn for conn in connections if conn]  # keep the active connections.
+    return remotes
+
+
+async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
-    config = get_config()
+    config = get_cluv_config()
 
     def _update_progress(progress: int, status: str, total: int):
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    num_tasks = 4
+    num_tasks = 5 if config.data_source else 4
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
     await install_uv(remote)
@@ -128,10 +166,20 @@ async def sync_task_function(
     await clone_project(remote)
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
-    await remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
+    await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
 
     _update_progress(3, "Fetching results", num_tasks)
-    await fetch_results(remote, config.results_path)
+    await fetch_results(remote, config)
+
+    if config.data_source:
+        _update_progress(4, "Syncing datasets", num_tasks)
+        here = current_cluster()
+        local_dataset_path = (config.get_cluster_config(here) if here else config).datasets_path
+        if not local_dataset_path:
+            raise RuntimeError("data_source is set, so dataset_path should also be set!")
+        local_dataset_path = Path(os.path.expandvars(local_dataset_path))
+
+        await _push_datasets_to_remote(local_dataset_path, remote, config)
 
     _update_progress(num_tasks, "Done", num_tasks)
 
@@ -194,7 +242,9 @@ async def clone_project(remote: Remote):
         git_remote_name = "origin"
     if not git_remote_name:
         git_remote_name = "origin"
-    github_repo_url = subprocess.getoutput(f"git config --get remote.{git_remote_name}.url").strip()
+    github_repo_url = subprocess.getoutput(
+        f"git config --get remote.{git_remote_name}.url"
+    ).strip()
     if not github_repo_url:
         raise RuntimeError(
             f"Could not determine Git remote URL from remote '{git_remote_name}'. "
@@ -205,7 +255,9 @@ async def clone_project(remote: Remote):
     # Or configure the config credential-helper to store first?
 
     # Get the path to the root of the git repository
-    git_root_path = PurePosixPath(subprocess.getoutput("git rev-parse --show-toplevel").strip()).relative_to(Path.home())
+    git_root_path = PurePosixPath(
+        subprocess.getoutput("git rev-parse --show-toplevel").strip()
+    ).relative_to(Path.home())
 
     # If the project isn't cloned yet, clone it.
     _is_cloned_on_cluster = (
@@ -249,70 +301,133 @@ async def clone_project(remote: Remote):
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
-async def fetch_results(remote: Remote, results_path: Path | str):
-    """Fetches results from all remote clusters to the current (mila for now) cluster using rsync."""
-    results_path = Path(results_path)
-    assert not results_path.is_absolute()
-    project_dir = find_pyproject().parent
+async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):
+    """Pull from source to the locally-resolved datasets_path."""
+    # Resolve the env vars on the remote.
+    source_host = source_remote.hostname
+    source_path = await source_remote.get_output(f"echo {source_path}")
+    if "$" in str(local_datasets_path):
+        # Important to stop here if there is $SCRATCH in the datasets_path and it is not set on
+        # this machine.
+        raise RuntimeError(
+            f"Cannot resolve datasets_path '{local_datasets_path}' on this machine: "
+            f"there are unknown environment variables in the path.\n"
+            f"To avoid copying the datasets from {source_remote.hostname} to this machine, run "
+            f"`cluv sync` from {source_remote.hostname}, or use the "
+            f"`--no-sync-datasets` flag when running `uv sync` from this machine."
+        )
 
-    results_path_relative_to_home = (project_dir / results_path).relative_to(Path.home())
-
-    # TODO: to simplify, for now we assume that the results are stored in a directory directly under the project directory.
-    # A directory with the same name (e.g. logs) is created in $SCRATCH.
-    # This could cause some confusion if there are multiple projects with a `logs` directory, since we'd see the logs
-    # from different projects in the same place. To fix this, for now we use `$SCRATCH/logs/{project_name}` as the `logs` dir.
-
-    # Create the results directory if it doesn't exist.
-    # TODO: Create that result directory as a symlink to a dir in $SCRATCH?
-
-    results_path.mkdir(parents=True, exist_ok=True)
-
-    await create_results_dir_with_symlink_to_scratch(remote, results_path)
+    local_datasets_path.mkdir(parents=True, exist_ok=True)
+    console.log(
+        f"[green]Pulling datasets:[/green] {source_host}:{source_path} -> {local_datasets_path}"
+    )
+    source_path = await source_remote.get_output(f"echo {source_path}")
     await run(
-        # Using --full-form flags (not -avz) for better readability.
         (
             "rsync",
             "--archive",
             "--verbose",
             "--compress",
             "--copy-links",
-            f"{remote.hostname}:{results_path_relative_to_home}",
-            str((Path.home() / results_path_relative_to_home).parent),
-            # shlex.split(
-            #     f"rsync --archive --verbose --compress --copy-links "
-            #     f"{remote.hostname}:{results_path_relative_to_home} {(Path.home() / results_path_relative_to_home).parent}"
-            # )
+            "--chmod=u+w",
+            "--exclude=.git",
+            "--exclude=.datalad",
+            f"{source_host}:{source_path}/",
+            f"{local_datasets_path}/",
+        ),
+        _display=True,
+    )
+
+
+async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: CluvConfig):
+    """Push dataset from a local path to the remote cluster's datasets_path."""
+    datasets_path_template = str(config.get_cluster_config(remote.hostname).datasets_path)
+    resolved_path = (
+        await remote.get_output(
+            f"bash -l -c 'echo {datasets_path_template}'", hide=True, display=False
+        )
+    ).strip()
+    await remote.run(f"mkdir -p {resolved_path}", hide=True)
+    await run(
+        (
+            "rsync",
+            "--archive",
+            "--verbose",
+            "--compress",
+            "--copy-links",
+            "--chmod=u+w",
+            "--exclude=.git",
+            "--exclude=.datalad",
+            f"{local_source}/",
+            f"{remote.hostname}:{resolved_path}/",
+        ),
+        _display=True,
+    )
+
+
+async def fetch_results(remote: Remote, config: CluvConfig):
+    """Fetches results from a remote cluster to local using rsync via the results symlink."""
+    results_path_here = Path(os.path.expandvars(config.results_path))
+    results_path_here.mkdir(parents=True, exist_ok=True)
+
+    # Resolve any environment variables in the results_path on the remote before rsync, otherwise
+    # it would try to fetch results from a literal $SCRATCH/... folder, which doesn't exist.
+    results_path_on_cluster = str(config.get_cluster_config(remote.hostname).results_path)
+    results_path_on_cluster = await remote.get_output(
+        f"echo {results_path_on_cluster}", hide=False, display=True
+    )
+    # Optional, but useful if it isn't already set up: Create a symlink at project_root/<symlink_name>
+    # that points to the results_path (usually in $SCRATCH). This works with the example job script
+    # templates, which have `--output=logs/%j/slurm-%j.out` (relative to the project root).
+    await create_results_dir_with_symlink_to_scratch(
+        remote, config.results_symlink, results_path_on_cluster
+    )
+
+    await run(
+        (
+            "rsync",
+            "--archive",
+            "--verbose",
+            "--compress",
+            "--copy-links",
+            "--chmod=u+w",
+            f"{remote.hostname}:{results_path_on_cluster}/",
+            f"{results_path_here}/",
         ),
         warn=True,
         hide=False,
     )
 
 
-async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_path: Path):
-    """On the remote, symlink ~/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>.
+async def create_results_dir_with_symlink_to_scratch(
+    remote: Remote, results_symlink: str, results_path: str
+):
+    """On the remote, create results_path and symlink project/<results_symlink> -> results_path.
 
-    This keeps large outputs out of $HOME and in $SCRATCH where storage limits are more generous.
+    results_path may contain env vars (e.g. $SCRATCH); they are resolved via the remote login shell.
     """
     project_dir = find_pyproject().parent
     project_dir_relative_to_home = project_dir.relative_to(Path.home())
-    symlink_path = project_dir_relative_to_home / results_path
+    symlink_path = project_dir_relative_to_home / results_symlink
 
-    # On some clusters (e.g. Vulcan), $SCRATCH is only defined in login shells.
-    scratch = (
-        await remote.get_output("bash -l -c 'echo $SCRATCH'", hide=True, warn=True, display=False)
+    # Resolve env vars (e.g. $SCRATCH) in results_path using the remote login shell.
+    resolved_path = (
+        await remote.get_output(
+            f"bash --login -c 'echo {results_path}'", hide=True, warn=True, display=False
+        )
     ).strip()
-    if not scratch:
-        logger.warning(f"Remote {remote.hostname} does not have $SCRATCH defined.")
+    if not resolved_path:
+        logger.warning(
+            f"Could not resolve results_path '{results_path}' on {remote.hostname}. Skipping symlink."
+        )
         return
 
-    scratch_dir = f"{scratch}/{results_path}/{project_dir.name}"
-
-    # Create the target directory in $SCRATCH if it doesn't already exist.
-    if not await remote_test("-d", scratch_dir, remote):
-        result = await remote.run(f"mkdir -p {scratch_dir}", warn=True, hide=True)
+    # Create the target directory if it doesn't already exist.
+    if not await remote_test("-d", resolved_path, remote):
+        result = await remote.run(f"mkdir -p {resolved_path}", warn=True, hide=True)
         if result.returncode != 0:
             logger.warning(
-                f"Failed to create {scratch_dir} on {remote.hostname}. "
+                f"Failed to create {resolved_path} on {remote.hostname}. "
                 f"Results will be stored in {symlink_path}, which may fill up $HOME."
             )
             await remote.run(f"mkdir -p {symlink_path}", warn=True, hide=True)
@@ -322,23 +437,23 @@ async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_pat
     if await remote_test("-L", symlink_path, remote):
         return
 
-    # If a real file/directory exists there, warn — the user may be filling up $HOME.
+    # If a real file/directory exists there, warn, the user may be filling up $HOME.
     if await remote_test("-e", symlink_path, remote):
         logger.warning(
-            f"{symlink_path} on {remote.hostname} is a real directory, not a symlink to $SCRATCH. "
-            f"You may end up filling up $HOME. Consider replacing it with a symlink to {scratch_dir}."
+            f"{symlink_path} on {remote.hostname} is a real directory, not a symlink. "
+            f"You may end up filling up $HOME. Consider replacing it with a symlink to {resolved_path}."
         )
         return
 
-    # Nothing at the path yet — create the symlink.
+    # Nothing at the path yet, create the symlink.
     result = await remote.run(
-        f"ln -s -T {scratch_dir} {symlink_path}",
+        f"ln -s -T {resolved_path} {symlink_path}",
         warn=True,
         hide=True,
     )
     if result.returncode != 0:
         logger.warning(
-            f"Failed to create symlink {symlink_path} -> {scratch_dir} on {remote.hostname}."
+            f"Failed to create symlink {symlink_path} -> {resolved_path} on {remote.hostname}."
         )
 
 

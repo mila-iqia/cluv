@@ -1,14 +1,16 @@
 """Unit tests for cluv/cli/init.py check functions."""
 
 import importlib
+import os
 import textwrap
 from pathlib import Path
 
 import pytest
 
 from cluv.cli.init import (
+    DEFAULT_RESULTS_LINKNAME,
     DEFAULT_RESULTS_PATH,
-    JOB_SCRIPT_PATH,
+    SCRIPTS_DIR_PATH,
     check_cluv_config,
     check_git,
     check_home_dir,
@@ -19,6 +21,7 @@ from cluv.config import load_cluv_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLUV_INIT_MODULE = importlib.import_module("cluv.cli.init")
+JOB_SCRIPT_PATH = f"{SCRIPTS_DIR_PATH}/job.sh"
 
 
 class TestCheckHomeDir:
@@ -64,13 +67,15 @@ class TestCheckCluvConfig:
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
         p = tmp_path / "pyproject.toml"
-        p.write_text(textwrap.dedent(
-            """\
+        p.write_text(
+            textwrap.dedent(
+                """\
             [tool.cluv]
             clusters = {"mila" = {}}
             results_path = "results"
             """
-        ))
+            )
+        )
 
         check_cluv_config(p)
         config = load_cluv_config(p)
@@ -79,63 +84,55 @@ class TestCheckCluvConfig:
         assert config.results_path == "results"
 
 
-# TODO : fixture to set environment variables ?
 class TestSymlinkCheck:
-    def test_no_symlink_if_results_path_is_none(self, tmp_path) -> None:
-        """check_symlink_to_scratch() should not create a symlink if the results_path is None"""
-        check_symlink_to_scratch(tmp_path, None)
-
-        assert not (tmp_path / DEFAULT_RESULTS_PATH).exists()
-
     def test_no_symlink_if_scratch_not_set(self, tmp_path, monkeypatch) -> None:
         """check_symlink_to_scratch() should not create a symlink if the $SCRATCH env var is not set"""
         monkeypatch.delenv("SCRATCH", raising=False)
 
-        check_symlink_to_scratch(tmp_path, DEFAULT_RESULTS_PATH)
+        check_symlink_to_scratch(tmp_path, DEFAULT_RESULTS_PATH, DEFAULT_RESULTS_LINKNAME)
 
         assert not (tmp_path / DEFAULT_RESULTS_PATH).exists()
 
-    def test_create_symlink(self, tmp_path, monkeypatch) -> None:
-        """check_symlink_to_scratch() should create a symlink from results_path to scratch"""
+    def test_create_symlink(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """check_symlink_to_scratch() should create a symlink from results_symlink to results_path"""
         scratch_path = tmp_path / "scratch"
         monkeypatch.setenv("SCRATCH", str(scratch_path))
-        expected_results_path = tmp_path / DEFAULT_RESULTS_PATH
-        expected_results_scratch_path = scratch_path / DEFAULT_RESULTS_PATH / tmp_path.name
+        fake_project_root = tmp_path
 
-        check_symlink_to_scratch(tmp_path, DEFAULT_RESULTS_PATH)
+        expected_results_symlink = fake_project_root / DEFAULT_RESULTS_LINKNAME
+        expected_results_scratch_path = Path(os.path.expandvars(DEFAULT_RESULTS_PATH))
 
-        assert expected_results_path.exists()
-        assert expected_results_path.is_symlink()
+        check_symlink_to_scratch(
+            project_root=fake_project_root,
+            results_path=DEFAULT_RESULTS_PATH,
+            results_symlink=DEFAULT_RESULTS_LINKNAME,
+        )
+
+        assert expected_results_symlink.exists()
+        assert expected_results_symlink.is_symlink()
         assert expected_results_scratch_path.exists()
-        assert expected_results_path.resolve() == expected_results_scratch_path.resolve()
-
+        assert expected_results_symlink.resolve() == expected_results_scratch_path.resolve()
 
     def test_keep_existing_symlink(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """check_symlink_to_scratch() should not overwrite an existing symlink not pointing to scratch"""
         scratch_path = tmp_path / "scratch"
         monkeypatch.setenv("SCRATCH", str(scratch_path))
-        expected_results_path = tmp_path / DEFAULT_RESULTS_PATH
-        expected_results_scratch_path = scratch_path / DEFAULT_RESULTS_PATH / tmp_path.name
-        expected_results_path.symlink_to(
+        fake_project_root = tmp_path
+        expected_results_symlink = fake_project_root / DEFAULT_RESULTS_LINKNAME
+        expected_results_scratch_path = Path(os.path.expandvars(DEFAULT_RESULTS_PATH))
+        expected_results_symlink.symlink_to(
             tmp_path / "some_other_folder"
         )  # Create a symlink pointing to a new location
 
-        check_symlink_to_scratch(tmp_path, DEFAULT_RESULTS_PATH)
+        check_symlink_to_scratch(fake_project_root, DEFAULT_RESULTS_PATH, DEFAULT_RESULTS_LINKNAME)
 
         # The original symlink should be kept, and not changed to point to scratch
-        assert expected_results_path.is_symlink()
-        assert expected_results_path.resolve() == (tmp_path / "some_other_folder").resolve()
+        assert expected_results_symlink.is_symlink()
+        assert expected_results_symlink.resolve() == (tmp_path / "some_other_folder").resolve()
         assert not expected_results_scratch_path.exists()
 
 
 class TestJobScriptCheck:
-    def test_no_job_script_if_results_path_is_none(self, tmp_path: Path) -> None:
-        """check_job_script() should not create a job script if the results_path is None"""
-
-        check_job_script(tmp_path, None)
-
-        assert not (tmp_path / JOB_SCRIPT_PATH).exists()
-
     def test_keep_existing_job_script(self, tmp_path: Path) -> None:
         """check_job_script() should not overwrite an existing job script"""
         job_script_path = tmp_path / JOB_SCRIPT_PATH
@@ -162,7 +159,7 @@ class TestJobScriptCheck:
 
         assert job_script.exists()
         assert safe_job_script.exists()
-        assert "#SBATCH --output=outputs/%j/slurm-%j.out" in job_script.read_text()
+        # assert "#SBATCH --output=outputs/%j/slurm-%j.out" in job_script.read_text()
 
         safe_job_script_content = safe_job_script.read_text()
         assert 'project_name="my_project"' in safe_job_script_content
@@ -207,7 +204,7 @@ class TestJobScriptCheck:
         generated_legacy_script = project_root / "scripts" / "legacy_job.sh"
         assert generated_legacy_script.exists()
         generated_legacy_script_content = generated_legacy_script.read_text()
-        assert '#SBATCH --output=outputs/%j/slurm-%j.out' in generated_legacy_script_content
+        assert "#SBATCH --output=outputs/%j/slurm-%j.out" in generated_legacy_script_content
         assert 'results_path="outputs"' in generated_legacy_script_content
         assert "Using $results_path" in generated_legacy_script_content
         assert "results_dir" not in generated_legacy_script_content

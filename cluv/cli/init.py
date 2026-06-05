@@ -10,8 +10,8 @@ from cluv.utils import console
 __all__ = ["init"]
 
 SCRIPTS_DIR_PATH = "scripts"
-JOB_SCRIPT_PATH = f"{SCRIPTS_DIR_PATH}/job.sh"
-DEFAULT_RESULTS_PATH = "logs"
+DEFAULT_RESULTS_PATH = "$SCRATCH/logs/cluv"
+DEFAULT_RESULTS_LINKNAME = "logs"
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # Repository root when running cluv from a source checkout.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -62,7 +62,7 @@ def init() -> None:
     check_job_script(pyproject_path.parent, config.results_path)
 
     # Check if the results path is correctly symlinked to scratch
-    check_symlink_to_scratch(pyproject_path.parent, config.results_path)
+    check_symlink_to_scratch(pyproject_path.parent, config.results_path, config.results_symlink)
 
     # Show what the user can do next after the project setup
     console.print()
@@ -156,17 +156,11 @@ def check_git() -> None:
         raise RuntimeError("Error when checking git remote: ", git_remote.stderr)
 
 
-def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> None:
+def check_symlink_to_scratch(project_root: Path, results_path: str, results_symlink: str) -> None:
     """
     Check if a symlink from the results_path in the project in $HOME to the corresponding path in $SCRATCH already exists. If not, create it.
-    The symlink should be like : $HOME/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>
+    The symlink should be like : $HOME/<project>/<results_symlink> -> $SCRATCH/<results_path>/<project_name>
     """
-    if results_path is None:
-        console.print(
-            "[yellow]⚠️  Warning: Results path is not configured. Skipping symlink creation.[/yellow]"
-        )
-        return
-
     if "SCRATCH" not in os.environ:
         console.print(
             "[yellow]⚠️  Warning: $SCRATCH variable not set. Skipping symlink creation.[/yellow]"
@@ -174,8 +168,8 @@ def check_symlink_to_scratch(project_root: Path, results_path: str | None) -> No
         return
 
     # Generate the expected scratch and symlink path
-    scratch_path = Path(os.path.expandvars(f"$SCRATCH/{results_path}/{project_root.name}"))
-    symlink_path = project_root / results_path
+    scratch_path = Path(os.path.expandvars(results_path))
+    symlink_path = project_root / results_symlink
 
     if symlink_path.is_symlink():
         if symlink_path.resolve() == scratch_path.resolve():
@@ -202,25 +196,22 @@ def check_ssh_hostnames(clusters: list[str]) -> None:
     missing_clusters = set(clusters).difference(ssh_hostnames)
 
     if len(missing_clusters) > 0:
-        console.print(f"[yellow]⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. Try to run [bold]mila init[/bold] to add all available clusters.[/yellow]")
+        console.print(
+            f"[yellow]⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. Try to run [bold]mila init[/bold] to add all available clusters.[/yellow]"
+        )
         for cluster in missing_clusters:
             console.print(f"[yellow]    - {cluster}[/yellow]")
     else:
-        console.print("[green]✅ All clusters in the cluv config are present in your SSH config.[/green]")
+        console.print(
+            "[green]✅ All clusters in the cluv config are present in your SSH config.[/green]"
+        )
 
 
-def check_job_script(project_root: Path, results_path: str | None) -> None:
+def check_job_script(project_root: Path, results_path: str) -> None:
     """
     Check if job script templates exist. If not, create them.
     The scripts are templates for users to submit jobs to Slurm with cluv.
     """
-    if results_path is None:
-        console.print(
-            "[yellow]⚠️  Warning: Results path is not configured. Skipping job template script generation.[/yellow]"
-        )
-        return
-
-    project_name = project_root.name
     try:
         project_root_relative_to_home = project_root.relative_to(Path.home())
         project_root_for_script = f"$HOME/{project_root_relative_to_home}"
@@ -238,7 +229,9 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
     for script_template in script_templates:
         script_path = scripts_dir / script_template.name
         if script_path.exists():
-            console.print(f"[green]✅ Job template script already exists at '{script_path}'.[/green]")
+            console.print(
+                f"[green]✅ Job template script already exists at '{script_path}'.[/green]"
+            )
             continue
         script_content = script_template.read_text()
         script_content = re.sub(
@@ -249,7 +242,7 @@ def check_job_script(project_root: Path, results_path: str | None) -> None:
         )
         script_content = re.sub(
             r"^project_name=.*$",
-            f'project_name="{project_name}"',
+            f'project_name="{project_root.name}"',
             script_content,
             flags=re.MULTILINE,
         )
@@ -300,7 +293,9 @@ def _get_script_templates_path() -> Path:
         if script_templates_path.exists():
             return script_templates_path
     checked_paths_text = ", ".join(str(path) for path in checked_paths)
-    raise RuntimeError(f"Couldn't find the script templates folder. Checked: {checked_paths_text}.")
+    raise RuntimeError(
+        f"Couldn't find the script templates folder. Checked: {checked_paths_text}."
+    )
 
 
 def _get_pyproject_template_path() -> Path:

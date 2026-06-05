@@ -12,6 +12,7 @@ import logging
 import subprocess
 import sys
 import typing
+from pathlib import Path
 from typing import Callable
 
 import rich
@@ -103,6 +104,7 @@ def main(argv: list[str] | None = None) -> None:
             logger.error("No standard error.")
         sys.exit(err.returncode)
 
+
 def add_submit_args(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> argparse.ArgumentParser:
@@ -124,6 +126,7 @@ def add_submit_args(
     submit_parser.add_argument(
         "job_script",
         metavar="<job.sh>",
+        type=Path,
         help="Path to the sbatch job script (relative to project root).",
     )
     submit_parser.add_argument(
@@ -139,18 +142,17 @@ def add_submit_args(
 def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser(
         "status",
-        help="Get the status of available clusters.",
+        help="Get the status of clusters and jobs.",
         formatter_class=rich_argparse.RichHelpFormatter,
     )
     status_parser.add_argument(
-        "clusters",
-        nargs="*",
-        default=None,
-        metavar="<cluster>",
-        help=("Cluster(s) to query. Leave empty to query all clusters with an active connection."),
+        "table",
+        nargs="?",
+        choices=["clusters", "jobs", "all"],
+        default="all",
+        metavar="<table>",
+        help="Which table to display: cluster overview, jobs overview, or both (default: all).",
     )
-    # TODO: Add sub-commands to query the status with respect to different things, GPUs, storage, jobs, etc?
-    # Or just display everything?
     status_parser.set_defaults(func=status)
     return status_parser
 
@@ -173,6 +175,13 @@ def add_sync_args(
             "Leave empty to synchronize with all currently logged in clusters. "
             "Use a comma to separate multiple clusters."
         ),
+    )
+    sync_parser.add_argument(
+        "--sync-datasets",
+        dest="sync_datasets",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Push datasets from data_source to each cluster. Requires data_source in config.",
     )
     # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
     # sync_parser.add_argument(

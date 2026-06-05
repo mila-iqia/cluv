@@ -226,7 +226,7 @@ def _state_text(state: str) -> Text:
         return Text(state, style="yellow")
     elif state in ("COMPLETED", "COMPLETING"):
         return Text(state, style="blue")
-    elif state in ("FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"):
+    elif state in FAILED_JOB_STATES:
         return Text(state, style="red")
     return Text(state or "—", style="dim")
 

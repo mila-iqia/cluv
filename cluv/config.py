@@ -15,6 +15,8 @@ from pydantic.dataclasses import dataclass
 
 from cluv.utils import current_cluster
 
+from cluv.utils import find_pyproject
+
 logger = logging.getLogger(__name__)
 
 
@@ -116,18 +118,6 @@ class CluvConfig(BaseModel):
 def get_cluv_config() -> CluvConfig:
     """Get the cluv config, loading it from the pyproject.toml if needed."""
     return load_cluv_config(find_pyproject())
-
-
-def find_pyproject(start: Path | None = None) -> Path:
-    current = (start or Path.cwd()).resolve()
-    for folder in (current, *current.parents):
-        candidate = folder / "pyproject.toml"
-        if candidate.is_file():
-            return candidate
-    raise RuntimeError(
-        f"Could not find pyproject.toml starting from {current}!\n"
-        f"Cluv can only be used within a project managed with uv."
-    )
 
 
 def has_cluv_config(pyproject_path: Path) -> bool:

@@ -72,28 +72,22 @@ def get_default_cluster_status(cluster: str) -> ClusterStatus:
 # All commands are separated by a sentinel so we can split a single SSH output.
 _SEP = "---CLUV-SEP---"
 
-LIST_GPUS = 'sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu'
+SINFO_LIST_GPUS = 'sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu'
 
 # Script for DRAC clusters (partition-stats + diskusage_report, no savail/disk-quota)
 _REMOTE_SCRIPT_DRAC = f"""
 partition-stats 2>/dev/null; echo {_SEP}
-{LIST_GPUS}; echo {_SEP}
-squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
-squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+{SINFO_LIST_GPUS}; echo {_SEP}
 timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
 """
 
 # Script for the Mila cluster (savail + disk-quota, no partition-stats/diskusage_report)
 _REMOTE_SCRIPT_MILA = f"""
 echo {_SEP}
-sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu; echo {_SEP}
-squeue -u $(whoami) -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
-squeue -u $(whoami) -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
+{SINFO_LIST_GPUS}; echo {_SEP}
 echo {_SEP}
 savail 2>/dev/null; echo {_SEP}
 disk-quota 2>/dev/null; echo {_SEP}
-squeue -h -t R -o "%i" 2>/dev/null | wc -l; echo {_SEP}
-squeue -h -t PD -o "%i" 2>/dev/null | wc -l; echo {_SEP}
 """
 
 _MILA_CLUSTERS = {"mila"}
@@ -191,14 +185,10 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     (
         partition_stats_out,
         sinfo_out,
-        running_out,
-        pending_out,
         diskusage_out,
         savail_out,
         disk_quota_out,
-        all_running_out,
-        all_pending_out,
-    ) = parts[:9]
+    ) = parts[:5]
 
     # --- GPU info: prefer savail (Mila) over sinfo (DRAC) ---
     savail_idle, savail_total, savail_models = parse_savail(savail_out)

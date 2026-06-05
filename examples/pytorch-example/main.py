@@ -73,11 +73,12 @@ def main(args: Args | None = None):
     dataset = CIFAR10(datasets_path, download=False)
     print(dataset)
 
-    # model = torchvision.models.resnet18(num_classes=10)
-    # optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     # TODO: Make this a distributed example, so that it can also run on Tamia and others with
     # full-node job allocations.
+    # model = torchvision.models.resnet18(num_classes=10)
+    # optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
     # from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+    # model = FSDP(model)
     # from torch.nn.parallel import DistributedDataParallel
     # model = DistributedDataParallel(model)
 

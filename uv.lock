@@ -1432,7 +1432,7 @@ wheels = [
 [[package]]
 name = "pytorch-example"
 version = "0.1.0"
-source = { editable = "examples/pytorch-example" }
+source = { virtual = "examples/pytorch-example" }
 dependencies = [
     { name = "cluv" },
     { name = "numpy" },

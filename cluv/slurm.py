@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
 @dataclass
 class StorageStats:
@@ -16,7 +17,6 @@ class StorageStats:
     home_quota: float
     scratch_used: float
     scratch_quota: float
-
 
 # ---------------------------------------------------------------------------
 # partition-stats (DRAC-only)
@@ -177,7 +177,7 @@ def parse_sinfo_nodes(output: str) -> tuple[int, int, list[str]]:
         parts = line.split(None, 2)
         if len(parts) < 3:
             continue
-        _node, state, gres_field = parts[0], parts[1].lower(), parts[2]
+        _, state, gres_field = parts[0], parts[1].lower(), parts[2]
 
         matches = _GRES_RE.findall(gres_field)
         if not matches:

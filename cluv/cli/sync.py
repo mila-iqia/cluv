@@ -99,18 +99,33 @@ async def sync(
         tasks.append(functools.partial(sync_task_function, remote=remote))
         task_descriptions.append(f"{this_cluster or 'local'} -> {remote.hostname}")
 
-    await run_async_tasks_with_progress_bar(
+    per_cluster_new_runs: list[list[Path]] = await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
         task_descriptions=task_descriptions,
         overall_progress_task_description="[green]Syncing project",
     )
+
+    # Display a consolidated summary of all newly-synced runs across all clusters.
+    cwd = Path.cwd()
+    for remote, new_runs in zip(remotes, per_cluster_new_runs):
+        if new_runs:
+            console.print(
+                f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]"
+            )
+            for run_path in sorted(new_runs):
+                try:
+                    display_path = run_path.relative_to(cwd)
+                except ValueError:
+                    display_path = run_path
+                console.print(f"  {display_path}")
+
     return remotes
 
 
 async def sync_task_function(
     report_progress: ReportProgressFn,
     remote: Remote,
-):
+) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_config()
@@ -131,9 +146,10 @@ async def sync_task_function(
     await remote.run(f"bash -l -c 'uv --directory={project_path} sync --quiet'")
 
     _update_progress(3, "Fetching results", num_tasks)
-    await fetch_results(remote, config.results_path)
+    new_runs = await fetch_results(remote, config.results_path)
 
     _update_progress(num_tasks, "Done", num_tasks)
+    return new_runs
 
 
 async def install_uv(remote: Remote):
@@ -249,8 +265,12 @@ async def clone_project(remote: Remote):
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
-async def fetch_results(remote: Remote, results_path: Path | str):
-    """Fetches results from all remote clusters to the current (mila for now) cluster using rsync."""
+async def fetch_results(remote: Remote, results_path: Path | str) -> list[Path]:
+    """Fetches results from all remote clusters to the current (mila for now) cluster using rsync.
+
+    Returns the list of newly-synced run directories (those that did not exist locally before
+    the rsync ran).
+    """
     results_path = Path(results_path)
     assert not results_path.is_absolute()
     project_dir = find_pyproject().parent
@@ -293,13 +313,9 @@ async def fetch_results(remote: Remote, results_path: Path | str):
         hide=False,
     )
 
-    # Display paths of newly-synced runs.
-    if local_results_dir.exists():
-        new_runs = sorted({p for p in local_results_dir.iterdir() if p.is_dir()} - existing_runs)
-        if new_runs:
-            console.print(f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]")
-            for run_path in new_runs:
-                console.print(f"  {run_path}")
+    if not local_results_dir.exists():
+        return []
+    return sorted({p for p in local_results_dir.iterdir() if p.is_dir()} - existing_runs)
 
 
 async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_path: Path):

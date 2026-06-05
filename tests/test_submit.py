@@ -72,11 +72,12 @@ class TestGetSbatchCommand:
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"
+        results_path = "results"
         p.write_text(
             textwrap.dedent(
-                """\
+                f"""\
             [tool.cluv]
-            results_path = "results"
+            results_path = "{results_path}"
             [tool.cluv.env]
             MY_VAR="1"
             [tool.cluv.clusters.mila.env]
@@ -86,18 +87,21 @@ class TestGetSbatchCommand:
             """
             )
         )
-
+        job_script = project_dir / "scripts" / "my_script.sh"
+        job_script.parent.mkdir()
+        job_script.touch(0o755)
         sbatch_command = get_sbatch_command(
             cluster="mila",
-            job_script=Path("scripts/my_script.sh"),
+            job_script=job_script,
             sbatch_args=[],
             program_args=[],
             git_commit="abecdef",
         )
 
-        assert (
-            sbatch_command
-            == "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
+        assert sbatch_command == (
+            "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
+            f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
+            "sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
         )
 
 

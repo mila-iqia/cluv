@@ -90,12 +90,8 @@ disk-quota 2>/dev/null; echo {_SEP}
 _MILA_CLUSTERS = {"mila"}
 
 
-async def fetch_live_job_info(
-    cluster: str, job_ids: list[int]
-) -> dict[int, LiveJobInfo]:
+async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, LiveJobInfo]:
     """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
-    import time
-    start_time = time.time()
     ids_str = ",".join(str(jid) for jid in job_ids)
     cmd = (
         f"sacct -j {ids_str} --format=JobID,State,Start,Submit,Elapsed"
@@ -139,10 +135,9 @@ async def fetch_live_job_info(
         except (ValueError, OverflowError):
             pass
 
-        result[job_id] = LiveJobInfo(cluster=cluster, state=state, elapsed=elapsed_out, wait_time=wait_time)
-
-    print(f"(fetch_live_job_info) Fetched info for {len(result)} jobs on {remote.hostname}/{cluster} in {time.time() - start_time:.1f}s")
-
+        result[job_id] = LiveJobInfo(
+            cluster=cluster, state=state, elapsed=elapsed_out, wait_time=wait_time
+        )
     return result
 
 
@@ -152,9 +147,6 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
     """
-    import time
-    start_time = time.time()
-
     # Use get_remote_without_2fa_prompt directly so we never filter out the
     # "current" cluster the way login() does. A working socket for mila is
     # perfectly usable even when /home/mila is mounted locally.
@@ -208,8 +200,6 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     storage = parse_diskusage_report(diskusage_out)
     if storage.home_quota == 0:
         storage = parse_disk_quota(disk_quota_out)
-
-    print(f"(get_real_cluster_status) Fetched status for {cluster} in {time.time() - start_time:.1f}s")
 
     return ClusterStatus(
         name=cluster,
@@ -280,7 +270,9 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 # ---------------------------------------------------------------------------
 # Main display
 # ---------------------------------------------------------------------------
-def _build_cluster_table(data: list[ClusterStatus], clusters_job_stats: dict[str, JobStats]) -> Table:
+def _build_cluster_table(
+    data: list[ClusterStatus], clusters_job_stats: dict[str, JobStats]
+) -> Table:
     table = Table(
         title="Cluster Overview",
         box=box.ROUNDED,
@@ -298,11 +290,20 @@ def _build_cluster_table(data: list[ClusterStatus], clusters_job_stats: dict[str
 
     for c in data:
         status = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
-        job_stats = clusters_job_stats.get(c.name, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0))
-        my_jobs = Text(f"{job_stats.my_running} / {job_stats.my_pending} / {job_stats.my_cancelled} / {job_stats.my_completed}", style="cyan")  
+        job_stats = clusters_job_stats.get(
+            c.name, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0)
+        )
+        my_jobs = Text(
+            f"{job_stats.my_running} / {job_stats.my_pending} / {job_stats.my_cancelled} / {job_stats.my_completed}",
+            style="cyan",
+        )
 
-        home_bar = _bar(c.storage.home_used, c.storage.home_quota)
-        scratch_bar = _bar(c.storage.scratch_used, c.storage.scratch_quota)
+        home_bar = Text("$HOME     ", style="bold") + _bar(
+            c.storage.home_used, c.storage.home_quota
+        )
+        scratch_bar = Text("$SCRATCH  ", style="bold") + _bar(
+            c.storage.scratch_used, c.storage.scratch_quota
+        )
 
         # Dim the whole row if the cluster is offline
         row_style = "dim" if not c.online else ""
@@ -312,7 +313,7 @@ def _build_cluster_table(data: list[ClusterStatus], clusters_job_stats: dict[str
             Text(c.gpu_model, style="bright_blue"),
             _gpu_bar(c.gpu_idle, c.gpu_total),
             my_jobs,
-            Text("$HOME     ", style="bold") + home_bar + "\n" + Text("$SCRATCH  ", style="bold") + scratch_bar,
+            home_bar + scratch_bar,
             style=row_style,
         )
 
@@ -342,9 +343,7 @@ def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo]) -> Table:
 
         try:
             submitted_str = (
-                datetime.fromisoformat(job.submitted_at)
-                .astimezone()
-                .strftime("%b %d %H:%M")
+                datetime.fromisoformat(job.submitted_at).astimezone().strftime("%b %d %H:%M")
             )
         except (ValueError, TypeError):
             submitted_str = job.submitted_at
@@ -378,7 +377,7 @@ def _build_legend() -> Panel:
         "[red]⚠[/red] disconnected  "
         "[green]▰[/green] free GPU  "
         "[red]▱[/red] busy GPU   "
-        "[green]█[/green]/[yellow]█[/yellow]/[red]█[/red] disk usage (low/med/high)"
+        "[green]▰[/green]/[yellow]▰[/yellow]/[red]▰[/red] disk usage (low/med/high)"
     )
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 
@@ -402,16 +401,25 @@ async def get_job_infos(clusters: list[str]) -> tuple[dict[int, LiveJobInfo], di
     # Count jobs status per cluster
     clusters_job_stats: dict[str, JobStats] = {}
     for info in live_info.values():
-        cluster_stats = clusters_job_stats.setdefault(info.cluster, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0))
+        cluster_stats = clusters_job_stats.setdefault(
+            info.cluster, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0)
+        )
         if info.state == "RUNNING":
             cluster_stats.my_running += 1
         elif info.state == "PENDING":
             cluster_stats.my_pending += 1
-        elif info.state in ("CANCELLED", "FAILED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"):
+        elif info.state in (
+            "CANCELLED",
+            "FAILED",
+            "TIMEOUT",
+            "NODE_FAIL",
+            "OUT_OF_MEMORY",
+            "PREEMPTED",
+        ):
             cluster_stats.my_cancelled += 1
         elif info.state in ("COMPLETED", "COMPLETING"):
             cluster_stats.my_completed += 1
-    
+
     return live_info, clusters_job_stats
 
 
@@ -420,8 +428,6 @@ async def status(table: str) -> None:
     - Gives you an overview of the state of each cluster, and displays an overview of the state of your jobs across the clusters.
     - Displays the number of idle nodes, or the number of idle GPUs, or something similar, for each cluster
     """
-    import time
-    start_time = time.time()
     console = Console()
     clusters = get_config().clusters_names
 
@@ -448,9 +454,7 @@ async def status(table: str) -> None:
         console.print(_build_cluster_table(data, clusters_job_stats))
         console.print(_build_legend())
         console.print()
-    
+
     if table in ("jobs", "all"):
         console.print(_build_cluv_jobs_table(live_info))
         console.print()
-
-    print(f"Total fetch time: {time.time() - start_time:.1f}s")

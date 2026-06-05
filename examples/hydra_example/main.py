@@ -19,9 +19,9 @@ import wandb
 from omegaconf import DictConfig
 from torchvision.datasets import CIFAR10
 
-from cluv.job import JobInfo, current_job_info, get_datasets_path
+from cluv.job import RunInfo, current_job_info, get_datasets_path
 
-job: JobInfo | None = None
+job: RunInfo | None = None
 
 
 def cluv_resolver(attr: str, default: str | None = None) -> str | None:

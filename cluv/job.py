@@ -27,8 +27,8 @@ in_job_array = "SLURM_ARRAY_JOB_ID" in os.environ
 
 
 @dataclass(frozen=True)
-class JobInfo:
-    """Information about a "job"/"run".
+class RunInfo:
+    """Information about a "run".
 
     Note, there may be multiple "runs" inside a single "job", that's why there is a distinction.
     """
@@ -52,6 +52,8 @@ class JobInfo:
 
     results_path: Path
 
+    command: list[str]
+
     @property
     def datasets_path(self) -> Path | None:
         """The path where the datasets are located for this job (based on which cluster it runs on.)"""
@@ -59,6 +61,29 @@ class JobInfo:
         if not cluster_info:
             return None
         return cluster_info.datasets_path
+
+
+@dataclass(frozen=True)
+class JobInfo:
+    """Information about a job, which contains one or more tasks/"runs"."""
+
+    cluster: str
+    job_id: int
+    array_job_id: int | None
+    tasks: list[RunInfo]
+
+    @property
+    def state(self):
+        from remote_slurm_executor.slurm_remote import RemoteSlurmJob
+
+        # Note: This doesn't call sacct too often, there is a caching mechanism in submitit.
+        return RemoteSlurmJob(
+            self.cluster,
+            folder="",
+            job_id=str(self.job_id),
+            tasks=list(range(len(self.tasks))),
+            remote_dir_sync=None,  # type: ignore
+        ).state
 
 
 def get_results_path() -> Path:
@@ -77,7 +102,7 @@ def get_datasets_path() -> Path | None:
     return Path(os.path.expandvars(datasets_path)) if datasets_path else None
 
 
-def current_job_info() -> JobInfo | None:
+def current_job_info() -> RunInfo | None:
     """Returns information about the current job, such as its unique run id and results path.
 
     This is useful to determine where to save checkpoints or results for this job, and to have a unique
@@ -97,7 +122,7 @@ def current_job_info() -> JobInfo | None:
     assert config, "Example must be run on a cluster."
     assert config.results_path
     assert config.datasets_path
-    return JobInfo(
+    return RunInfo(
         run_id=run_id,
         cluster=cluster,
         results_path=config.results_path / run_id,

@@ -9,19 +9,20 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, ClassVar
 
 import hydra_zen
+import rich
+import rich.box
+import rich.table
 from hydra.core.utils import JobReturn, JobStatus
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
 from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-from remote_slurm_executor.utils import LoginNode, RemoteDirSync
-from submitit.core.core import Job as SubmititJob
 from submitit.helpers import _default_custom_logging
 
 from cluv.cli.submit import submit
 from cluv.cli.sync import fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, get_cluv_config
-from cluv.job import JobInfo, get_results_path, get_run_id
+from cluv.job import JobInfo, RunInfo, get_results_path, get_run_id
 from cluv.remote import Remote
 
 logger = logging.getLogger(__name__)
@@ -214,37 +215,7 @@ class CluvLauncher(Launcher):
         )
         local_results_dir = get_results_path()
 
-        class FakeRemoteDirSync(RemoteDirSync):
-            login_node: Remote  # type: ignore
-            remote_dir: PurePosixPath
-            local_dir: Path
-
-            def copy_to_remote(self, local_path: Path) -> PurePosixPath:
-                raise NotImplementedError("Cluv syncs stuff.")
-                return self._get_remote_path(local_path)
-
-            def get_from_remote(
-                self, remote_path: PurePosixPath | None = None, local_path: Path | None = None
-            ) -> Path:
-                # Pretend to sync, but it is done already.
-                assert bool(remote_path) ^ bool(local_path), (
-                    "Exactly one of remote_path or local_path should be passed."
-                )
-                if remote_path:
-                    return self._get_local_path(remote_path)
-                assert local_path
-                remote_path = self._get_remote_path(local_path)
-                return local_path
-
-        remote_dir_sync = FakeRemoteDirSync(
-            LoginNode(cluster),
-            local_dir=local_results_dir,
-            remote_dir=cluster_results_dir,
-        )
-        submitit_jobs: list[RemoteSlurmJob] = []
-        jobs: list[JobInfo] = []
-
-        runid_template = get_run_id(
+        _runid_template = get_run_id(
             cluster=cluster,
             job_id="%j",
             task_index="%t",
@@ -253,17 +224,28 @@ class CluvLauncher(Launcher):
             doing_job_chunking=False,
         )
 
+        sbatch_args = convert_submitit_style_params_to_sbatch_flags(self.params)
+        # Drop the flags we don't want.
+        sbatch_args = [
+            arg
+            for arg in sbatch_args
+            if not arg.startswith(("--output=", "--wckey", "--job-name"))
+        ]
+
+        job_infos: list[JobInfo] = []
         for override in job_overrides:
             # Use this so the output is where it would be if we used submitit.
             job = await submit(
                 cluster=cluster,
                 job_script=Path(self.job_script),
-                sbatch_args=[f"--output={cluster_results_dir}/{runid_template}/%j_%t_log.out"],
+                sbatch_args=[f"--output={cluster_results_dir}/{_runid_template}/%j_%t_log.out"],
                 program_args=["python", "main.py", *override],
                 _skip_sync=True,
             )
             assert job is not None
             job_id = job.job_id
+            # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
+            job = JobInfo(cluster=cluster, job_id=job_id, array_job_id=None, tasks=[])
             assert not self.chunking and not self.packing  # jobid is the "run id" for now.
             run_id = get_run_id(
                 cluster=cluster,
@@ -277,29 +259,15 @@ class CluvLauncher(Launcher):
             _cluster_job_results_path = cluster_results_dir / run_id
             # The path where the remote results will be synced locally.
             local_job_results_path = local_results_dir / run_id
-
-            jobs.append(
-                JobInfo(cluster=self.cluster, run_id=run_id, results_path=local_job_results_path)
+            job.tasks.append(
+                RunInfo(
+                    cluster=cluster,
+                    run_id=run_id,
+                    results_path=local_job_results_path,
+                    command=override,
+                )
             )
-
-            # TODO: Super ugly. Avoid doing the rsync per-job from RemoteSlurmJob.wait,
-            # do it with cluv instead.
-            class PatchedRemoteSlurmJob(RemoteSlurmJob):
-                def wait(self) -> None:
-                    SubmititJob.wait(self)
-
-            # Trying to reuse this here that I made for the 'remote slurm executor' package.
-            # It allows fetching the status of the job via SSH.
-            submitit_job = PatchedRemoteSlurmJob(
-                self.cluster,
-                folder=local_job_results_path,  # not really used for anything, but required by the interface.
-                job_id=str(job_id),
-                tasks=[0],
-                remote_dir_sync=remote_dir_sync,
-            )
-            submitit_jobs.append(submitit_job)
-
-        await monitor_jobs_async(submitit_jobs, poll_interval_seconds=30)
+        await monitor_jobs_async(job_infos, poll_interval_seconds=30)
         # await asyncio.gather(*(job.awaitable().wait(poll_interval=30) for job in submitit_jobs))
 
         await asyncio.gather(
@@ -319,29 +287,47 @@ class CluvLauncher(Launcher):
         #         )
         #     )
         # TODO: What is the 'results' in our case? We don't want to pickle/unpickle stuff.
+        job_results: list[JobReturn] = []
+        table = rich.table.Table(
+            title="Jobs",
+            box=rich.box.ROUNDED,
+            show_lines=True,
+            header_style="bold white on #1a1a2e",
+            title_style="bold cyan",
+            expand=True,
+        )
 
-        for job_info, job in zip(jobs, submitit_jobs):
-            out = job_info.results_path / f"{job.job_id}_0_log.out"
-            out = "logs" / out.relative_to(local_results_dir)
-            logger.info(f"Job {job_info.run_id} finished ({job.state}): Output: {out}")
-
-        return [
-            # job.results()
-            JobReturn(
-                overrides=overrides,
-                working_dir=str(job_info.results_path),
-                status=JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED,
-            )
-            for job_info, job, overrides in zip(jobs, submitit_jobs, job_overrides)
-        ]
-        # potentially unpack the results of the jobs.
-        if self.packing:
-            return sum((job.results() for job in submitit_jobs), [])
-        return [job.results()[0] for job in submitit_jobs]
+        table.add_column("Run id", style="bold", ratio=1)
+        table.add_column("Command", justify="center", ratio=3)
+        table.add_column("State", justify="center", ratio=1)
+        table.add_column("Results path", justify="left", ratio=2)
+        for job in job_infos:
+            for task_id, run in enumerate(job.tasks):
+                out = run.results_path / f"{job.job_id}_0_log.out"
+                out = "logs" / out.relative_to(local_results_dir)
+                logger.info(f"Run {run.run_id} finished ({job.state}): Output: {out}")
+                job_status = JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED
+                job_results.append(
+                    JobReturn(
+                        overrides=run.command,
+                        working_dir=str(run.results_path),
+                        status=job_status,
+                    )
+                )
+                table.add_row(
+                    run.run_id,
+                    " ".join(run.command),
+                    job.state,
+                    str(run.results_path),
+                    # style=row_style
+                    end_section=(task_id == len(job.tasks) - 1),
+                )
+        rich.print(table)
+        return job_results
 
 
 async def monitor_jobs_async(
-    jobs: Sequence[SubmititJob],
+    jobs: Sequence[JobInfo],
     poll_interval_seconds: float = 30,
     test_mode: bool = False,
     custom_logging: Callable = _default_custom_logging,
@@ -371,21 +357,29 @@ async def monitor_jobs_async(
         print("There are no jobs to monitor")
         return
 
-    job_arrays = ", ".join(sorted(set(str(job.job_id).split("_", 1)[0] for job in jobs)))
+    job_arrays = [job.job_id for job in jobs]
+    # job_arrays = ", ".join(sorted(set(str(job.job_id).split("_", 1)[0] for job in jobs)))
     print(f"Monitoring {n_jobs} jobs from job arrays {job_arrays} \n")
+
+    submitit_jobs = [
+        RemoteSlurmJob(
+            job.cluster, folder="", job_id=str(job.job_id), tasks=[0], remote_dir_sync=None
+        )
+        for job in jobs
+    ]
 
     monitoring_start_time = time.time()
     while True:
         if not test_mode:
-            jobs[0].get_info(mode="force")  # Force update once to sync the state
+            submitit_jobs[0].get_info(mode="force")  # Force update once to sync the state
         state_jobs = collections.defaultdict(set)
-        for i, job in enumerate(jobs):
+        for i, job in enumerate(submitit_jobs):
             state_jobs[job.state.upper()].add(i)
             if job.done():
                 state_jobs["DONE"].add(i)
 
         failed_job_indices = sorted(state_jobs["FAILED"])
-        if len(state_jobs["DONE"]) == len(jobs):
+        if len(state_jobs["DONE"]) == len(submitit_jobs):
             print(f"All jobs finished, jobs with indices {failed_job_indices} failed", flush=True)
             break
 
@@ -414,6 +408,7 @@ class CluvLauncherConfig:
 #     zen_dataclass={"cls_name": "CluvLauncherConfig"},
 # )
 
+
 # # Interesting idea: Create the config based on the signature of that function directly.
 # from submitit.slurm.slurm import _make_sbatch_string
 # _AddedArgumentsConf = hydra_zen.builds(
@@ -422,3 +417,16 @@ class CluvLauncherConfig:
 #     hydra_convert="object",
 #     zen_exclude=["command", "folder", "map_count"],
 # )
+def convert_submitit_style_params_to_sbatch_flags(
+    submitit_launcher_params: dict[str, Any],
+) -> list[str]:
+    from submitit.slurm.slurm import _make_sbatch_string
+
+    generated_sbatch_script = _make_sbatch_string(
+        "{command}", folder="{folder}", **submitit_launcher_params
+    )
+    return [
+        line.removeprefix("#SBATCH").strip()
+        for line in generated_sbatch_script.splitlines()
+        if line.startswith("#SBATCH")
+    ]

@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shlex
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from cluv.cache import save_job
 from cluv.cli.sync import sync
-from cluv.config import ClusterConfig, find_pyproject, get_config
+from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote
 from cluv.slurm import FAILED_JOB_STATES
 from cluv.utils import console
 
 RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
+logger = logging.getLogger(__name__)
 
 __all__ = ["submit"]
 
@@ -173,7 +175,7 @@ async def submit_first(
                     return None
 
                 await asyncio.sleep(wait_time)
-                wait_time = min(wait_time*2, 20)
+                wait_time = min(wait_time * 2, 20)
         console.log(
             f"Job {start_job_id} on cluster {start_cluster} is running. Cancelling the other jobs...\n",
             f"Use `ssh {start_cluster} sacct -j {start_job_id}` to view its status.",
@@ -236,25 +238,65 @@ def get_sbatch_command(
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
     """
     # Resolve remote job script path.
-    project_path = find_pyproject().parent.relative_to(Path.home())
-    remote_job_script = f"~/{project_path}/{job_script}"
+    project_root = find_pyproject().parent
+    project_root_relative_to_home = project_root.relative_to(Path.home())
+    if not job_script.is_absolute():
+        job_script = job_script.absolute()
+    remote_job_script = f"~/{project_root_relative_to_home}/{job_script.relative_to(project_root)}"
 
     # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
-    config = get_config()
+    config = get_cluv_config()
+    cluster_config = config.get_cluster_config(cluster)
     env_vars: dict[str, str] = {**config.env}
-    env_vars.update(config.clusters.get(cluster, ClusterConfig()).env)
+    env_vars.update(cluster_config.env)
 
     # Prefix the job name with "cluv-" so it is easy to identify cluv-submitted jobs in sacct.
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
+    in_job_chunking = False
+    in_job_packing = False
+    # SBATCH --output=logs/%j/slurm-%j.out
+    assert not in_job_chunking and not in_job_packing, "todo"
+    # might contain unresolved env vars.
+    cluster_results_path = PurePosixPath(cluster_config.results_path)
+    # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
+
+    if in_job_chunking:
+        assert not in_job_packing, "can't do both right now."
+        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
+    elif in_job_packing:
+        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j_%t/slurm-%j_%t.out"
+    else:
+        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j/slurm-%j.out"
+
+    output_from_cluv = env_vars["SBATCH_OUTPUT"]
+    if (
+        output_from_file := next(
+            (
+                line
+                for line in job_script.read_text().splitlines()
+                if line.strip().startswith("#SBATCH") and "--output" in line
+            ),
+            None,
+        )
+    ) and output_from_file != output_from_cluv:
+        logger.warning(
+            UserWarning(
+                f"[yellow]⚠️ The job script {job_script} contains an SBATCH --output directive "
+                f"which will be overwritten by cluv, to facilitate the syncing of results.\n"
+                f"Consider using cluv in your Python script to decide where to store results. "
+                f"Take a look a the pytorch example of the Cluv repo for more info.[/yellow]"
+            )
+        )
+
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     sbatch_args_str = " ".join(shlex.quote(f) for f in sbatch_args)
     program_args_str = shlex.join(program_args)
 
     return (
-        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={project_path} "
+        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={project_root_relative_to_home} "
         f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
 
@@ -267,9 +309,9 @@ async def sbatch(
     git_commit: str,
 ) -> subprocess.CompletedProcess[str]:
     """Submit the job via sbatch on the remote cluster, and return the job id."""
-    remote_cmd = get_sbatch_command(
-        remote.hostname, job_script, sbatch_args, program_args, git_commit
-    )
+    cluster = remote.hostname
+
+    remote_cmd = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
     return await remote.run(remote_cmd, display=True, warn=True, hide=True)
 
 

@@ -1,3 +1,5 @@
+import asyncio
+import contextvars
 import os
 import socket
 import sys
@@ -7,6 +9,10 @@ import rich.console
 
 # todo: seeing some weird behaviour with stderr, the progress bars repeating themselves, etc.
 console = rich.console.Console(record=True, file=sys.stdout)
+
+console_lock: contextvars.ContextVar[asyncio.Lock | None] = contextvars.ContextVar(
+    "console_lock", default=None
+)
 
 
 def current_cluster() -> str | None:

@@ -13,7 +13,7 @@ from rich.text import Text
 
 from cluv.cache import CachedJob, load_jobs
 from cluv.cli.login import get_remote_without_2fa_prompt
-from cluv.config import get_config
+from cluv.config import get_cluv_config
 from cluv.slurm import (
     FAILED_JOB_STATES,
     StorageStats,
@@ -430,7 +430,7 @@ async def status(table: str) -> None:
     elapsed time, wait time).
     """
     console = Console()
-    clusters = get_config().clusters_names
+    clusters = get_cluv_config().clusters_names
 
     console.print()
     console.rule("[bold cyan]cluv status[/bold cyan]")

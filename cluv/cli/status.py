@@ -37,6 +37,7 @@ class JobStats:
 
 @dataclass
 class LiveJobInfo:
+    cluster: str
     state: str
     elapsed: str | None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
     wait_time: str | None  # formatted time from Submit to Start (or to now if still pending)
@@ -90,7 +91,6 @@ _MILA_CLUSTERS = {"mila"}
 
 
 async def fetch_live_job_info(
-    # remote: Remote, job_ids: list[int]
     cluster: str, job_ids: list[int]
 ) -> dict[int, LiveJobInfo]:
     """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
@@ -139,7 +139,7 @@ async def fetch_live_job_info(
         except (ValueError, OverflowError):
             pass
 
-        result[job_id] = LiveJobInfo(state=state, elapsed=elapsed_out, wait_time=wait_time)
+        result[job_id] = LiveJobInfo(cluster=cluster, state=state, elapsed=elapsed_out, wait_time=wait_time)
 
     print(f"(fetch_live_job_info) Fetched info for {len(result)} jobs on {remote.hostname}/{cluster} in {time.time() - start_time:.1f}s")
 
@@ -251,7 +251,7 @@ def _bar(used: float, total: float, width: int = 10) -> Text:
     """Return a coloured block-character progress bar."""
     ratio = used / total if total else 0
     filled = int(ratio * width)
-    bar_str = "█" * filled + "░" * (width - filled)
+    bar_str = "▰" * filled + "▱" * (width - filled)
     pct = ratio * 100
     if pct < 60:
         colour = "green"
@@ -280,7 +280,7 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 # ---------------------------------------------------------------------------
 # Main display
 # ---------------------------------------------------------------------------
-def _build_cluster_table(data: list[ClusterStatus]) -> Table:
+def _build_cluster_table(data: list[ClusterStatus], clusters_job_stats: dict[str, JobStats]) -> Table:
     table = Table(
         title="Cluster Overview",
         box=box.ROUNDED,
@@ -383,6 +383,38 @@ def _build_legend() -> Panel:
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 
 
+async def get_job_infos(clusters: list[str]) -> tuple[dict[int, LiveJobInfo], dict[str, JobStats]]:
+    # Load cached jobs
+    cached_jobs = load_jobs()
+
+    # Regroup jobs by cluster
+    cluster_jobs: dict[str, list[int]] = {}
+    for job in cached_jobs:
+        if job.cluster in clusters:
+            cluster_jobs.setdefault(job.cluster, []).append(job.job_id)
+
+    # Fetch live job info for all cached jobs
+    results = await asyncio.gather(
+        *(fetch_live_job_info(c, ids) for c, ids in cluster_jobs.items())
+    )
+    live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
+
+    # Count jobs status per cluster
+    clusters_job_stats: dict[str, JobStats] = {}
+    for info in live_info.values():
+        cluster_stats = clusters_job_stats.setdefault(info.cluster, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0))
+        if info.state == "RUNNING":
+            cluster_stats.my_running += 1
+        elif info.state == "PENDING":
+            cluster_stats.my_pending += 1
+        elif info.state in ("CANCELLED", "FAILED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"):
+            cluster_stats.my_cancelled += 1
+        elif info.state in ("COMPLETED", "COMPLETING"):
+            cluster_stats.my_completed += 1
+    
+    return live_info, clusters_job_stats
+
+
 async def status(table: str) -> None:
     """Gets the status of available clusters.
     - Gives you an overview of the state of each cluster, and displays an overview of the state of your jobs across the clusters.
@@ -393,42 +425,30 @@ async def status(table: str) -> None:
     console = Console()
     clusters = get_config().clusters_names
 
-    # Query clusters in parallel
-    with console.status("Fetching clusters status..."):
-        data: list[ClusterStatus] = [
-            d for d in await asyncio.gather(*(get_cluster_status(c) for c in clusters))
-        ]
-
-    # Show a tip message if all clusters are offline, which likely means the user hasn't logged in yet (no control sockets).
-    if all(not c.online for c in data):
-        console.print(
-            "[yellow]No active connections to any clusters found. Run [bold]cluv login[/bold] first.[/yellow]"
-        )
-
     console.print()
     console.rule("[bold cyan]cluv status[/bold cyan]")
     console.print()
 
-    # Fetch live job info for all cached jobs that belong to reachable clusters.
-    live_info: dict[int, LiveJobInfo] = {}
-    cached_jobs = load_jobs()
-    cluster_jobs: dict[str, list[int]] = {}
-    for job in cached_jobs:
-        if job.cluster in clusters:
-            cluster_jobs.setdefault(job.cluster, []).append(job.job_id)
-
-    results = await asyncio.gather(
-            *(
-                fetch_live_job_info(c, ids)
-                for c, ids in cluster_jobs.items()
-            )
-    )
-    live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
+    with console.status("Fetching jobs status..."):
+        live_info, clusters_job_stats = await get_job_infos(clusters)
 
     if table in ("clusters", "all"):
-        console.print(_build_cluster_table(data))
+        # Query clusters in parallel
+        with console.status("Fetching clusters status..."):
+            data: list[ClusterStatus] = [
+                d for d in await asyncio.gather(*(get_cluster_status(c) for c in clusters))
+            ]
+
+        # Show a tip message if all clusters are offline, which likely means the user hasn't logged in yet (no control sockets).
+        if all(not c.online for c in data):
+            console.print(
+                "[yellow]No active connections to any clusters found. Run [bold]cluv login[/bold] first.[/yellow]"
+            )
+
+        console.print(_build_cluster_table(data, clusters_job_stats))
         console.print(_build_legend())
         console.print()
+    
     if table in ("jobs", "all"):
         console.print(_build_cluv_jobs_table(live_info))
         console.print()

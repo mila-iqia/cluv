@@ -585,12 +585,10 @@ def get_sbatch_command(
 
     in_job_chunking = False
     in_job_packing = False
-    # SBATCH --output=logs/%j/slurm-%j.out
     assert not in_job_chunking and not in_job_packing, "todo"
     # might contain unresolved env vars.
     cluster_results_path = PurePosixPath(cluster_config.results_path)
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
-
     if in_job_chunking:
         assert not in_job_packing, "can't do both right now."
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"

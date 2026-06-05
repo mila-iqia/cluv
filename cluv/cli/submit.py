@@ -234,8 +234,11 @@ def get_sbatch_command(
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
     """
     # Resolve remote job script path.
-    project_path = find_pyproject().parent.relative_to(Path.home())
-    remote_job_script = f"~/{project_path}/{job_script}"
+    project_root = find_pyproject().parent
+    project_root_relative_to_home = project_root.relative_to(Path.home())
+    if not job_script.is_absolute():
+        job_script = job_script.absolute()
+    remote_job_script = f"~/{project_root_relative_to_home}/{job_script.relative_to(project_root)}"
 
     # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
     config = get_cluv_config()
@@ -289,7 +292,7 @@ def get_sbatch_command(
     program_args_str = shlex.join(program_args)
 
     return (
-        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={project_path} "
+        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={project_root_relative_to_home} "
         f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
 

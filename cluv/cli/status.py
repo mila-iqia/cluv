@@ -267,6 +267,7 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 def _build_cluster_table(
     data: list[ClusterStatus], clusters_job_stats: dict[str, JobStats]
 ) -> Table:
+    """Build the cluster overview table with live status info and job counts."""
     table = Table(
         title="Cluster Overview",
         box=box.ROUNDED,
@@ -318,6 +319,7 @@ def _build_cluv_jobs_table(
         cached_jobs: list[CachedJob],
         live_info: dict[int, LiveJobInfo]
 ) -> Table:
+    """Build the jobs overview table with one row per cached job, enriched with live status info."""
     table = Table(
         title="Jobs Overview",
         box=box.SIMPLE_HEAVY,
@@ -381,6 +383,7 @@ async def get_job_infos(
     cached_jobs: list[CachedJob],
     clusters: list[str]
 ) -> tuple[dict[int, LiveJobInfo], dict[str, JobStats]]:
+    """Fetch live job info for all cached jobs, and count job statuses per cluster."""
     # Regroup jobs by cluster
     cluster_jobs: dict[str, list[int]] = {}
     for job in cached_jobs:

@@ -244,8 +244,7 @@ class CluvLauncher(Launcher):
             )
             assert job is not None
             job_id = job.job_id
-            # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
-            job = JobInfo(cluster=cluster, job_id=job_id, array_job_id=None, tasks=[])
+
             assert not self.chunking and not self.packing  # jobid is the "run id" for now.
             run_id = get_run_id(
                 cluster=cluster,
@@ -259,14 +258,23 @@ class CluvLauncher(Launcher):
             _cluster_job_results_path = cluster_results_dir / run_id
             # The path where the remote results will be synced locally.
             local_job_results_path = local_results_dir / run_id
-            job.tasks.append(
-                RunInfo(
-                    cluster=cluster,
-                    run_id=run_id,
-                    results_path=local_job_results_path,
-                    command=override,
-                )
+
+            # TODO: Unclear if we should just use Job or if we actually need something like JobInfo.
+            job = JobInfo(
+                cluster=cluster,
+                job_id=job_id,
+                array_job_id=None,
+                tasks=[
+                    RunInfo(
+                        cluster=cluster,
+                        run_id=run_id,
+                        results_path=local_job_results_path,
+                        command=override,
+                    )
+                ],
             )
+            job_infos.append(job)
+
         await monitor_jobs_async(job_infos, poll_interval_seconds=30)
         # await asyncio.gather(*(job.awaitable().wait(poll_interval=30) for job in submitit_jobs))
 
@@ -363,7 +371,11 @@ async def monitor_jobs_async(
 
     submitit_jobs = [
         RemoteSlurmJob(
-            job.cluster, folder="", job_id=str(job.job_id), tasks=[0], remote_dir_sync=None
+            job.cluster,
+            folder="",
+            job_id=str(job.job_id),
+            tasks=list(range(len(job.tasks))),
+            remote_dir_sync=None,
         )
         for job in jobs
     ]

@@ -19,8 +19,8 @@ from submitit.core.core import Job as SubmititJob
 from submitit.helpers import _default_custom_logging
 
 from cluv.cli.submit import submit
-from cluv.cli.sync import fetch_results
-from cluv.config import get_cluv_config
+from cluv.cli.sync import fetch_results, get_active_remotes
+from cluv.config import CluvConfig, get_cluv_config
 from cluv.job import JobInfo, get_results_path, get_run_id
 from cluv.remote import Remote
 
@@ -139,6 +139,12 @@ class CluvLauncher(Launcher):
                 v = OmegaConf.to_container(v, resolve=True)
             self.params[k] = v
 
+        self.synced_clusters: set[str] = set()
+        self.cluster_remotes: dict[str, Remote] = {}
+        self.cluv_config: CluvConfig | None = None
+
+        self._loop = asyncio.new_event_loop()
+
     def setup(
         self,
         *,
@@ -149,17 +155,25 @@ class CluvLauncher(Launcher):
         self.hydra_context = hydra_context
         self.task_function = task_function
         self.config = config
-        # raise NotImplementedError(
-        #     f"This launcher is not implemented yet. ({hydra_context=}, {task_function=}, {config=})"
-        # )
+        logger.debug(f"{hydra_context=}, {task_function=}, {config=}")
+        self.cluv_config = get_cluv_config()
+        self._loop.run_until_complete(self.setup_async())
+
+    async def setup_async(self) -> None:
+        # Perhaps we could connect to all clusters here?
+        if self.cluster == "first":
+            remotes = await get_active_remotes()
+        else:
+            remotes = [await Remote.connect(self.cluster)]
+        self.cluster_remotes = {remote.hostname: remote for remote in remotes}
+
+    def __del__(self):
+        self._loop.close()
 
     def launch(
         self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
     ) -> Sequence[JobReturn]:
-        return asyncio.run(self.launch_jobs(job_overrides, initial_job_idx))
-        raise NotImplementedError(
-            f"This launcher is not implemented yet. ({job_overrides=}, {initial_job_idx=})"
-        )
+        return self._loop.run_until_complete(self.launch_jobs(job_overrides, initial_job_idx))
 
     async def launch_jobs(
         self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
@@ -168,10 +182,12 @@ class CluvLauncher(Launcher):
         cluster = "mila"  # todo: find the right cluster for these jobs (maybe even multiple?)
         chunking = False
         packing = False
-        config = get_cluv_config()
         cluster_remote = await Remote.connect(cluster)
 
-        # TODO: Remove any 'launcher'-related configs!
+        assert self.cluv_config
+        assert self.cluster_remotes
+
+        # TODO: Remove any 'hydra/launcher'-related configs!
         assert all("launcher=cluv" in override for override in job_overrides), (
             "TODO: remove the launcher-related overrides from all the commands!"
         )
@@ -187,7 +203,9 @@ class CluvLauncher(Launcher):
         # self.params["ntasks_per_gpu"] = 5
         # pack the jobs based on their VRAM requirements and the packing factor
         # job_specs = job_packing(job_overrides, packing_factor)
-        cluster_results_dir = config.get_cluster_config(cluster).results_path
+        cluster_results_dir = self.cluv_config.get_cluster_config(cluster).results_path
+        assert self.cluster != "first", "todo"
+        cluster_remote = self.cluster_remotes[self.cluster]
         cluster_results_dir = PurePosixPath(
             await cluster_remote.get_output(f"echo {cluster_results_dir}")
         )
@@ -280,7 +298,12 @@ class CluvLauncher(Launcher):
         await monitor_jobs_async(submitit_jobs, poll_interval_seconds=30)
         # await asyncio.gather(*(job.awaitable().wait(poll_interval=30) for job in submitit_jobs))
 
-        await fetch_results(cluster_remote, config)
+        await asyncio.gather(
+            *(
+                fetch_results(cluster_remote, self.cluv_config)
+                for cluster_remote in self.cluster_remotes.values()
+            )
+        )
 
         # Pretend like we made some pickle file.
         # for job_info, job in zip(jobs, submitit_jobs):

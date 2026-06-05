@@ -197,7 +197,7 @@ class CluvLauncher(Launcher):
             new_override = [
                 override
                 for override in overrides
-                if not override.startswith(("hydra/launcher", "hydra.launcher"))
+                if not override.startswith(("hydra/launcher", "hydra.launcher", "launcher"))
             ]
             new_job_overrides.append(new_override)
         job_overrides = new_job_overrides
@@ -305,14 +305,18 @@ class CluvLauncher(Launcher):
             expand=True,
         )
 
-        table.add_column("Run id", style="bold", ratio=1)
-        table.add_column("Command", justify="center", ratio=3)
-        table.add_column("State", justify="center", ratio=1)
-        table.add_column("Results path", justify="left", ratio=2)
+        table.add_column("Run id", style="bold")
+        table.add_column("Command", justify="right")
+        table.add_column("State", justify="right")
+        table.add_column("Results path", justify="left")
         for job in job_infos:
             for task_id, run in enumerate(job.tasks):
-                out = run.results_path / f"{job.job_id}_0_log.out"
-                out = "logs" / out.relative_to(local_results_dir)
+                out = next(run.results_path.glob("*.out"), run.results_path)
+                try:
+                    out = out.relative_to(Path.cwd())
+                except ValueError:
+                    pass
+
                 logger.info(f"Run {run.run_id} finished ({job.state}): Output: {out}")
                 job_status = JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED
                 job_results.append(

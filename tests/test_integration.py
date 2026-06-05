@@ -207,6 +207,7 @@ async def test_submit(remote: Remote, fake_scratch: Path):
         sbatch_args=["--time=00:00:30"],
         program_args=["python", "--version"],
     )
+    cluster = remote.hostname
     assert isinstance(job_id, int)
     try:
         job_name = await remote.get_output(
@@ -257,7 +258,7 @@ async def test_submit(remote: Remote, fake_scratch: Path):
 
         output_file = (
             Path(os.path.expandvars(get_cluv_config().results_path))
-            / str(job_id)
+            / f"{cluster}_{job_id}"
             / f"slurm-{job_id}.out"
         )
         assert output_file.is_file(), (

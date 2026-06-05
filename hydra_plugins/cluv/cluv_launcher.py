@@ -312,7 +312,7 @@ class CluvLauncher(Launcher):
                     (
                         find_pyproject().parent
                         / Path(cluv_config.results_symlink)
-                        / run.results_path
+                        / run.results_path.relative_to(local_results_dir)
                     ).glob("*.out"),
                     run.results_path,
                 )

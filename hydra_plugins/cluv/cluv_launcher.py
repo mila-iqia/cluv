@@ -19,7 +19,7 @@ from submitit.core.core import Job as SubmititJob
 from submitit.helpers import _default_custom_logging
 
 from cluv.cli.submit import submit
-from cluv.cli.sync import fetch_results, get_active_remotes
+from cluv.cli.sync import fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, get_cluv_config
 from cluv.job import JobInfo, get_results_path, get_run_id
 from cluv.remote import Remote
@@ -166,6 +166,7 @@ class CluvLauncher(Launcher):
         else:
             remotes = [await Remote.connect(self.cluster)]
         self.cluster_remotes = {remote.hostname: remote for remote in remotes}
+        await sync([self.cluster] if self.cluster != "first" else None)
 
     def __del__(self):
         self._loop.close()
@@ -257,6 +258,7 @@ class CluvLauncher(Launcher):
                 job_script=Path(job_script),
                 sbatch_args=[f"--output={cluster_results_dir}/{runid_template}/%j_%t_log.out"],
                 program_args=["python", "main.py", *override],
+                _skip_sync=True,
             )
             assert job is not None
             job_id = job.job_id

@@ -16,8 +16,7 @@ import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, save_job
-
-from cluv.cli.sync import sync
+from cluv.cli.sync import get_active_remotes, sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.slurm import FAILED_JOB_STATES, clean_job_state
@@ -74,6 +73,7 @@ async def submit(
     sbatch_args: list[str],
     program_args: list[str],
     autocommit: bool = False,
+    _skip_sync: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
 
@@ -92,6 +92,7 @@ async def submit(
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
+        _skip_sync: If True, skip the synchronization step before submitting.
 
     Returns:
         The job ID of the submitted job or None if the sbatch command fails.
@@ -107,6 +108,12 @@ async def submit(
     )
     ```
     """
+    if job_script is None:
+        job_script = get_cluv_config().get_cluster_config(cluster).job_script_path
+        if job_script is None:
+            raise ValueError(
+                f"No job script was provided and no job_script_path is configured for {cluster=}!"
+            )
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(
         autocommit=autocommit,
@@ -163,12 +170,16 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    _skip_sync: bool = False,
 ) -> Job | None:
     """Submit the job on all clusters, and wait until one of them starts.
     Once one starts, cancel the others.
     """
     # Sync with all clusters with an existing connections.
-    remotes = await sync()
+    if not _skip_sync:
+        remotes = await sync()
+    else:
+        remotes = await get_active_remotes()
     cluster_to_remote: dict[str, Remote | None] = {remote.hostname: remote for remote in remotes}
     this_cluster = current_cluster()
     if this_cluster is not None:

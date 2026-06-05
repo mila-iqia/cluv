@@ -128,12 +128,26 @@ async def sync(
             )
         await _pull_datasets(source_remote, source_path, local_datasets_path)
 
-    await run_async_tasks_with_progress_bar(
+    per_cluster_new_runs: list[list[Path]] = await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
         task_descriptions=task_descriptions,
         overall_progress_task_description="[green]Syncing project",
     )
     console_lock.reset(token)
+
+    # Display a consolidated summary of all newly-synced runs across all clusters.
+    cwd = Path.cwd()
+    for remote, new_runs in zip(remotes, per_cluster_new_runs):
+        if new_runs:
+            console.print(
+                f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]"
+            )
+            for run_path in sorted(new_runs):
+                try:
+                    display_path = run_path.relative_to(cwd)
+                except ValueError:
+                    display_path = run_path
+                console.print(f"  {display_path}")
 
     return remotes
 
@@ -148,7 +162,7 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
-async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
+async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_cluv_config()
@@ -169,7 +183,7 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
     await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
 
     _update_progress(3, "Fetching results", num_tasks)
-    await fetch_results(remote, config)
+    new_runs = await fetch_results(remote, config)
 
     if config.data_source:
         _update_progress(4, "Syncing datasets", num_tasks)
@@ -182,6 +196,7 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
         await _push_datasets_to_remote(local_dataset_path, remote, config)
 
     _update_progress(num_tasks, "Done", num_tasks)
+    return new_runs
 
 
 async def install_uv(remote: Remote):
@@ -365,10 +380,19 @@ async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: C
     )
 
 
-async def fetch_results(remote: Remote, config: CluvConfig):
-    """Fetches results from a remote cluster to local using rsync via the results symlink."""
+async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
+    """Fetches results from a remote cluster to local using rsync via the results symlink.
+
+    Returns the list of newly-synced run directories (those that did not exist locally before
+    the rsync ran).
+    """
     results_path_here = Path(os.path.expandvars(config.results_path))
     results_path_here.mkdir(parents=True, exist_ok=True)
+
+    # Snapshot the runs already present locally before syncing.
+    existing_runs: set[Path] = (
+        {p for p in results_path_here.iterdir() if p.is_dir()} if results_path_here.exists() else set()
+    )
 
     # Resolve any environment variables in the results_path on the remote before rsync, otherwise
     # it would try to fetch results from a literal $SCRATCH/... folder, which doesn't exist.
@@ -397,6 +421,10 @@ async def fetch_results(remote: Remote, config: CluvConfig):
         warn=True,
         hide=False,
     )
+
+    if not results_path_here.exists():
+        return []
+    return sorted({p for p in results_path_here.iterdir() if p.is_dir()} - existing_runs)
 
 
 async def create_results_dir_with_symlink_to_scratch(

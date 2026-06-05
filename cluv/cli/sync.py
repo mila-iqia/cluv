@@ -256,11 +256,17 @@ async def fetch_results(remote: Remote, results_path: Path | str):
     project_dir = find_pyproject().parent
 
     results_path_relative_to_home = (project_dir / results_path).relative_to(Path.home())
+    local_results_dir = Path.home() / results_path_relative_to_home
 
     # TODO: to simplify, for now we assume that the results are stored in a directory directly under the project directory.
     # A directory with the same name (e.g. logs) is created in $SCRATCH.
     # This could cause some confusion if there are multiple projects with a `logs` directory, since we'd see the logs
     # from different projects in the same place. To fix this, for now we use `$SCRATCH/logs/{project_name}` as the `logs` dir.
+
+    # Snapshot the runs already present locally before syncing.
+    existing_runs: set[Path] = (
+        {p for p in local_results_dir.iterdir() if p.is_dir()} if local_results_dir.exists() else set()
+    )
 
     # Create the results directory if it doesn't exist.
     # TODO: Create that result directory as a symlink to a dir in $SCRATCH?
@@ -286,6 +292,14 @@ async def fetch_results(remote: Remote, results_path: Path | str):
         warn=True,
         hide=False,
     )
+
+    # Display paths of newly-synced runs.
+    if local_results_dir.exists():
+        new_runs = sorted({p for p in local_results_dir.iterdir() if p.is_dir()} - existing_runs)
+        if new_runs:
+            console.print(f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]")
+            for run_path in new_runs:
+                console.print(f"  {run_path}")
 
 
 async def create_results_dir_with_symlink_to_scratch(remote: Remote, results_path: Path):

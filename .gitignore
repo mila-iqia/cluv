@@ -14,3 +14,5 @@ wheels/
 .claude
 .vscode
 logs/
+# created by `uv run mkdocs serve` and such.
+site/

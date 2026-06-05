@@ -11,7 +11,7 @@ from rich.panel import Panel
 
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.cli.sync import sync
-from cluv.config import find_pyproject, get_config
+from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote
 from cluv.utils import console, current_cluster
 
@@ -57,7 +57,7 @@ async def _get_cluster_remotes(clusters: list[str] | None) -> list[Remote]:
     # Actually Remote constructor doesn't start if _start_control_socket=False
     this_cluster = current_cluster()
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
-    clusters = get_config().clusters_names
+    clusters = get_cluv_config().clusters_names
     if this_cluster and this_cluster in clusters:
         clusters.remove(this_cluster)
     connections = await asyncio.gather(

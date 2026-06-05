@@ -1,5 +1,4 @@
 #!/bin/bash
-#SBATCH --output=logs/%j/slurm-%j.out
 #SBATCH --gres=gpu:1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2

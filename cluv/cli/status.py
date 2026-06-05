@@ -421,8 +421,8 @@ async def status(table: str) -> None:
         table: Which table(s) to show: "clusters", "jobs", or "all".
 
     Returns:
-        None    
-    
+        None
+
     The "clusters" table shows live info about each cluster's GPU availability and storage usage,
     along with counts of the user's running/pending/failed/completed jobs on that cluster.
 

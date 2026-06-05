@@ -125,7 +125,7 @@ env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.nibi]
-env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="def-normandf", SBATCH_TIMELIMIT="0:05:00", SBATCH_MEM_PER_NODE="6G"}
+env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.trillium]
 env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}

@@ -29,10 +29,6 @@ __all__ = ["status"]
 
 @dataclass
 class JobStats:
-    running: int
-    pending: int
-
-    # subset of the above that belong to the current user
     my_running: int
     my_pending: int
     my_cancelled: int
@@ -53,7 +49,6 @@ class ClusterStatus:
     gpu_idle: int
     gpu_total: int
     gpu_model: str
-    jobs: JobStats
     storage: StorageStats
 
 
@@ -64,7 +59,6 @@ def get_default_cluster_status(cluster: str) -> ClusterStatus:
         gpu_idle=0,
         gpu_total=0,
         gpu_model="?",
-        jobs=JobStats(running=0, pending=0, my_running=0, my_cancelled=0, my_completed=0, my_pending=0),
         storage=StorageStats(home_used=0, home_quota=0, scratch_used=0, scratch_quota=0),
     )
 
@@ -198,29 +192,16 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
         gpu_idle, gpu_total, models = parse_sinfo_nodes(sinfo_out)
     gpu_model = ", ".join(models) if models else "?"
 
-    # --- Job counts ---
+    # --- Partition stats can give us node counts which are a useful
+    #     fallback when GPU counts aren't available --
     has_partition_stats = bool(partition_stats_out.strip())
     if has_partition_stats:
         ps = parse_partition_stats(partition_stats_out)
-        jobs_running = ps["jobs_running"]
-        jobs_pending = ps["jobs_pending"]
         # If neither savail nor sinfo gave us GPU counts, fall back to
         # partition-stats node counts (less precise but better than nothing).
         if gpu_total == 0:
             gpu_idle = ps["gpu_idle_nodes"]
             gpu_total = ps["gpu_total_nodes"]
-    else:
-        try:
-            jobs_running = int(all_running_out.strip())
-            jobs_pending = int(all_pending_out.strip())
-        except ValueError:
-            jobs_running = jobs_pending = 0
-
-    try:
-        my_running = int(running_out.strip())
-        my_pending = int(pending_out.strip())
-    except ValueError:
-        my_running = my_pending = 0
 
     # --- Storage: prefer diskusage_report (DRAC, per-user quotas);
     #     fall back to disk-quota (Mila: lfs for $HOME, beegfs for $SCRATCH) ---
@@ -236,14 +217,6 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
         gpu_idle=gpu_idle,
         gpu_total=gpu_total,
         gpu_model=gpu_model,
-        jobs=JobStats(
-            running=jobs_running,
-            pending=jobs_pending,
-            my_running=my_running,
-            my_pending=my_pending,
-            my_cancelled=0,
-            my_completed=0,
-        ),
         storage=storage,
     )
 

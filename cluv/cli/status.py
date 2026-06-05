@@ -11,7 +11,7 @@ from rich.table import Table
 from rich.text import Text
 
 from cluv.cli.login import get_remote_without_2fa_prompt
-from cluv.config import get_config
+from cluv.config import get_cluv_config
 from cluv.slurm import (
     StorageStats,
     parse_disk_quota,
@@ -352,7 +352,7 @@ async def status(table: str) -> None:
     - Displays the number of idle nodes, or the number of idle GPUs, or something similar, for each cluster
     """
     console = Console()
-    clusters = get_config().clusters_names
+    clusters = get_cluv_config().clusters_names
 
     # Query clusters in parallel
     with console.status("Fetching clusters status..."):

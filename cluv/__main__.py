@@ -12,6 +12,7 @@ import logging
 import subprocess
 import sys
 import typing
+from pathlib import Path
 from typing import Callable
 
 import rich
@@ -103,6 +104,7 @@ def main(argv: list[str] | None = None) -> None:
             logger.error("No standard error.")
         sys.exit(err.returncode)
 
+
 def add_submit_args(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> argparse.ArgumentParser:
@@ -124,6 +126,7 @@ def add_submit_args(
     submit_parser.add_argument(
         "job_script",
         metavar="<job.sh>",
+        type=Path,
         help="Path to the sbatch job script (relative to project root).",
     )
     submit_parser.add_argument(
@@ -172,6 +175,13 @@ def add_sync_args(
             "Leave empty to synchronize with all currently logged in clusters. "
             "Use a comma to separate multiple clusters."
         ),
+    )
+    sync_parser.add_argument(
+        "--sync-datasets",
+        dest="sync_datasets",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Push datasets from data_source to each cluster. Requires data_source in config.",
     )
     # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
     # sync_parser.add_argument(

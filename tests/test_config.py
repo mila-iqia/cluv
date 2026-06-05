@@ -2,9 +2,11 @@
 
 from pathlib import Path
 
-from cluv.config import load_cluv_config, ClusterConfig
-from milatools.cli.init_command import DRAC_CLUSTERS
 import pytest
+from milatools.cli.init_command import DRAC_CLUSTERS
+
+from cluv.config import ClusterConfig, PartialClusterConfig, load_cluv_config
+
 
 def write_pyproject(tmp_path: Path, content: str) -> Path:
     p = tmp_path / "pyproject.toml"
@@ -43,8 +45,9 @@ results_path = "logs"
         )
         cfg = load_cluv_config(p)
         assert "mila" in cfg.clusters
-        assert isinstance(cfg.clusters["mila"], ClusterConfig)
+        assert isinstance(cfg.clusters["mila"], PartialClusterConfig)
         assert cfg.clusters["mila"].env == {}
+        assert isinstance(cfg.get_cluster_config("mila"), ClusterConfig)
 
     def test_per_cluster_sbatch_vars_new_format(self, tmp_path: Path) -> None:
         p = write_pyproject(
@@ -60,7 +63,6 @@ SBATCH_PARTITION = "main"
         cfg = load_cluv_config(p)
         assert cfg.clusters["rorqual"].env["SBATCH_ACCOUNT"] == "def-bengioy"
         assert cfg.clusters["rorqual"].env["SBATCH_PARTITION"] == "main"
-
 
     def test_cluster_with_no_vars(self, tmp_path):
         p = write_pyproject(
@@ -100,7 +102,6 @@ SBATCH_GPUS = "1"
         cfg = load_cluv_config(p)
         assert cfg.env["SBATCH_TIME"] == "1:00:00"
         assert cfg.env["SBATCH_GPUS"] == "1"
-
 
     def test_missing_env_section_defaults_to_empty(self, tmp_path: Path) -> None:
         p = write_pyproject(
@@ -163,9 +164,10 @@ SBATCH_PARTITION = "main"
 # Real project config
 # ---------------------------------------------------------------------------
 
+
 class TestRealProjectConfig:
     def test_loads_without_error(self, pytestconfig) -> None:
         root_dir = pytestconfig.rootpath
         cfg = load_cluv_config(root_dir / "pyproject.toml")
         assert cfg is not None
-        assert set(cfg.clusters_names) == set (DRAC_CLUSTERS + ["mila"])
+        assert set(cfg.clusters_names) == set(DRAC_CLUSTERS + ["mila"])

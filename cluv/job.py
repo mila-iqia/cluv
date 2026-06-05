@@ -42,10 +42,10 @@ class JobInfo:
     the job is doing job packing (with --ntasks-per-gpu) or job chunking (with --array=...%1) or
     both:
 
-    - Normal job:                        `${SLURM_JOB_ID}`
-    - Packing (with --ntasks-per-gpu>1): `${SLURM_JOB_ID}_${SLURM_PROCID}`
-    - Chunking (with --array=0-N%1):     `${SLURM_ARRAY_JOB_ID}`
-    - Chunking + Packing:                `${SLURM_ARRAY_JOB_ID}_${SLURM_PROCID}`
+    - Normal job:                        `${cluster}_${SLURM_JOB_ID}`
+    - Packing (with --ntasks-per-gpu>1): `${cluster}_${SLURM_JOB_ID}_${SLURM_PROCID}`
+    - Chunking (with --array=0-N%1):     `${cluster}_${SLURM_ARRAY_JOB_ID}`
+    - Chunking + Packing:                `${cluster}_${SLURM_ARRAY_JOB_ID}_${SLURM_PROCID}`
 
     Tip: Use this as the run_id for `wandb.init` or whenever you need a unique run identifier.
     """

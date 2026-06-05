@@ -5,7 +5,8 @@ import os
 import shlex
 import subprocess
 import sys
-from pathlib import Path
+import warnings
+from pathlib import Path, PurePosixPath
 
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
@@ -237,13 +238,50 @@ def get_sbatch_command(
 
     # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
     config = get_cluv_config()
+    cluster_config = config.get_cluster_config(cluster)
     env_vars: dict[str, str] = {**config.env}
-    env_vars.update(config.get_cluster_config(cluster).env)
+    env_vars.update(cluster_config.env)
 
     # Prefix the job name with "cluv-" so it is easy to identify cluv-submitted jobs in sacct.
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
+
+    in_job_chunking = False
+    in_job_packing = False
+    # SBATCH --output=logs/%j/slurm-%j.out
+    assert not in_job_chunking and not in_job_packing, "todo"
+    # might contain unresolved env vars.
+    cluster_results_path = PurePosixPath(cluster_config.results_path)
+    # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
+
+    if in_job_chunking:
+        assert not in_job_packing, "can't do both right now."
+        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
+    elif in_job_packing:
+        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j_%t/slurm-%j_%t.out"
+    else:
+        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j/slurm-%j.out"
+
+    output_from_cluv = env_vars["SBATCH_OUTPUT"]
+    if (
+        output_from_file := next(
+            (
+                line
+                for line in job_script.read_text().splitlines()
+                if line.strip().startswith("#SBATCH") and "--output" in line
+            ),
+            None,
+        )
+    ) and output_from_file != output_from_cluv:
+        warnings.warn(
+            UserWarning(
+                f"[yellow]Warning: The job script {job_script} contains an SBATCH --output directive "
+                f"which will be overwritten by cluv, to facilitate the syncing of results.\n"
+                f"Consider using cluv in your script to decide where to store results. Take a look a "
+                f"the pytorch example of the Cluv repo for more info.[/yellow]"
+            )
+        )
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     sbatch_args_str = " ".join(shlex.quote(f) for f in sbatch_args)

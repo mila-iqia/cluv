@@ -1,15 +1,23 @@
 # Pytorch Setup
 
-A simple example to install `torch` and detect the available GPUs.
+A simple PyTorch example. To run it, first navigate to the root of this example:
+```
+cd examples/pytorch-example
+```
+
+
+To submit a job on all available clusters and keep the first to run:
 
 ```bash
-# Run the cluv submit command at the root of this example folder.
+cluv submit first scripts/job.sh -- python main.py
+```
 
-# For the mila cluster, with no additional Slurm args
-cluv submit mila scripts/job.sh -- python src/pytorch_setup/main.py
+To run on a specific remote cluster:
 
-# For a DRAC cluster, with an additional Slurm argument to specify the allocation account
-cluv submit <DRAC_cluster> scripts/job.sh --account=<allocation_account> -- python src/pytorch_setup/main.py
+```bash
+cluv submit mila scripts/job.sh -- python main.py
+cluv submit nibi scripts/job.sh -- python main.py
+...
 ```
 
 Note : currently use a Pytorch version inferior to `2.11.0` to avoid compatibility issues with CUDA 12.8.

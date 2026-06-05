@@ -22,7 +22,7 @@ from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
 from cluv.cli.sync import sync
-from cluv.config import load_cluv_config
+from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -256,7 +256,7 @@ async def test_submit(remote: Remote, fake_scratch: Path):
         await sync(clusters=[remote.hostname])
 
         output_file = (
-            Path(os.path.expandvars(load_cluv_config().results_path))
+            Path(os.path.expandvars(get_cluv_config().results_path))
             / str(job_id)
             / f"slurm-{job_id}.out"
         )

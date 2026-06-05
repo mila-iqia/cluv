@@ -203,7 +203,7 @@ async def test_submit(remote: Remote, fake_scratch: Path):
     should_cancel_job = True
     job_id = await submit(
         cluster=remote.hostname,
-        job_script=Path("scripts/safe_job.sh"),
+        job_script=Path("scripts/job.sh"),
         sbatch_args=["--time=00:00:30"],
         program_args=["python", "--version"],
     )

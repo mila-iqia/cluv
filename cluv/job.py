@@ -102,7 +102,7 @@ def get_datasets_path() -> Path | None:
     return Path(os.path.expandvars(datasets_path)) if datasets_path else None
 
 
-def current_job_info() -> RunInfo | None:
+def current_run_info() -> RunInfo | None:
     """Returns information about the current job, such as its unique run id and results path.
 
     This is useful to determine where to save checkpoints or results for this job, and to have a unique
@@ -126,6 +126,7 @@ def current_job_info() -> RunInfo | None:
         run_id=run_id,
         cluster=cluster,
         results_path=config.results_path / run_id,
+        command=[],
     )
 
 

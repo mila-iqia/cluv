@@ -230,11 +230,16 @@ class CluvLauncher(Launcher):
             arg
             for arg in sbatch_args
             if not arg.startswith(("--output=", "--wckey", "--job-name"))
+            or "{folder}" in arg
+            or "{command}" in arg
         ]
 
         job_infos: list[JobInfo] = []
         for override in job_overrides:
             # Use this so the output is where it would be if we used submitit.
+            # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
+            # TODO: Save the command used for submission in the output folder as well, since we
+            # don't generate a job script.
             job = await submit(
                 cluster=cluster,
                 job_script=Path(self.job_script),
@@ -285,15 +290,6 @@ class CluvLauncher(Launcher):
             )
         )
 
-        # Pretend like we made some pickle file.
-        # for job_info, job in zip(jobs, submitit_jobs):
-        #     job.paths.result_pickle.write_bytes(
-        #         pickle.dumps(
-        #             ("success", f"Job {job_info.run_id} is done!")
-        #             if job.state == "COMPLETED"
-        #             else ("failure", f"Job {job_info.run_id} failed!")
-        #         )
-        #     )
         # TODO: What is the 'results' in our case? We don't want to pickle/unpickle stuff.
         job_results: list[JobReturn] = []
         table = rich.table.Table(
@@ -308,7 +304,7 @@ class CluvLauncher(Launcher):
         table.add_column("Run id", style="bold")
         table.add_column("Command", justify="right")
         table.add_column("State", justify="right")
-        table.add_column("Results path", justify="left")
+        table.add_column("Output File", justify="right")
         for job in job_infos:
             for task_id, run in enumerate(job.tasks):
                 out = next(run.results_path.glob("*.out"), run.results_path)
@@ -330,7 +326,7 @@ class CluvLauncher(Launcher):
                     run.run_id,
                     " ".join(run.command),
                     job.state,
-                    str(run.results_path),
+                    str(out),
                     # style=row_style
                     end_section=(task_id == len(job.tasks) - 1),
                 )

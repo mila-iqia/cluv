@@ -19,9 +19,9 @@ import wandb
 from omegaconf import DictConfig
 from torchvision.datasets import CIFAR10
 
-from cluv.job import RunInfo, current_job_info, get_datasets_path
+from cluv.job import RunInfo, current_run_info, get_datasets_path
 
-job: RunInfo | None = None
+current_job: RunInfo | None = None
 
 
 def cluv_resolver(attr: str, default: str | None = None) -> str | None:
@@ -30,13 +30,13 @@ def cluv_resolver(attr: str, default: str | None = None) -> str | None:
     Usage in Hydra config: ${cluv:attr, default} where `attr` is an attribute of the current job (e.g. "results_path")
     and `default` is an optional default value to return if the attribute is not set in the current job.
     """
-    global job
-    if job is None:
-        job = current_job_info()
+    global current_job
+    if current_job is None:
+        current_job = current_run_info()
 
     if default is not None:
-        return getattr(job, attr, default)
-    return getattr(job, attr)
+        return getattr(current_job, attr, default)
+    return getattr(current_job, attr)
 
 
 omegaconf.OmegaConf.register_new_resolver("cluv", cluv_resolver)
@@ -64,7 +64,7 @@ def main(config_dict: DictConfig):
     config = Config(**hydra.utils.instantiate(config_dict))
     rich.print(config)
 
-    job_info = current_job_info()
+    job_info = current_run_info()
 
     datasets_path = get_datasets_path()
     assert datasets_path, "A datasets_path must be set in the config for this example to work."

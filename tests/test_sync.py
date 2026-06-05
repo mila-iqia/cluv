@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from cluv.cli.sync import sync
-from cluv.config import load_cluv_config
+from cluv.config import get_cluv_config
 from cluv.job import get_datasets_path
 from cluv.remote import Remote
 from cluv.utils import current_cluster
@@ -35,7 +35,7 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
 
     monkeypatch.chdir("examples/pytorch-example")
 
-    config = load_cluv_config()
+    config = get_cluv_config()
     assert config
     assert config.datasets_path
 

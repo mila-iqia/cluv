@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from cluv.cli.sync import sync
-from cluv.config import find_pyproject, get_config
+from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote
 from cluv.utils import console
 
@@ -236,7 +236,7 @@ def get_sbatch_command(
     remote_job_script = f"~/{project_path}/{job_script}"
 
     # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
-    config = get_config()
+    config = get_cluv_config()
     env_vars: dict[str, str] = {**config.env}
     env_vars.update(config.get_cluster_config(cluster).env)
 

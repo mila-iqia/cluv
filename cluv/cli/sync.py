@@ -27,8 +27,7 @@ from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import (
     CluvConfig,
     find_pyproject,
-    get_config,
-    load_cluv_config,
+    get_cluv_config,
 )
 from cluv.job import get_datasets_path
 from cluv.remote import Remote, get_ssh_options_for_host, run
@@ -77,7 +76,7 @@ async def sync(
     if clusters and here in clusters:
         clusters.remove(here)
 
-    config = load_cluv_config()
+    config = get_cluv_config()
 
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     all_remotes = await get_active_remotes()
@@ -142,7 +141,7 @@ async def sync(
 
 async def get_active_remotes() -> list[Remote]:
     """Returns the Remotes for each cluster which has an active SSH connection."""
-    clusters = get_config().clusters_names
+    clusters = get_cluv_config().clusters_names
     connections = await asyncio.gather(
         *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
     )
@@ -153,7 +152,7 @@ async def get_active_remotes() -> list[Remote]:
 async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
-    config = get_config()
+    config = get_cluv_config()
 
     def _update_progress(progress: int, status: str, total: int):
         info = textwrap.shorten(status, 50, placeholder="...")

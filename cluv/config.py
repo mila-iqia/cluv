@@ -101,7 +101,7 @@ class CluvConfig(BaseModel):
 
         The environment variables as part of paths will *not* be resolved.
         """
-        cluv_config = load_cluv_config(find_pyproject())
+        cluv_config = get_cluv_config()
         cluster_config = cluv_config.clusters[cluster]
         datasets_path = cluster_config.datasets_path or cluv_config.datasets_path
         return ClusterConfig(
@@ -113,7 +113,7 @@ class CluvConfig(BaseModel):
 
 
 @functools.cache
-def get_config() -> CluvConfig:
+def get_cluv_config() -> CluvConfig:
     """Get the cluv config, loading it from the pyproject.toml if needed."""
     return load_cluv_config(find_pyproject())
 
@@ -137,8 +137,7 @@ def has_cluv_config(pyproject_path: Path) -> bool:
     return "cluv" in data.get("tool", {})
 
 
-def load_cluv_config(pyproject_path: Path | None = None) -> CluvConfig:
-    pyproject_path = pyproject_path or find_pyproject()
+def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     with pyproject_path.open("rb") as handle:
         data = tomllib.load(handle)
 
@@ -151,7 +150,7 @@ def load_cluv_config(pyproject_path: Path | None = None) -> CluvConfig:
 
 def get_cluster_choices() -> list[str]:
     """Return configured clusters or the defaults when config is missing/invalid."""
-    return get_config().clusters_names
+    return get_cluv_config().clusters_names
 
 
 def current_cluster_config() -> ClusterConfig | None:
@@ -159,7 +158,7 @@ def current_cluster_config() -> ClusterConfig | None:
     cluster = current_cluster()
     if not cluster:
         return None  # not on a cluster.
-    cluv_config = load_cluv_config(find_pyproject())
+    cluv_config = get_cluv_config()
     data_source = cluv_config.data_source
     config = cluv_config.get_cluster_config(cluster)
     if data_source:

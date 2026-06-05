@@ -64,7 +64,7 @@ class JobInfo:
 def get_datasets_path() -> Path | None:
     """Returns the resolved 'datasets_path' from the Cluv config."""
     datasets_path = (
-        cluv.config.current_cluster_config() or cluv.config.load_cluv_config()
+        cluv.config.current_cluster_config() or cluv.config.get_cluv_config()
     ).datasets_path
     return Path(os.path.expandvars(datasets_path)) if datasets_path else None
 

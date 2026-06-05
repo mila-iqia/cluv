@@ -1,16 +1,17 @@
-import textwrap
 import subprocess
+import textwrap
 from pathlib import Path
 
-from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command, get_config
-
 import pytest
+
+from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command
+from cluv.config import get_cluv_config
 
 
 @pytest.fixture
 def project_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     # To avoid that a test reads the cached config of an other, we need to clear the cache between each test.
-    get_config.cache_clear()
+    get_cluv_config.cache_clear()
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)  # Set the home directory to tmp_path
     project_dir = tmp_path / "my_project"

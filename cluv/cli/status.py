@@ -79,6 +79,8 @@ _REMOTE_SCRIPT_DRAC = f"""
 partition-stats 2>/dev/null; echo {_SEP}
 {SINFO_LIST_GPUS}; echo {_SEP}
 timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
+echo {_SEP}
+echo {_SEP}
 """
 
 # Script for the Mila cluster (savail + disk-quota, no partition-stats/diskusage_report)
@@ -180,8 +182,6 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
         return get_default_cluster_status(cluster)
 
     parts = raw.split(_SEP)
-    # Pad in case some sections are missing
-    parts += [""] * 10
     (
         partition_stats_out,
         sinfo_out,

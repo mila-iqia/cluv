@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import shlex
 import subprocess
 import sys
-import warnings
 from pathlib import Path, PurePosixPath
 
 from cluv.cli.sync import sync
@@ -16,6 +16,7 @@ from cluv.utils import console
 RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
 FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
+logger = logging.getLogger(__name__)
 
 __all__ = ["submit"]
 
@@ -274,12 +275,12 @@ def get_sbatch_command(
             None,
         )
     ) and output_from_file != output_from_cluv:
-        warnings.warn(
+        logger.warning(
             UserWarning(
-                f"[yellow]Warning: The job script {job_script} contains an SBATCH --output directive "
+                f"[yellow]⚠️ The job script {job_script} contains an SBATCH --output directive "
                 f"which will be overwritten by cluv, to facilitate the syncing of results.\n"
-                f"Consider using cluv in your script to decide where to store results. Take a look a "
-                f"the pytorch example of the Cluv repo for more info.[/yellow]"
+                f"Consider using cluv in your Python script to decide where to store results. "
+                f"Take a look a the pytorch example of the Cluv repo for more info.[/yellow]"
             )
         )
 

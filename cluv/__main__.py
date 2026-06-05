@@ -12,6 +12,7 @@ import logging
 import subprocess
 import sys
 import typing
+from pathlib import Path
 from typing import Callable
 
 import rich
@@ -103,6 +104,7 @@ def main(argv: list[str] | None = None) -> None:
             logger.error("No standard error.")
         sys.exit(err.returncode)
 
+
 def add_submit_args(
     subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
 ) -> argparse.ArgumentParser:
@@ -124,6 +126,7 @@ def add_submit_args(
     submit_parser.add_argument(
         "job_script",
         metavar="<job.sh>",
+        type=Path,
         help="Path to the sbatch job script (relative to project root).",
     )
     submit_parser.add_argument(

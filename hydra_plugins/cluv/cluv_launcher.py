@@ -21,7 +21,7 @@ from submitit.helpers import _default_custom_logging
 
 from cluv.cli.submit import submit
 from cluv.cli.sync import fetch_results, get_active_remotes, sync
-from cluv.config import CluvConfig, get_cluv_config
+from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import JobInfo, RunInfo, get_results_path, get_run_id
 from cluv.remote import Remote
 
@@ -305,9 +305,17 @@ class CluvLauncher(Launcher):
         table.add_column("Command", justify="right")
         table.add_column("State", justify="right")
         table.add_column("Output File", justify="right")
+        cluv_config = get_cluv_config()
         for job in job_infos:
             for task_id, run in enumerate(job.tasks):
-                out = next(run.results_path.glob("*.out"), run.results_path)
+                out = next(
+                    (
+                        find_pyproject().parent
+                        / Path(cluv_config.results_symlink)
+                        / run.results_path
+                    ).glob("*.out"),
+                    run.results_path,
+                )
                 try:
                     out = out.relative_to(Path.cwd())
                 except ValueError:

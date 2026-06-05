@@ -82,7 +82,7 @@ Here's an example `pyproject.toml` with cluv configuration for three clusters, a
 results_path = "logs"
 
 [tool.cluv.env]
-SBATCH_TIME = "3:00:00"
+SBATCH_TIMELIMIT = "3:00:00"
 WANDB_MODE = "offline"
 
 [tool.cluv.clusters.mila]
@@ -136,10 +136,12 @@ cluv sync [<cluster> ...]
 
 ### `cluv status`
 
-Display an overview of each cluster: GPU availability, running/queued jobs, estimated queue wait, GPU utilisation, and disk usage. Falls back to mock data if no active connections exist.
+Display an overview of :
+* Cluster: GPU availability, running/queued jobs and disk usage.
+* Jobs: cached jobs from `cluv submit` with their status.
 
 ```
-cluv status [<cluster> ...]
+cluv status [<table>]
 ```
 
 ### `cluv submit`

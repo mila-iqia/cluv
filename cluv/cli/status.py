@@ -15,6 +15,7 @@ from cluv.cache import load_jobs
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_config
 from cluv.slurm import (
+    FAILED_JOB_STATES,
     StorageStats,
     parse_disk_quota,
     parse_diskusage_report,
@@ -108,17 +109,14 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
     result: dict[int, LiveJobInfo] = {}
     now = datetime.now(timezone.utc)
     _fmt = "%Y-%m-%dT%H:%M:%S"
-    for line in raw.splitlines():
-        parts = line.strip().split("|")
-        if len(parts) < 5:
-            continue
-        job_id_str, state, start_str, submit_str, elapsed = parts[:5]
-        try:
-            job_id = int(job_id_str.strip())
-        except ValueError:
-            continue
 
-        state = state.strip()
+    for line in raw.splitlines():
+        # Should have 5 columns
+        parts = line.strip().split("|")
+        if len(parts) != 5:
+            continue
+        job_id_str, state, start_str, submit_str, elapsed = parts
+
         elapsed_val = elapsed.strip()
         elapsed_out = elapsed_val if elapsed_val and elapsed_val != "00:00:00" else None
 
@@ -134,10 +132,12 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
             wait_time = _format_duration(max(delta_s, 0))
         except (ValueError, OverflowError):
             pass
-
+        
+        job_id = int(job_id_str.strip())
         result[job_id] = LiveJobInfo(
-            cluster=cluster, state=state, elapsed=elapsed_out, wait_time=wait_time
+            cluster=cluster, state=state.strip(), elapsed=elapsed_out, wait_time=wait_time
         )
+
     return result
 
 
@@ -168,13 +168,7 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
         return get_default_cluster_status(cluster)
 
     parts = raw.split(_SEP)
-    (
-        partition_stats_out,
-        sinfo_out,
-        diskusage_out,
-        savail_out,
-        disk_quota_out,
-    ) = parts[:5]
+    partition_stats_out, sinfo_out, diskusage_out, savail_out, disk_quota_out = parts[:5]
 
     # --- GPU info: prefer savail (Mila) over sinfo (DRAC) ---
     savail_idle, savail_total, savail_models = parse_savail(savail_out)
@@ -334,7 +328,6 @@ def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo]) -> Table:
     table.add_column("Git commit")
     table.add_column("Submitted at")
     table.add_column("Job status")
-    table.add_column("Job script")
     table.add_column("Waiting time")
     table.add_column("Elapsed time")
 
@@ -350,12 +343,12 @@ def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo]) -> Table:
 
         if info is not None:
             state_cell = _state_text(info.state)
-            wait_cell = info.wait_time or "?"
-            elapsed_cell = info.elapsed or "?"
+            wait_cell = info.wait_time or "-"
+            elapsed_cell = info.elapsed or "-"
         else:
-            state_cell = Text("?", style="dim")
-            wait_cell = "?"
-            elapsed_cell = "?"
+            state_cell = Text("-", style="dim")
+            wait_cell = "-"
+            elapsed_cell = "-"
 
         table.add_row(
             job.cluster,
@@ -363,7 +356,6 @@ def _build_cluv_jobs_table(live_info: dict[int, LiveJobInfo]) -> Table:
             job.git_commit[:7],
             submitted_str,
             state_cell,
-            job.job_script,
             wait_cell,
             elapsed_cell,
         )
@@ -408,14 +400,7 @@ async def get_job_infos(clusters: list[str]) -> tuple[dict[int, LiveJobInfo], di
             cluster_stats.my_running += 1
         elif info.state == "PENDING":
             cluster_stats.my_pending += 1
-        elif info.state in (
-            "CANCELLED",
-            "FAILED",
-            "TIMEOUT",
-            "NODE_FAIL",
-            "OUT_OF_MEMORY",
-            "PREEMPTED",
-        ):
+        elif info.state in FAILED_JOB_STATES:
             cluster_stats.my_cancelled += 1
         elif info.state in ("COMPLETED", "COMPLETING"):
             cluster_stats.my_completed += 1

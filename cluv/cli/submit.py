@@ -11,11 +11,10 @@ from cluv.cache import save_job
 from cluv.cli.sync import sync
 from cluv.config import ClusterConfig, find_pyproject, get_config
 from cluv.remote import Remote
+from cluv.slurm import FAILED_JOB_STATES
 from cluv.utils import console
 
 RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
-FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
-
 
 __all__ = ["submit"]
 

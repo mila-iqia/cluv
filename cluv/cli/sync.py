@@ -133,7 +133,7 @@ async def sync(
         task_descriptions=task_descriptions,
         overall_progress_task_description="[green]Syncing project",
     )
-<<<<<<< HEAD
+    console_lock.reset(token)
 
     # Display a consolidated summary of all newly-synced runs across all clusters.
     cwd = Path.cwd()
@@ -148,19 +148,10 @@ async def sync(
                 except ValueError:
                     display_path = run_path
                 console.print(f"  {display_path}")
-=======
-    console_lock.reset(token)
->>>>>>> origin/master
 
     return remotes
 
 
-<<<<<<< HEAD
-async def sync_task_function(
-    report_progress: ReportProgressFn,
-    remote: Remote,
-) -> list[Path]:
-=======
 async def get_active_remotes() -> list[Remote]:
     """Returns the Remotes for each cluster which has an active SSH connection."""
     clusters = get_cluv_config().clusters_names
@@ -171,8 +162,7 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
-async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
->>>>>>> origin/master
+async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_cluv_config()
@@ -193,10 +183,7 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
     await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
 
     _update_progress(3, "Fetching results", num_tasks)
-<<<<<<< HEAD
-    new_runs = await fetch_results(remote, config.results_path)
-=======
-    await fetch_results(remote, config)
+    new_runs = await fetch_results(remote, config)
 
     if config.data_source:
         _update_progress(4, "Syncing datasets", num_tasks)
@@ -207,7 +194,6 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote):
         local_dataset_path = Path(os.path.expandvars(local_dataset_path))
 
         await _push_datasets_to_remote(local_dataset_path, remote, config)
->>>>>>> origin/master
 
     _update_progress(num_tasks, "Done", num_tasks)
     return new_runs
@@ -330,37 +316,6 @@ async def clone_project(remote: Remote):
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
 
-<<<<<<< HEAD
-async def fetch_results(remote: Remote, results_path: Path | str) -> list[Path]:
-    """Fetches results from all remote clusters to the current (mila for now) cluster using rsync.
-
-    Returns the list of newly-synced run directories (those that did not exist locally before
-    the rsync ran).
-    """
-    results_path = Path(results_path)
-    assert not results_path.is_absolute()
-    project_dir = find_pyproject().parent
-
-    results_path_relative_to_home = (project_dir / results_path).relative_to(Path.home())
-    local_results_dir = Path.home() / results_path_relative_to_home
-
-    # TODO: to simplify, for now we assume that the results are stored in a directory directly under the project directory.
-    # A directory with the same name (e.g. logs) is created in $SCRATCH.
-    # This could cause some confusion if there are multiple projects with a `logs` directory, since we'd see the logs
-    # from different projects in the same place. To fix this, for now we use `$SCRATCH/logs/{project_name}` as the `logs` dir.
-
-    # Snapshot the runs already present locally before syncing.
-    existing_runs: set[Path] = (
-        {p for p in local_results_dir.iterdir() if p.is_dir()} if local_results_dir.exists() else set()
-    )
-
-    # Create the results directory if it doesn't exist.
-    # TODO: Create that result directory as a symlink to a dir in $SCRATCH?
-
-    results_path.mkdir(parents=True, exist_ok=True)
-
-    await create_results_dir_with_symlink_to_scratch(remote, results_path)
-=======
 async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):
     """Pull from source to the locally-resolved datasets_path."""
     # Resolve the env vars on the remote.
@@ -382,7 +337,6 @@ async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets
         f"[green]Pulling datasets:[/green] {source_host}:{source_path} -> {local_datasets_path}"
     )
     source_path = await source_remote.get_output(f"echo {source_path}")
->>>>>>> origin/master
     await run(
         (
             "rsync",
@@ -426,10 +380,19 @@ async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: C
     )
 
 
-async def fetch_results(remote: Remote, config: CluvConfig):
-    """Fetches results from a remote cluster to local using rsync via the results symlink."""
+async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
+    """Fetches results from a remote cluster to local using rsync via the results symlink.
+
+    Returns the list of newly-synced run directories (those that did not exist locally before
+    the rsync ran).
+    """
     results_path_here = Path(os.path.expandvars(config.results_path))
     results_path_here.mkdir(parents=True, exist_ok=True)
+
+    # Snapshot the runs already present locally before syncing.
+    existing_runs: set[Path] = (
+        {p for p in results_path_here.iterdir() if p.is_dir()} if results_path_here.exists() else set()
+    )
 
     # Resolve any environment variables in the results_path on the remote before rsync, otherwise
     # it would try to fetch results from a literal $SCRATCH/... folder, which doesn't exist.
@@ -459,9 +422,9 @@ async def fetch_results(remote: Remote, config: CluvConfig):
         hide=False,
     )
 
-    if not local_results_dir.exists():
+    if not results_path_here.exists():
         return []
-    return sorted({p for p in local_results_dir.iterdir() if p.is_dir()} - existing_runs)
+    return sorted({p for p in results_path_here.iterdir() if p.is_dir()} - existing_runs)
 
 
 async def create_results_dir_with_symlink_to_scratch(

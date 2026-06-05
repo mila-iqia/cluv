@@ -71,7 +71,6 @@ async def sync(
     - Over SSH, does a git fetch on all remote clusters
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
-    # TODO: Figure out which Slurm cluster we're currently on. Assuming mila for now.
     here = current_cluster()
     if clusters and here in clusters:
         clusters.remove(here)

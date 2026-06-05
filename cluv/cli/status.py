@@ -293,16 +293,13 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
     table.add_column("Cluster", style="bold", ratio=1)
     table.add_column("GPU model", justify="center", ratio=2)
     table.add_column("Free GPUs", justify="left", ratio=1)
-    table.add_column("My jobs\nrun / pend / fail / comp", justify="center", ratio=1)
-    # table.add_column("All jobs\nrun / pend", justify="center", ratio=1)
-    table.add_column("$HOME", justify="left", ratio=2)
-    table.add_column("$SCRATCH", justify="left", ratio=2)
+    table.add_column("My jobs\nrun / pend / fail / comp", justify="center", ratio=2)
+    table.add_column("Storage used", justify="left", ratio=2)
 
     for c in data:
         status = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
-        my_jobs = Text(f"{c.jobs.my_running} / {c.jobs.my_pending}", style="cyan")
-        my_jobs = Text(f"{c.jobs.my_running} / {c.jobs.my_pending} / {c.jobs.my_cancelled} / {c.jobs.my_completed}", style="cyan")  # TODO
-        # all_jobs = Text(f"{c.jobs.running} / {c.jobs.pending}", style="white")
+        job_stats = clusters_job_stats.get(c.name, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0))
+        my_jobs = Text(f"{job_stats.my_running} / {job_stats.my_pending} / {job_stats.my_cancelled} / {job_stats.my_completed}", style="cyan")  
 
         home_bar = _bar(c.storage.home_used, c.storage.home_quota)
         scratch_bar = _bar(c.storage.scratch_used, c.storage.scratch_quota)
@@ -315,9 +312,7 @@ def _build_cluster_table(data: list[ClusterStatus]) -> Table:
             Text(c.gpu_model, style="bright_blue"),
             _gpu_bar(c.gpu_idle, c.gpu_total),
             my_jobs,
-            # all_jobs,
-            home_bar,
-            scratch_bar,
+            Text("$HOME     ", style="bold") + home_bar + "\n" + Text("$SCRATCH  ", style="bold") + scratch_bar,
             style=row_style,
         )
 

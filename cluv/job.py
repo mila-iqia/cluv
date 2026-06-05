@@ -64,7 +64,7 @@ class JobInfo:
 def get_results_path() -> Path:
     """Returns the resolved 'results_path' from the Cluv config."""
     results_path = (
-        cluv.config.current_cluster_config() or cluv.config.load_cluv_config()
+        cluv.config.current_cluster_config() or cluv.config.get_cluv_config()
     ).results_path
     return Path(os.path.expandvars(results_path))
 

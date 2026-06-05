@@ -45,6 +45,8 @@ class CluvLauncher(Launcher):
         self,
         ## NEW args:
         cluster: str = "first",  # which cluster to submit to.
+        job_script: str
+        | Path = "scripts/job.sh",  # the job script to run on the cluster. It should be set up to run the command passed to `submit` in its arguments.
         vram_gb: int | None = None,  # Enables job packing!
         checkpointing: bool = True,  # Enables job chunking (via job arrays!)
         # executor: Callable[[], RemoteSlurmExecutor],
@@ -86,6 +88,8 @@ class CluvLauncher(Launcher):
     ) -> None:
         super().__init__()
         self.cluster = cluster
+        self.job_script = job_script
+        # todo:
         self.vram_gb = vram_gb
         self.checkpointing = checkpointing
 
@@ -143,6 +147,9 @@ class CluvLauncher(Launcher):
         self.cluster_remotes: dict[str, Remote] = {}
         self.cluv_config: CluvConfig | None = None
 
+        self.chunking = False
+        self.packing = False
+
         self._loop = asyncio.new_event_loop()
 
     def setup(
@@ -179,14 +186,9 @@ class CluvLauncher(Launcher):
     async def launch_jobs(
         self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
     ) -> list[JobReturn]:
-        job_script = "scripts/job.sh"
-        cluster = "mila"  # todo: find the right cluster for these jobs (maybe even multiple?)
-        chunking = False
-        packing = False
-        cluster_remote = await Remote.connect(cluster)
-
         assert self.cluv_config
         assert self.cluster_remotes
+        cluster = self.cluster
 
         # TODO: Remove any 'hydra/launcher'-related configs!
         new_job_overrides = []
@@ -255,14 +257,14 @@ class CluvLauncher(Launcher):
             # Use this so the output is where it would be if we used submitit.
             job = await submit(
                 cluster=cluster,
-                job_script=Path(job_script),
+                job_script=Path(self.job_script),
                 sbatch_args=[f"--output={cluster_results_dir}/{runid_template}/%j_%t_log.out"],
                 program_args=["python", "main.py", *override],
                 _skip_sync=True,
             )
             assert job is not None
             job_id = job.job_id
-            assert not chunking and not packing  # jobid is the "run id" for now.
+            assert not self.chunking and not self.packing  # jobid is the "run id" for now.
             run_id = get_run_id(
                 cluster=cluster,
                 job_id=job_id,
@@ -277,7 +279,7 @@ class CluvLauncher(Launcher):
             local_job_results_path = local_results_dir / run_id
 
             jobs.append(
-                JobInfo(cluster=cluster, run_id=run_id, results_path=local_job_results_path)
+                JobInfo(cluster=self.cluster, run_id=run_id, results_path=local_job_results_path)
             )
 
             # TODO: Super ugly. Avoid doing the rsync per-job from RemoteSlurmJob.wait,
@@ -289,7 +291,7 @@ class CluvLauncher(Launcher):
             # Trying to reuse this here that I made for the 'remote slurm executor' package.
             # It allows fetching the status of the job via SSH.
             submitit_job = PatchedRemoteSlurmJob(
-                cluster,
+                self.cluster,
                 folder=local_job_results_path,  # not really used for anything, but required by the interface.
                 job_id=str(job_id),
                 tasks=[0],
@@ -333,7 +335,7 @@ class CluvLauncher(Launcher):
             for job_info, job, overrides in zip(jobs, submitit_jobs, job_overrides)
         ]
         # potentially unpack the results of the jobs.
-        if packing:
+        if self.packing:
             return sum((job.results() for job in submitit_jobs), [])
         return [job.results()[0] for job in submitit_jobs]
 

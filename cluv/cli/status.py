@@ -310,10 +310,10 @@ def _build_cluster_table(
 
         table.add_row(
             status + Text(c.name, style="bold magenta" if c.online else "bold bright_black"),
-            Text(c.gpu_model, style="bright_blue"),
-            _gpu_bar(c.gpu_idle, c.gpu_total),
-            my_jobs,
-            home_bar + scratch_bar,
+            Text(c.gpu_model, style="bright_blue") if c.online else "-",
+            _gpu_bar(c.gpu_idle, c.gpu_total) if c.online else "-",
+            my_jobs if c.online else "-",
+            home_bar + "\n" + scratch_bar if c.online else "-",
             style=row_style,
         )
 

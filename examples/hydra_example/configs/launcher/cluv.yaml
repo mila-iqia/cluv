@@ -2,4 +2,7 @@
 defaults:
   - override /hydra/launcher: cluv_launcher
   # - override /hydra/sweeper: cluv_sweeper
-vram_gb: 10
+hydra:
+  launcher:
+    cluster: mila
+    vram_gb: 10

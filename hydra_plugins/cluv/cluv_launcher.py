@@ -188,14 +188,14 @@ class CluvLauncher(Launcher):
         assert self.cluster_remotes
 
         # TODO: Remove any 'hydra/launcher'-related configs!
-        assert all("launcher=cluv" in override for override in job_overrides), (
-            "TODO: remove the launcher-related overrides from all the commands!"
-        )
         new_job_overrides = []
         for overrides in job_overrides:
-            new_job_override = list(overrides)
-            new_job_override.remove("launcher=cluv")
-            new_job_overrides.append(new_job_override)
+            new_override = [
+                override
+                for override in overrides
+                if not override.startswith(("hydra/launcher", "hydra.launcher"))
+            ]
+            new_job_overrides.append(new_override)
         job_overrides = new_job_overrides
 
         # if self.vram_gb:

@@ -319,16 +319,21 @@ def project_dir(fake_home: Path, project_name: str, is_existing_project: bool) -
         job_script.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     return project_dir
 
+@pytest.fixture(autouse=True)
+def return_to_start_dir():
+    start_dir = Path.cwd()
+    try:
+        yield
+    finally:
+        os.chdir(start_dir)
 
 @pytest.mark.timeout(5)
 def test_init(
     project_dir: Path,
-    project_name: str,
     scratch: Path | None,
     is_existing_project: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-
     monkeypatch.chdir(project_dir)
 
     init()

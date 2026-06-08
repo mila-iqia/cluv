@@ -11,7 +11,13 @@ import cluv.cli.init
 import cluv.cli.submit
 import cluv.remote
 import cluv.utils
-from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command, submit
+from cluv.cli.submit import (
+    ensure_clean_git_state,
+    get_sbatch_command,
+    submit,
+    submit_first,
+)
+from cluv.cli.sync import sync
 from cluv.config import get_cluv_config
 from cluv.utils import current_cluster
 
@@ -209,8 +215,6 @@ def mock_current_cluster(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
 async def test_can_submit_on_current_cluster(
     monkeypatch: pytest.MonkeyPatch, mock_current_cluster: str, cluv_project_dir: Path
 ) -> None:
-    # This is a very basic test, just to check that we can call the function without error.
-    # A more thorough test would require mocking the sync and sbatch functions, which is a bit more work.
     dummy_commit = "dummy_git_commit"
     monkeypatch.setattr(
         cluv.cli.submit,
@@ -267,3 +271,144 @@ async def test_can_submit_on_current_cluster(
     assert returned_jobid == jobid
     mock_ensure_clean_git_state.assert_called_once()
     mock.assert_called_once()
+
+
+@pytest.mark.parametrize("runs_first_on_current_cluster", [True, False])
+async def test_submit_first_considers_current_cluster(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_current_cluster: str,
+    cluv_project_dir: Path,
+    runs_first_on_current_cluster: bool,
+) -> None:
+    """Test that `submit first` also considers the current cluster as an option.
+
+    Test that it submits a job locally, and also cancels the local job.
+    """
+    run_commands: list[tuple[str, ...]] = []
+    this_cluster_jobid = 123
+    other_cluster_jobid = 456
+    this_cluster_wait_time = 1 if runs_first_on_current_cluster else 3
+    other_cluster_wait_time = 3 if runs_first_on_current_cluster else 1
+
+    async def fake_run(
+        program_and_args: tuple[str, ...],
+        input: str | None = None,
+        warn: bool = False,
+        hide: cluv.remote.Hide = False,
+        **other_kwargs,
+    ) -> subprocess.CompletedProcess[str]:
+        nonlocal this_cluster_wait_time, other_cluster_wait_time
+        full_command = shlex.join(program_and_args)
+        run_commands.append(program_and_args)
+
+        def _result(stdout: str):
+            return subprocess.CompletedProcess(
+                program_and_args, returncode=0, stdout=stdout, stderr=""
+            )
+
+        print(f"Running command: {full_command}")
+        if full_command.startswith("bash --login -c '") and "sbatch --parsable" in full_command:
+            return _result(str(this_cluster_jobid))
+        if full_command.startswith(f"ssh {other_cluster}") and "sbatch --parsable" in full_command:
+            return _result(str(other_cluster_jobid))
+
+        # Querying for the job's state:
+        if full_command.startswith(f"sacct -j {this_cluster_jobid} --format=State"):
+            this_cluster_wait_time -= 1
+            if this_cluster_wait_time > 0:
+                return _result("PENDING")
+            return _result("RUNNING")
+        if full_command.startswith(
+            f"ssh {other_cluster} 'sacct -j {other_cluster_jobid} --format=State"
+        ):
+            other_cluster_wait_time -= 1
+            if other_cluster_wait_time > 0:
+                return _result("PENDING")
+            return _result("RUNNING")
+
+        # Cancelling once the jobs are running.
+        if (
+            runs_first_on_current_cluster
+            and full_command == f"ssh {other_cluster} 'scancel {other_cluster_jobid}'"
+        ):
+            return _result("")
+        if not runs_first_on_current_cluster and full_command == f"scancel {this_cluster_jobid}":
+            return _result("")
+        print(*run_commands, sep="\n")
+        pytest.fail(f"Unexpected command: {full_command}, {runs_first_on_current_cluster=}")
+        # assert not ("ssh" in full_command and mock_current_cluster in full_command), (
+        #     "Should never try to ssh to the current cluster."
+        # )
+        # # assert " ".join(program_args) in full_command
+        # # assert " ".join(sbatch_args) in full_command
+        # # assert "sbatch --parsable" in full_command
+
+    monkeypatch.setattr(
+        cluv.remote, cluv.remote.run.__name__, _mock := unittest.mock.AsyncMock(wraps=fake_run)
+    )
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        cluv.cli.submit.run.__name__,
+        _mock := unittest.mock.AsyncMock(wraps=fake_run),
+    )
+
+    # async def mock_sbatch(
+    #     remote: cluv.remote.Remote | None,
+    #     job_script: Path,
+    #     sbatch_args: list[str],
+    #     program_args: list[str],
+    #     git_commit: str,
+    # ):
+    #     sbatch_command = get_sbatch_command(
+    #         cluster=remote.hostname if remote else mock_current_cluster,
+    #         job_script=job_script,
+    #         sbatch_args=sbatch_args,
+    #         program_args=program_args,
+    #         git_commit=git_commit,
+    #     )
+    #     return subprocess.CompletedProcess(
+    #         sbatch_command if remote is None else ("ssh", remote.hostname, sbatch_command),
+    #         0,
+    #         str(this_cluster_jobid if remote is None else other_cluster_jobid),
+    #         "",
+    #     )
+
+    # monkeypatch.setattr(cluv.cli.submit, sbatch.__name__, mock_sbatch)
+
+    # Pack `cluv sync` so it returns a Remote that is not for the current cluster.
+    other_cluster = "mila" if mock_current_cluster != "mila" else "tamia"
+    # Should be fine to use a 'real' remote here, since we patch the `run` function that is used
+    # everywhere. There shouldn't be an actual call to `ssh other_cluster` that goes though.
+    other_cluster_remote = cluv.remote.Remote(hostname=other_cluster)
+    # mock_remote = unittest.mock.Mock(
+    #     spec=cluv.remote.Remote,
+    #     hostname=other_cluster,
+    #     wraps=,
+    #     spec_set=True,
+    # )
+
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        sync.__name__,
+        mock_sync := unittest.mock.AsyncMock(return_value=[other_cluster_remote]),
+    )
+
+    job_script = cluv_project_dir / "my_script.sh"
+    job_script.parent.mkdir(exist_ok=True)
+    job_script.write_text("#!/bin/bash\necho Hello World\n")
+    job_script.touch(0o755)
+
+    sbatch_args = ["--account=my_account", "--mem=8G"]
+    program_args = ["program_arg_1", "program_arg_2"]
+    dummy_commit = "dummy_git_commit"
+    returned_jobid = await submit_first(
+        job_script=job_script,
+        sbatch_args=sbatch_args,
+        program_args=program_args,
+        git_commit=dummy_commit,
+    )
+    mock_sync.assert_awaited_once()
+    if runs_first_on_current_cluster:
+        assert returned_jobid == this_cluster_jobid
+    else:
+        assert returned_jobid == other_cluster_jobid

@@ -11,6 +11,7 @@ import sys
 from pathlib import Path, PurePosixPath
 
 import rich.table
+import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, save_job
@@ -161,17 +162,27 @@ async def submit_first(
     cancelling = False
 
     def make_table() -> rich.table.Table:
-        nonlocal cancelling
         table = rich.table.Table(
             "Cluster",
             "Job ID",
             "Status",
-            title="Waiting for a job to start"
+            title="Waiting for a job to start..."
             if not cancelling
-            else "Waiting for other jobs to be cancelled",
+            else "Waiting for jobs to cancel...",
         )
         for (cluster, job_id), job_state in cluster_and_jobid_to_jobstate.items():
-            table.add_row(cluster, str(job_id), job_state)
+            table.add_row(
+                cluster,
+                str(job_id),
+                rich.text.Text(
+                    job_state,
+                    style="green"
+                    if job_state.startswith(("RUNNING", "COMPLETED"))
+                    else "yellow"
+                    if job_state.startswith("PENDING")
+                    else "red",
+                ),
+            )
         return table
 
     try:
@@ -179,7 +190,7 @@ async def submit_first(
             first_running_job = await wait_for_running_job(
                 cluster_and_jobid_to_jobstate, cluster_to_remote, max_wait_time_seconds
             )
-            live.update(make_table(), refresh=True)
+            live.update(make_table(), refresh=True)  # probably not entirely necessary.
             if not first_running_job:
                 console.log("All submitted jobs have failed! Exiting.")
                 return None
@@ -195,10 +206,11 @@ async def submit_first(
                 cluster_to_remote,
                 max_wait_time_seconds,
             )
-            live.update(make_table(), refresh=True)
+            live.update(make_table(), refresh=True)  # probably not entirely necessary.
 
         console.print(
-            f"Successfully cancelled all other jobs except for job {first_running_job.job_id} on cluster {first_running_job.cluster}."
+            f"Successfully cancelled all other jobs except for job {first_running_job.job_id} "
+            f"on cluster {first_running_job.cluster}, which is {first_running_job.state}."
         )
     except (KeyboardInterrupt, asyncio.CancelledError, Exception):
         console.log("Interrupted by user. Cancelling all jobs...")
@@ -281,6 +293,10 @@ async def wait_for_jobs_to_cancel(
     job_states = await asyncio.gather(
         *(get_job_state(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
     )
+    for (cluster, job_id), job_state in zip(to_cancel, job_states):
+        logger.info(f"Job {job_id} on cluster {cluster} state: {job_state}")
+        cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
+
     to_cancel = [
         (cluster, job_id)
         for (cluster, job_id), job_state in zip(to_cancel, job_states)
@@ -313,16 +329,18 @@ async def wait_for_jobs_to_cancel(
         logger.debug(f"Job states: {job_states}")
 
         for (cluster, job_id), job_state in zip(to_cancel, job_states):
-            logger.info(f"Job {job_id} on cluster {cluster} state: {job_state}")
+            logger.info(f"Job {job_id} on cluster {cluster} is in state: {job_state}")
             cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
-            if job_state.startswith(tuple(["CANCELLED"] + FAILED_JOB_STATES)):
+            if job_state.startswith(("CANCELLED", "COMPLETED")):
                 console.print(f"Job {job_id} on cluster {cluster} is now {job_state}.")
                 to_cancel.remove((cluster, job_id))
+                # TODO: Do we remove the jobs from the table if they failed?
                 # Also remove from `cluster_to_jobid` so the ctrl+c handler below doesn't
                 # try to cancel it again.
                 # cluster_and_jobid_to_jobstate.pop((cluster, job_id))
     console.print(
-        f"Successfully cancelled all other jobs except for job {first_running_job.job_id} on cluster {first_running_job.cluster}."
+        f"Successfully cancelled all other jobs except for job {first_running_job.job_id} on "
+        f"cluster {first_running_job.cluster}."
     )
 
 
@@ -457,7 +475,7 @@ async def sbatch(
 
 async def get_job_state(remote: Remote | None, job_id: int) -> str:
     """Get the state of the job with the given id on the remote cluster with `sacct`."""
-    sacct_command = f"sacct -j {job_id} --format=State --noheader --allocations"
+    sacct_command = f"sacct -j {job_id} --format=State --parsable2 --noheader --allocations"
     if remote:
         return await remote.get_output(sacct_command, hide=True)
     result = await run(tuple(shlex.split(sacct_command)), hide=True)

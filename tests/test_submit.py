@@ -401,14 +401,15 @@ async def test_submit_first_considers_current_cluster(
     sbatch_args = ["--account=my_account", "--mem=8G"]
     program_args = ["program_arg_1", "program_arg_2"]
     dummy_commit = "dummy_git_commit"
-    returned_jobid = await submit_first(
+    returned_job = await submit_first(
         job_script=job_script,
         sbatch_args=sbatch_args,
         program_args=program_args,
         git_commit=dummy_commit,
     )
+    assert returned_job
     mock_sync.assert_awaited_once()
     if runs_first_on_current_cluster:
-        assert returned_jobid == this_cluster_jobid
+        assert returned_job.job_id == this_cluster_jobid
     else:
-        assert returned_jobid == other_cluster_jobid
+        assert returned_job.job_id == other_cluster_jobid

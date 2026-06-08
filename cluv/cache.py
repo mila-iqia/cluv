@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 from cluv.utils import find_pyproject
@@ -27,23 +26,7 @@ class Job:
     program_args: list[str]
 
 
-def save_job(
-    job_id: int,
-    cluster: str,
-    job_script: str,
-    git_commit: str,
-    sbatch_args: list[str],
-    program_args: list[str],
-) -> None:
-    job = Job(
-        job_id=job_id,
-        cluster=cluster,
-        job_script=job_script,
-        git_commit=git_commit,
-        submitted_at=datetime.now(timezone.utc).isoformat(),
-        sbatch_args=sbatch_args,
-        program_args=program_args,
-    )
+def save_job(job: Job) -> None:
     path = get_cache_path()
 
     path.parent.mkdir(parents=True, exist_ok=True)

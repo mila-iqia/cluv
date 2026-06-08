@@ -31,7 +31,7 @@ async def submit(
     job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
-) -> int | None:
+) -> Job | None:
     """Submit a SLURM job on a remote cluster.
 
     Enforces a clean git state, syncs the project, sets `GIT_COMMIT` and any
@@ -68,7 +68,10 @@ async def submit(
     here = current_cluster()
 
     if cluster == "first":
-        return await submit_first(job_script, sbatch_args, program_args, git_commit)
+        job = await submit_first(job_script, sbatch_args, program_args, git_commit)
+        if job:
+            save_job(job)
+        return job
 
     if cluster != here:
         # Sync.
@@ -78,20 +81,31 @@ async def submit(
         # Submitting to the current cluster.
         remote = None
     result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
+    submit_time = datetime.datetime.now()
 
     if result.returncode != 0:
         console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
         return None
 
     job_id = int(result.stdout.strip())
-    save_job(job_id, cluster, str(job_script), git_commit, sbatch_args, program_args)
+    job = Job(
+        job_id=job_id,
+        cluster=cluster,
+        job_script=str(job_script),
+        git_commit=git_commit,
+        sbatch_args=sbatch_args,
+        program_args=program_args,
+        submitted_at=submit_time.isoformat(),
+    )
+    save_job(job)
 
     console.log(
         f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
-        f"Use `ssh {cluster} sacct -j {job_id}` to view its status."
+        f"Use `ssh {cluster} sacct -j {job_id}` to view its status, and `cluv sync {cluster}` to "
+        f"fetch results once it is complete.."
     )
 
-    return job_id
+    return job
 
 
 async def submit_first(
@@ -114,6 +128,10 @@ async def submit_first(
         assert not any(remote.hostname == this_cluster for remote in remotes)
 
     # Submit the job on all the clusters (and possibly locally).
+    sbatch_commands = {
+        cluster: get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
+        for cluster in cluster_to_remote
+    }
     sbatch_results = await asyncio.gather(
         *[
             sbatch(
@@ -134,16 +152,27 @@ async def submit_first(
 
     cluster_to_jobid: dict[str, int] = {}
     table = rich.table.Table("Cluster", "Result", title="Jobs submitted on the clusters")
-    for cluster, result in cluster_to_sbatch_result.items():
-        if isinstance(result, BaseException):
-            table.add_row(cluster, f"[red]Error: {result}[/red]")
+    for cluster, sbatch_result in cluster_to_sbatch_result.items():
+        sbatch_command = sbatch_commands[cluster]
+        if isinstance(sbatch_result, BaseException):
+            table.add_row(
+                cluster, f"{sbatch_command}\n[red]Error: {sbatch_result}[/red]", end_section=True
+            )
         else:
-            if result.returncode == 0:
-                job_id = int(result.stdout.strip())
+            if sbatch_result.returncode == 0:
+                job_id = int(sbatch_result.stdout.strip())
                 cluster_to_jobid[cluster] = job_id
-                table.add_row(cluster, f"[green]Job ID: {job_id}[/green]")
+                table.add_row(
+                    cluster,
+                    f"{sbatch_command}\n[green]Job ID: {job_id}[/green]",
+                    end_section=True,
+                )
             else:
-                table.add_row(cluster, f"[red]Error: {result.stderr.strip()}[/red]")
+                table.add_row(
+                    cluster,
+                    f"{sbatch_command}\n[red]Error: {sbatch_result.stderr.strip()}[/red]",
+                    end_section=True,
+                )
     console.print(table)
 
     if not cluster_to_jobid:
@@ -177,9 +206,9 @@ async def submit_first(
                 rich.text.Text(
                     job_state,
                     style="green"
-                    if job_state.startswith(("RUNNING", "COMPLETED"))
+                    if job_state.startswith(("RUNNING", "COMPLETED", "CANCELLED"))
                     else "yellow"
-                    if job_state.startswith("PENDING")
+                    if job_state.startswith(("PENDING", "UNKNOWN"))
                     else "red",
                 ),
             )
@@ -212,6 +241,14 @@ async def submit_first(
             f"Successfully cancelled all other jobs except for job {first_running_job.job_id} "
             f"on cluster {first_running_job.cluster}, which is {first_running_job.state}."
         )
+        if first_running_job.state.startswith("RUNNING"):
+            console.print(
+                f"Use `ssh {first_running_job.cluster} sacct -j {first_running_job.job_id}` to view its status."
+            )
+            console.print(
+                f"Once completed, run `cluv sync {first_running_job.cluster}` to fetch its results."
+            )
+
     except (KeyboardInterrupt, asyncio.CancelledError, Exception):
         console.log("Interrupted by user. Cancelling all jobs...")
         to_cancel = list(cluster_to_jobid.items())
@@ -466,11 +503,11 @@ async def sbatch(
     # Should be set, since `remote` is None if current_cluster() is the same as the cluster argument
     # to `submit`.
     assert cluster
-    remote_cmd = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
+    sbatch_command = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
     if remote:
-        return await remote.run(remote_cmd, display=True, warn=True, hide=True)
+        return await remote.run(sbatch_command, display=False, warn=True, hide=True)
     # Run the sbatch command locally.
-    return await run(tuple(shlex.split(remote_cmd)), _display=True, warn=True, hide=True)
+    return await run(tuple(shlex.split(sbatch_command)), _display=False, warn=True, hide=True)
 
 
 async def get_job_state(remote: Remote | None, job_id: int) -> str:

@@ -1,11 +1,19 @@
+import shlex
 import subprocess
 import textwrap
+import unittest
+import unittest.mock
 from pathlib import Path
 
 import pytest
 
-from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command
+import cluv.cli.init
+import cluv.cli.submit
+import cluv.remote
+import cluv.utils
+from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command, submit
 from cluv.config import get_cluv_config
+from cluv.utils import current_cluster
 
 
 @pytest.fixture(autouse=True)
@@ -27,6 +35,27 @@ def project_dir(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     project_dir = fake_home / "my_project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)  # Set current working dir
+    return project_dir
+
+
+@pytest.fixture
+def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.chdir(project_dir)  # Set current working dir
+
+    # def uv_init_without_git():
+    #     subprocess.check_output(("uv", "init", "--package", "--vcs", "none"), text=True)
+
+    # # from cluv.cli.init import run_uv_init
+
+    # monkeypatch.setattr(
+    #     "cluv.cli.init",
+    #     run_uv_init.__name__,
+    #     mock := unittest.mock.Mock(uv_init_without_git),
+    # )
+    # from cluv.cli import init
+
+    cluv.cli.init()
+    # mock.assert_called_once()
     return project_dir
 
 
@@ -165,3 +194,76 @@ class TestEnsureCleanGitState:
         monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
 
         assert ensure_clean_git_state() == "cccccccccccccccccccccccccccccccccccccccc"
+
+
+@pytest.fixture(params=["mila", "tamia", "rorqual"])
+def mock_current_cluster(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch):
+    cluster = getattr(request, "param", "mila")
+    mock = unittest.mock.Mock(spec=current_cluster, return_value=cluster)
+    monkeypatch.setattr(cluv.utils, current_cluster.__name__, mock)
+    monkeypatch.setattr(cluv.cli.submit, current_cluster.__name__, mock)
+    yield cluster
+    mock.assert_called()
+
+
+async def test_can_submit_on_current_cluster(
+    monkeypatch: pytest.MonkeyPatch, mock_current_cluster: str, cluv_project_dir: Path
+) -> None:
+    # This is a very basic test, just to check that we can call the function without error.
+    # A more thorough test would require mocking the sync and sbatch functions, which is a bit more work.
+    dummy_commit = "dummy_git_commit"
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        ensure_clean_git_state.__name__,
+        mock_ensure_clean_git_state := unittest.mock.Mock(
+            wraps=ensure_clean_git_state, side_effect=lambda: dummy_commit
+        ),
+    )
+    here = mock_current_cluster
+    monkeypatch.setenv("CC_CLUSTER", here)
+
+    jobid = 123
+
+    sbatch_args = ["--account=my_account", "--mem=8G"]
+    program_args = ["program_arg_1", "program_arg_2"]
+
+    async def fake_run(
+        program_and_args: tuple[str, ...],
+        input: str | None = None,
+        warn: bool = False,
+        hide: cluv.remote.Hide = False,
+        **other_kwargs,
+    ) -> subprocess.CompletedProcess[str]:
+        full_command = shlex.join(program_and_args)
+        assert (
+            "ssh" not in full_command
+        )  # Should not SSH since we're submitting to the current cluster.
+        assert " ".join(program_args) in full_command
+        assert " ".join(sbatch_args) in full_command
+        assert "sbatch --parsable" in full_command
+        return subprocess.CompletedProcess(
+            program_and_args, returncode=0, stdout=f"{jobid}", stderr=""
+        )
+
+    monkeypatch.setattr(
+        cluv.remote, cluv.remote.run.__name__, mock := unittest.mock.Mock(wraps=fake_run)
+    )
+    monkeypatch.setattr(
+        cluv.cli.submit, cluv.cli.submit.run.__name__, mock := unittest.mock.Mock(wraps=fake_run)
+    )
+
+    job_script = cluv_project_dir / "my_script.sh"
+    job_script.parent.mkdir(exist_ok=True)
+    job_script.write_text("#!/bin/bash\necho Hello World\n")
+    job_script.touch(0o755)
+
+    returned_jobid = await submit(
+        cluster=here,
+        job_script=job_script,
+        sbatch_args=sbatch_args,
+        program_args=program_args,
+    )
+
+    assert returned_jobid == jobid
+    mock_ensure_clean_git_state.assert_called_once()
+    mock.assert_called_once()

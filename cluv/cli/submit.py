@@ -11,9 +11,9 @@ from pathlib import Path, PurePosixPath
 from cluv.cache import save_job
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
-from cluv.remote import Remote
+from cluv.remote import Remote, run
 from cluv.slurm import FAILED_JOB_STATES
-from cluv.utils import console
+from cluv.utils import console, current_cluster
 
 RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
 logger = logging.getLogger(__name__)
@@ -60,14 +60,18 @@ async def submit(
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state()
 
+    here = current_cluster()
+
     if cluster == "first":
         return await submit_first(job_script, sbatch_args, program_args, git_commit)
 
-    # Sync.
-    remotes = await sync(clusters=[cluster])
-
-    # Run the sbatch command over SSH.
-    remote = remotes[0]
+    if cluster != here:
+        # Sync.
+        remote = (await sync(clusters=[cluster]))[0]
+        # Run the sbatch command over SSH.
+    else:
+        # Submitting to the current cluster.
+        remote = None
     result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
 
     if result.returncode != 0:
@@ -186,7 +190,9 @@ async def submit_first(
         await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)
 
     if start_job_id is not None and start_cluster is not None:
-        save_job(start_job_id, start_cluster, str(job_script), git_commit, sbatch_args, program_args)
+        save_job(
+            start_job_id, start_cluster, str(job_script), git_commit, sbatch_args, program_args
+        )
 
     return start_job_id
 
@@ -302,17 +308,22 @@ def get_sbatch_command(
 
 
 async def sbatch(
-    remote: Remote,
+    remote: Remote | None,
     job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
 ) -> subprocess.CompletedProcess[str]:
     """Submit the job via sbatch on the remote cluster, and return the job id."""
-    cluster = remote.hostname
-
+    cluster = remote.hostname if remote else current_cluster()
+    # Should be set, since `remote` is None if current_cluster() is the same as the cluster argument
+    # to `submit`.
+    assert cluster
     remote_cmd = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
-    return await remote.run(remote_cmd, display=True, warn=True, hide=True)
+    if remote:
+        return await remote.run(remote_cmd, display=True, warn=True, hide=True)
+    # Run the sbatch command locally.
+    return await run(tuple(shlex.split(remote_cmd)), _display=True, warn=True, hide=True)
 
 
 async def get_job_status(remote: Remote, job_id: int) -> str:

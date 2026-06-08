@@ -1,7 +1,6 @@
 """Unit tests for cluv/cli/init.py check functions."""
 
 import importlib
-import shutil
 import textwrap
 from pathlib import Path
 
@@ -15,7 +14,6 @@ from cluv.cli.init import (
     check_home_dir,
     check_job_script,
     check_symlink_to_scratch,
-    init,
 )
 from cluv.config import load_cluv_config
 
@@ -201,54 +199,3 @@ class TestJobScriptCheck:
         assert 'results_path="outputs"' in generated_legacy_script_content
         assert "Using $results_path" in generated_legacy_script_content
         assert "results_dir" not in generated_legacy_script_content
-
-
-class TestInitIntegration:
-    """Integration tests for the init() function that run the full init flow locally."""
-
-    @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not installed")
-    def test_init_with_path_creates_project(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """init(path=<name>) creates and initializes a project directory end-to-end."""
-        fake_home = tmp_path / "home"
-        fake_home.mkdir()
-        new_project = fake_home / "my_project"
-
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
-        monkeypatch.delenv("SCRATCH", raising=False)
-        monkeypatch.chdir(tmp_path)  # ensures cwd is restored after the test
-
-        init(path=new_project)
-
-        assert new_project.is_dir()
-        pyproject_path = new_project / "pyproject.toml"
-        assert pyproject_path.exists()
-
-        config = load_cluv_config(pyproject_path)
-        assert config.results_path is not None
-
-        assert (new_project / "scripts").is_dir()
-        assert (new_project / JOB_SCRIPT_PATH).exists()
-
-    @pytest.mark.skipif(shutil.which("uv") is None, reason="uv is not installed")
-    def test_init_without_path_uses_cwd(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """init() without a path argument runs in the current directory."""
-        fake_home = tmp_path / "home"
-        project_dir = fake_home / "my_project"
-        project_dir.mkdir(parents=True)
-
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
-        monkeypatch.delenv("SCRATCH", raising=False)
-        monkeypatch.chdir(project_dir)
-
-        init()
-
-        pyproject_path = project_dir / "pyproject.toml"
-        assert pyproject_path.exists()
-
-        config = load_cluv_config(pyproject_path)
-        assert config.results_path is not None
-

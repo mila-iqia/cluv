@@ -17,12 +17,12 @@ import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
-from cluv.config import load_cluv_config
 from cluv.cli.init import DEFAULT_RESULTS_PATH, init
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_real_cluster_status
 from cluv.cli.submit import submit
 from cluv.cli.sync import sync
+from cluv.config import load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -343,3 +343,19 @@ def test_init_twice_doesnt_raise(project_dir: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.chdir(project_dir)
     init()
     init()
+
+
+@pytest.mark.timeout(5)
+def test_init_at_path(fake_home: Path) -> None:
+    """Test that running `cluv init` at a specific path works correctly."""
+    project_path = fake_home / "my_new_project"
+    init(project_path)
+
+    generated_config = load_cluv_config(project_path / "pyproject.toml")
+    assert generated_config.results_path == DEFAULT_RESULTS_PATH
+    assert (project_path / "scripts").is_dir()
+    assert (project_path / "scripts" / "job.sh").is_file()
+    assert (project_path / "scripts" / "safe_job.sh").is_file()
+
+    expected_config = load_cluv_config(REPO_ROOT / "pyproject.toml")
+    assert generated_config.clusters_names == expected_config.clusters_names

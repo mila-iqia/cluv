@@ -9,6 +9,7 @@ import sys
 from pathlib import Path, PurePosixPath
 
 import rich.table
+from rich.live import Live
 
 from cluv.cache import save_job
 from cluv.cli.sync import sync
@@ -152,45 +153,72 @@ async def submit_first(
 
     max_wait_time_seconds = 60
     wait_time = 2  # seconds; grows up to max_wait_time_seconds.
+
+    cluster_and_jobid_to_jobstate: dict[tuple[str, int], str] = {
+        (cluster, job_id): "UNKNOWN" for cluster, job_id in cluster_to_jobid.items()
+    }
+
+    def make_table() -> rich.table.Table:
+        table = rich.table.Table("Cluster", "Job ID", "Status", title="Waiting for a job to start")
+        for (cluster, job_id), job_state in cluster_and_jobid_to_jobstate.items():
+            table.add_row(cluster, str(job_id), job_state)
+        return table
+
     try:
-        spinner = console.status("Waiting for a job to start...")
-        spinner.start()
+        with Live(make_table(), refresh_per_second=1) as live:
+            while first_running_job_id is None and cluster_to_jobid:
+                # Initial sleep after sbatch to give time for job to appear in sacct.
+                await asyncio.sleep(wait_time)
+                wait_time = min(wait_time * 2, max_wait_time_seconds)
 
-        while first_running_job_id is None:
-            for cluster, job_id in list(cluster_to_jobid.items()):
-                remote: Remote | None = cluster_to_remote[cluster]
-
-                job_state = await get_job_state(remote, job_id)
-                if job_state == "RUNNING":
-                    first_running_job_cluster = cluster
-                    first_running_job_id = job_id
-                    break
-                elif job_state in FAILED_JOB_STATES:
-                    console.print(
-                        f"Job {job_id} on cluster {cluster} ended with status {job_state}."
+                job_states = await asyncio.gather(
+                    *(
+                        get_job_state(cluster_to_remote[cluster], job_id)
+                        for cluster, job_id in cluster_to_jobid.items()
                     )
-                    cluster_to_jobid.pop(cluster)
+                )
+
+                for (cluster, job_id), job_state in zip(
+                    cluster_and_jobid_to_jobstate.keys(), job_states
+                ):
+                    cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
+                    if job_state in ["RUNNING", "COMPLETED"]:
+                        first_running_job_cluster = cluster
+                        first_running_job_id = job_id
+                        break
+                    elif job_state in FAILED_JOB_STATES:
+                        console.print(
+                            f"Job {job_id} on cluster {cluster} ended with status {job_state}."
+                        )
+                        cluster_to_jobid.pop(cluster)
+                live.update(make_table())
 
             # Stop the wait if all the jobs failed
             if not cluster_to_jobid:
                 console.log("All submitted jobs have failed! Exiting.")
                 return None
 
-            await asyncio.sleep(wait_time)
-            wait_time = min(wait_time * 2, max_wait_time_seconds)
-
-        spinner.stop()
-        if first_running_job_id:
-            console.log(
-                f"Job {first_running_job_id} on cluster {first_running_job_cluster} is running. Cancelling the other jobs...\n",
-                f"Use `ssh {first_running_job_cluster} sacct -j {first_running_job_id}` to view its status.",
-            )
     except (KeyboardInterrupt, asyncio.CancelledError):
         console.log("Interrupted by user. Cancelling all jobs...")
     finally:
-        await cancel_all_jobs(cluster_to_remote, cluster_to_jobid, first_running_job_cluster)
+        to_cancel = list(
+            cluster_to_jobid.items()
+        )  # a dict for now, might become a list of tuples.
+        if first_running_job_cluster:
+            assert first_running_job_id is not None
+            to_cancel.remove((first_running_job_cluster, first_running_job_id))
+        await asyncio.gather(
+            *[cancel_job(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel]
+        )
 
-    if first_running_job_id is not None and first_running_job_cluster is not None:
+    if first_running_job_id is not None:
+        assert first_running_job_cluster is not None
+        console.log(
+            f"Job {first_running_job_id} on cluster {first_running_job_cluster} is running. "
+            f"Cancelling the other jobs...\n",
+            f"Use `ssh {first_running_job_cluster} sacct -j {first_running_job_id}` to view its "
+            f"status.",
+        )
         save_job(
             first_running_job_id,
             first_running_job_cluster,
@@ -334,7 +362,7 @@ async def sbatch(
 
 async def get_job_state(remote: Remote | None, job_id: int) -> str:
     """Get the state of the job with the given id on the remote cluster with `sacct`."""
-    sacct_command = f"sacct -j {job_id} --format=State --noheader --allocations"
+    sacct_command = f"sacct -j {job_id} --parsable2 --format=State --noheader --allocations"
     if remote:
         return await remote.get_output(sacct_command, hide=True)
     result = await run(tuple(shlex.split(sacct_command)), hide=True)
@@ -355,13 +383,16 @@ async def cancel_job(remote: Remote | None, job_id: int) -> str:
 
 
 async def cancel_all_jobs(
-    remotes: dict[str, Remote | None], cluster_to_jobid: dict[str, int], keep_cluster: str | None
+    remotes: dict[str, Remote | None],
+    cluster_and_jobid: list[tuple[str, int]],
+    keep_cluster: str | None,
+    keep_job_id: int | None,
 ) -> None:
     """Cancel all jobs in cluster_to_jobid on their respective remotes."""
     await asyncio.gather(
         *[
             cancel_job(remotes[cluster], job_id)
-            for cluster, job_id in cluster_to_jobid.items()
-            if cluster != keep_cluster
+            for cluster, job_id in cluster_and_jobid.items()
+            if cluster != keep_cluster and job_id != keep_job_id
         ]
     )

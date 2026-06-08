@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import datetime
 import logging
 import os
 import shlex
@@ -11,7 +13,7 @@ from pathlib import Path, PurePosixPath
 import rich.table
 from rich.live import Live
 
-from cluv.cache import save_job
+from cluv.cache import Job, save_job
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
@@ -96,7 +98,7 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-) -> int | None:
+) -> Job | None:
     """Submit the job on all clusters, and wait until one of them starts.
     Once one starts, cancel the others.
     """
@@ -124,6 +126,7 @@ async def submit_first(
         ],
         return_exceptions=True,
     )
+    submit_time = datetime.datetime.now()
     # TODO: This could be a list of tuples eventually, since we could potentially try to submit
     # multiple different jobs per cluster.
     cluster_to_sbatch_result = dict(zip(cluster_to_remote.keys(), sbatch_results))
@@ -148,87 +151,179 @@ async def submit_first(
 
     # Wait for a job to start on a cluster.
     # If the wait is interrupted, cancel all jobs.
-    first_running_job_cluster: str | None = None
-    first_running_job_id: int | None = None
+    first_running_job: JobHandle | None = None
 
     max_wait_time_seconds = 60
-    wait_time = 2  # seconds; grows up to max_wait_time_seconds.
 
     cluster_and_jobid_to_jobstate: dict[tuple[str, int], str] = {
         (cluster, job_id): "UNKNOWN" for cluster, job_id in cluster_to_jobid.items()
     }
+    cancelling = False
 
     def make_table() -> rich.table.Table:
-        table = rich.table.Table("Cluster", "Job ID", "Status", title="Waiting for a job to start")
+        nonlocal cancelling
+        table = rich.table.Table(
+            "Cluster",
+            "Job ID",
+            "Status",
+            title="Waiting for a job to start"
+            if not cancelling
+            else "Waiting for other jobs to be cancelled",
+        )
         for (cluster, job_id), job_state in cluster_and_jobid_to_jobstate.items():
             table.add_row(cluster, str(job_id), job_state)
         return table
 
     try:
-        with Live(make_table(), refresh_per_second=1) as live:
-            while first_running_job_id is None and cluster_to_jobid:
-                # Initial sleep after sbatch to give time for job to appear in sacct.
-                await asyncio.sleep(wait_time)
-                wait_time = min(wait_time * 2, max_wait_time_seconds)
-
-                job_states = await asyncio.gather(
-                    *(
-                        get_job_state(cluster_to_remote[cluster], job_id)
-                        for cluster, job_id in cluster_to_jobid.items()
-                    )
-                )
-
-                for (cluster, job_id), job_state in zip(
-                    cluster_and_jobid_to_jobstate.keys(), job_states
-                ):
-                    cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
-                    if job_state in ["RUNNING", "COMPLETED"]:
-                        first_running_job_cluster = cluster
-                        first_running_job_id = job_id
-                        break
-                    elif job_state in FAILED_JOB_STATES:
-                        console.print(
-                            f"Job {job_id} on cluster {cluster} ended with status {job_state}."
-                        )
-                        cluster_to_jobid.pop(cluster)
-                live.update(make_table())
-
-            # Stop the wait if all the jobs failed
-            if not cluster_to_jobid:
+        with Live(get_renderable=make_table, console=console, refresh_per_second=1) as live:
+            first_running_job = await wait_for_running_job(
+                cluster_and_jobid_to_jobstate, cluster_to_remote, max_wait_time_seconds
+            )
+            live.update(make_table(), refresh=True)
+            if not first_running_job:
                 console.log("All submitted jobs have failed! Exiting.")
                 return None
 
-    except (KeyboardInterrupt, asyncio.CancelledError):
+            console.log(
+                f"Job {first_running_job.job_id} on cluster {first_running_job.cluster} is {first_running_job.state}. "
+                f"Cancelling the other jobs...\n",
+            )
+            cancelling = True
+            await wait_for_jobs_to_cancel(
+                cluster_and_jobid_to_jobstate,
+                first_running_job,
+                cluster_to_remote,
+                max_wait_time_seconds,
+            )
+            live.update(make_table(), refresh=True)
+
+        console.print(
+            f"Successfully cancelled all other jobs except for job {first_running_job.job_id} on cluster {first_running_job.cluster}."
+        )
+    except (KeyboardInterrupt, asyncio.CancelledError, Exception):
         console.log("Interrupted by user. Cancelling all jobs...")
-    finally:
-        to_cancel = list(
-            cluster_to_jobid.items()
-        )  # a dict for now, might become a list of tuples.
-        if first_running_job_cluster:
-            assert first_running_job_id is not None
-            to_cancel.remove((first_running_job_cluster, first_running_job_id))
+        to_cancel = list(cluster_to_jobid.items())
+        if first_running_job:
+            to_cancel.remove((first_running_job.cluster, first_running_job.job_id))
         await asyncio.gather(
-            *[cancel_job(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel]
+            *[
+                cancel_job(cluster_to_remote[cluster], job_id, print=True)
+                for cluster, job_id in to_cancel
+            ]
         )
 
-    if first_running_job_id is not None:
-        assert first_running_job_cluster is not None
-        console.log(
-            f"Job {first_running_job_id} on cluster {first_running_job_cluster} is running. "
-            f"Cancelling the other jobs...\n",
-            f"Use `ssh {first_running_job_cluster} sacct -j {first_running_job_id}` to view its "
-            f"status.",
-        )
-        save_job(
-            first_running_job_id,
-            first_running_job_cluster,
-            str(job_script),
-            git_commit,
-            sbatch_args,
-            program_args,
-        )
     # TODO: Return the cluster and job id.
-    return first_running_job_id
+    assert first_running_job
+    return Job(
+        job_id=first_running_job.job_id,
+        cluster=first_running_job.cluster,
+        job_script=str(job_script),
+        git_commit=git_commit,
+        sbatch_args=sbatch_args,
+        program_args=program_args,
+        submitted_at=submit_time.isoformat(),
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class JobHandle:
+    cluster: str
+    job_id: int
+    state: str
+
+
+async def wait_for_running_job(
+    cluster_and_jobid_to_jobstate: dict[tuple[str, int], str],
+    cluster_to_remote: dict[str, Remote | None],
+    max_wait_time_seconds: int = 60,
+) -> JobHandle | None:
+    """Watch the jobs with sacct until one of them starts (or completes)."""
+
+    first_running_job: JobHandle | None = None
+    wait_time = 10
+
+    to_query = list(cluster_and_jobid_to_jobstate.keys())
+
+    while first_running_job is None and to_query:
+        # Initial sleep after sbatch to give time for job to appear in sacct.
+        await asyncio.sleep(wait_time)
+        wait_time = min(wait_time * 2, max_wait_time_seconds)
+
+        job_states = await asyncio.gather(
+            *(get_job_state(cluster_to_remote[cluster], job_id) for cluster, job_id in to_query)
+        )
+
+        for (cluster, job_id), job_state in zip(to_query.copy(), job_states):
+            if (previous_state := cluster_and_jobid_to_jobstate[(cluster, job_id)]) != job_state:
+                console.print(
+                    f"Job {job_id} on cluster {cluster}: {previous_state} -> {job_state}"
+                )
+            cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
+            if job_state.startswith(("RUNNING", "COMPLETED")):
+                return JobHandle(job_id=job_id, cluster=cluster, state=job_state)
+            if job_state in FAILED_JOB_STATES:
+                to_query.remove((cluster, job_id))
+    # If all failed, `cluster_and_jobid_to_jobstate` is empty.
+    assert not to_query
+    return None
+
+
+async def wait_for_jobs_to_cancel(
+    cluster_and_jobid_to_jobstate: dict[tuple[str, int], str],
+    first_running_job: JobHandle,
+    cluster_to_remote: dict[str, Remote | None],
+    max_wait_time_seconds: int = 60,
+) -> JobHandle | None:
+
+    to_cancel = list(cluster_and_jobid_to_jobstate.keys())
+    to_cancel.remove((first_running_job.cluster, first_running_job.job_id))
+
+    job_states = await asyncio.gather(
+        *(get_job_state(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
+    )
+    to_cancel = [
+        (cluster, job_id)
+        for (cluster, job_id), job_state in zip(to_cancel, job_states)
+        if not job_state.startswith(("CANCELLED", "COMPLETED"))
+    ]
+
+    logger.info(f"Need to cancel the following jobs: {to_cancel}")
+
+    await asyncio.gather(
+        *[
+            cancel_job(cluster_to_remote[cluster], job_id, print=True)
+            for cluster, job_id in to_cancel
+        ]
+    )
+    wait_time = 5
+
+    while not all(
+        cluster_and_jobid_to_jobstate[cluster_jobid].startswith(
+            tuple(["CANCELLED"] + FAILED_JOB_STATES)
+        )
+        for cluster_jobid in to_cancel.copy()
+    ):
+        # Initial sleep after scancel to give time for job to be cancelled.
+        await asyncio.sleep(wait_time)
+        wait_time = min(wait_time * 2, max_wait_time_seconds)
+
+        job_states = await asyncio.gather(
+            *(get_job_state(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
+        )
+        logger.debug(f"Job states: {job_states}")
+
+        for (cluster, job_id), job_state in zip(to_cancel, job_states):
+            logger.info(f"Job {job_id} on cluster {cluster} state: {job_state}")
+            cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
+            if job_state.startswith(tuple(["CANCELLED"] + FAILED_JOB_STATES)):
+                console.print(f"Job {job_id} on cluster {cluster} is now {job_state}.")
+                to_cancel.remove((cluster, job_id))
+                # Also remove from `cluster_to_jobid` so the ctrl+c handler below doesn't
+                # try to cancel it again.
+                # cluster_and_jobid_to_jobstate.pop((cluster, job_id))
+    console.print(
+        f"Successfully cancelled all other jobs except for job {first_running_job.job_id} on cluster {first_running_job.cluster}."
+    )
 
 
 def ensure_clean_git_state() -> str:
@@ -362,22 +457,24 @@ async def sbatch(
 
 async def get_job_state(remote: Remote | None, job_id: int) -> str:
     """Get the state of the job with the given id on the remote cluster with `sacct`."""
-    sacct_command = f"sacct -j {job_id} --parsable2 --format=State --noheader --allocations"
+    sacct_command = f"sacct -j {job_id} --format=State --noheader --allocations"
     if remote:
         return await remote.get_output(sacct_command, hide=True)
     result = await run(tuple(shlex.split(sacct_command)), hide=True)
     return result.stdout.strip()
 
 
-async def cancel_job(remote: Remote | None, job_id: int) -> str:
+async def cancel_job(remote: Remote | None, job_id: int, print: bool = False) -> str:
     """Cancel the job with the given id on the remote cluster."""
     scancel_command = f"scancel {job_id}"
     if remote:
         output = await remote.get_output(scancel_command, hide=True)
-        console.print(f"Cancelled job {job_id} on cluster {remote.hostname}.")
+        if print:
+            console.print(f"Cancelled job {job_id} on cluster {remote.hostname}.")
     else:
         result = await run(tuple(shlex.split(scancel_command)), hide=True)
-        console.print(f"Cancelled job {job_id} on the current cluster.")
+        if print:
+            console.print(f"Cancelled job {job_id} on the current cluster.")
         output = result.stdout
     return output
 

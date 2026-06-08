@@ -3,6 +3,7 @@
 This is a simplified job script, used to test the syncing of the 'dataset' across clusters.
 """
 
+import enum
 import functools
 import os
 import re
@@ -24,6 +25,38 @@ SLURM_PROCID = int(os.environ["SLURM_PROCID"]) if "SLURM_PROCID" in os.environ e
 
 in_job_packing = "SLURM_NTASKS_PER_GPU" in os.environ
 in_job_array = "SLURM_ARRAY_JOB_ID" in os.environ
+
+
+class SlurmState(str, enum.Enum):
+    """Possible Slurm job states.
+
+    Reference: https://slurm.schedmd.com/squeue.html#SECTION_JOB-STATE-CODES
+    """
+
+    BOOT_FAIL = "BOOT_FAIL"
+    CANCELLED = "CANCELLED"
+    COMPLETED = "COMPLETED"
+    CONFIGURING = "CONFIGURING"
+    COMPLETING = "COMPLETING"
+    DEADLINE = "DEADLINE"
+    FAILED = "FAILED"
+    NODE_FAIL = "NODE_FAIL"
+    OUT_OF_MEMORY = "OUT_OF_MEMORY"
+    PENDING = "PENDING"
+    PREEMPTED = "PREEMPTED"
+    RUNNING = "RUNNING"
+    RESV_DEL_HOLD = "RESV_DEL_HOLD"
+    REQUEUE_FED = "REQUEUE_FED"
+    REQUEUE_HOLD = "REQUEUE_HOLD"
+    REQUEUED = "REQUEUED"
+    RESIZING = "RESIZING"
+    REVOKED = "REVOKED"
+    SIGNALING = "SIGNALING"
+    SPECIAL_EXIT = "SPECIAL_EXIT"
+    STAGE_OUT = "STAGE_OUT"
+    STOPPED = "STOPPED"
+    SUSPENDED = "SUSPENDED"
+    TIMEOUT = "TIMEOUT"
 
 
 @dataclass(frozen=True)

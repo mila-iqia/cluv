@@ -17,7 +17,7 @@ def get_cache_path() -> Path:
 
 
 @dataclass
-class CachedJob:
+class Job:
     job_id: int
     cluster: str
     job_script: str
@@ -35,7 +35,7 @@ def save_job(
     sbatch_args: list[str],
     program_args: list[str],
 ) -> None:
-    job = CachedJob(
+    job = Job(
         job_id=job_id,
         cluster=cluster,
         job_script=job_script,
@@ -51,14 +51,14 @@ def save_job(
         f.write(json.dumps(asdict(job)) + "\n")
 
 
-def load_jobs() -> list[CachedJob]:
+def load_jobs() -> list[Job]:
     path = get_cache_path()
     if not path.exists():
         return []
     jobs = []
     for line in path.read_text().splitlines():
         try:
-            jobs.append(CachedJob(**json.loads(line)))
+            jobs.append(Job(**json.loads(line)))
         except Exception:
             pass
     return jobs

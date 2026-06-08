@@ -10,7 +10,8 @@ from cluv.utils import console
 __all__ = ["init"]
 
 SCRIPTS_DIR_PATH = "scripts"
-DEFAULT_RESULTS_PATH = "logs"
+DEFAULT_RESULTS_PATH = "$SCRATCH/logs/cluv"
+DEFAULT_RESULTS_LINKNAME = "logs"
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # Repository root when running cluv from a source checkout.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -65,7 +66,7 @@ def init(path: Path | None = None) -> None:
     check_job_script(pyproject_path.parent, config.results_path)
 
     # Check if the results path is correctly symlinked to scratch
-    check_symlink_to_scratch(pyproject_path.parent, config.results_path)
+    check_symlink_to_scratch(pyproject_path.parent, config.results_path, config.results_symlink)
 
     # Show what the user can do next after the project setup
     console.print()
@@ -159,10 +160,10 @@ def check_git() -> None:
         raise RuntimeError("Error when checking git remote: ", git_remote.stderr)
 
 
-def check_symlink_to_scratch(project_root: Path, results_path: str) -> None:
+def check_symlink_to_scratch(project_root: Path, results_path: str, results_symlink: str) -> None:
     """
     Check if a symlink from the results_path in the project in $HOME to the corresponding path in $SCRATCH already exists. If not, create it.
-    The symlink should be like : $HOME/<project>/<results_path> -> $SCRATCH/<results_path>/<project_name>
+    The symlink should be like : $HOME/<project>/<results_symlink> -> $SCRATCH/<results_path>/<project_name>
     """
     if "SCRATCH" not in os.environ:
         console.print(
@@ -171,8 +172,8 @@ def check_symlink_to_scratch(project_root: Path, results_path: str) -> None:
         return
 
     # Generate the expected scratch and symlink path
-    scratch_path = Path(os.path.expandvars(f"$SCRATCH/{results_path}/{project_root.name}"))
-    symlink_path = project_root / results_path
+    scratch_path = Path(os.path.expandvars(results_path))
+    symlink_path = project_root / results_symlink
 
     if symlink_path.is_symlink():
         if symlink_path.resolve() == scratch_path.resolve():

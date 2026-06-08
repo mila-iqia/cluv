@@ -6,9 +6,17 @@ All functions are free of I/O and can be unit-tested against fixture strings.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
-from cluv.cli.status import StorageStats
+FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
+@dataclass
+class StorageStats:
+    """Disk usage as (used_gib, quota_gib) for $HOME and $SCRATCH."""
+    home_used: float
+    home_quota: float
+    scratch_used: float
+    scratch_quota: float
 
 # ---------------------------------------------------------------------------
 # partition-stats (DRAC-only)
@@ -169,7 +177,7 @@ def parse_sinfo_nodes(output: str) -> tuple[int, int, list[str]]:
         parts = line.split(None, 2)
         if len(parts) < 3:
             continue
-        _node, state, gres_field = parts[0], parts[1].lower(), parts[2]
+        _, state, gres_field = parts[0], parts[1].lower(), parts[2]
 
         matches = _GRES_RE.findall(gres_field)
         if not matches:

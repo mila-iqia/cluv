@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from cluv.config import get_config
+from cluv.config import get_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 from cluv.utils import console, current_cluster
 
@@ -19,7 +19,7 @@ async def login(clusters: list[str]) -> list[Remote]:
     Returns:
         A list of `Remote` objects, one for each cluster.
     """
-    clusters = clusters or get_config().clusters_names
+    clusters = clusters or get_cluv_config().clusters_names
     if (this_cluster := current_cluster()) and this_cluster in clusters:
         # don't try to connect to the cluster we're already on.
         clusters.remove(this_cluster)

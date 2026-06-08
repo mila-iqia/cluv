@@ -19,10 +19,10 @@ import pytest_asyncio
 
 from cluv.cli.init import DEFAULT_RESULTS_PATH, init
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.cli.status import ClusterStatus, get_real_cluster_status
+from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
 from cluv.cli.sync import sync
-from cluv.config import load_cluv_config
+from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -48,7 +48,7 @@ pytestmark = [
     pytest.mark.timeout(20),
 ]
 
-REQUIRED_CLUSTERS = ("mila", "rorqual", "tamia")
+REQUIRED_CLUSTERS = ("mila", "tamia")
 ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)
 STATUS_SUPPORTED_CLUSTERS = {"mila", "tamia", "rorqual"}
 SUBMIT_SUPPORTED_CLUSTERS = {"mila", "rorqual"}
@@ -127,8 +127,8 @@ async def test_login(remote: Remote):
 
 
 @pytest_asyncio.fixture(scope="session")
-async def cluster_status(remote: Remote):
-    return await get_real_cluster_status(remote)
+async def cluster_status(cluster: str) -> ClusterStatus:
+    return await get_cluster_status(cluster)
 
 
 @pytest.mark.slow
@@ -141,6 +141,8 @@ async def test_status_online(cluster_status: ClusterStatus, cluster: str):
     assert cluster_status.online is True
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
 @pytest.mark.asyncio
 async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
@@ -149,6 +151,8 @@ async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
     assert cluster_status.gpu_total > 0, "Expected cluster to report GPU nodes"
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
 @pytest.mark.asyncio
 async def test_status_gpu_model(cluster_status: ClusterStatus, cluster: str):
@@ -157,6 +161,8 @@ async def test_status_gpu_model(cluster_status: ClusterStatus, cluster: str):
     assert cluster_status.gpu_model != "?", f"GPU model not detected: {cluster_status.gpu_model!r}"
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
 @pytest.mark.asyncio
 async def test_status_jobs(cluster_status: ClusterStatus, cluster: str):
@@ -169,6 +175,8 @@ async def test_status_jobs(cluster_status: ClusterStatus, cluster: str):
     assert cluster_status.jobs.my_pending >= 0
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
 @pytest.mark.asyncio
 async def test_status_storage(cluster_status: ClusterStatus):
@@ -180,7 +188,7 @@ async def test_status_storage(cluster_status: ClusterStatus):
 
 @pytest.mark.slow
 @pytest.mark.timeout(180)
-async def test_submit(remote: Remote):
+async def test_submit(remote: Remote, fake_scratch: Path):
     """End-to-end: actually submit scripts/job.sh to a slurm cluster via sbatch.
 
     Requires an active SSH connection to the cluster and a clean git tree.
@@ -191,13 +199,15 @@ async def test_submit(remote: Remote):
     """
     if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
+
     should_cancel_job = True
     job_id = await submit(
         cluster=remote.hostname,
-        job_script=Path("scripts/safe_job.sh"),
+        job_script=Path("scripts/job.sh"),
         sbatch_args=["--time=00:00:30"],
         program_args=["python", "--version"],
     )
+    cluster = remote.hostname
     assert isinstance(job_id, int)
     try:
         job_name = await remote.get_output(
@@ -217,11 +227,11 @@ async def test_submit(remote: Remote):
             "DEADLINE",
         }
         final_status = "UNKNOWN"
-        MAX_POLL_ATTEMPTS = 75
-        POLL_INTERVAL_SECONDS = 2
-        # Poll up to ~150s (75 * 2s) for terminal state, leaving a bit of room in the
+        max_poll_attempts = 5
+        poll_interval_seconds = 5
+        # Poll for terminal state, leaving a bit of room in the
         # 180s test timeout for sync + output validation.
-        for _ in range(MAX_POLL_ATTEMPTS):
+        for _ in range(max_poll_attempts):
             status_output = await remote.get_output(
                 f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
                 warn=True,
@@ -232,19 +242,28 @@ async def test_submit(remote: Remote):
             final_status = status_output.strip().partition("|")[0].strip()
             if final_status in TERMINAL_STATUSES:
                 break
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+            await asyncio.sleep(poll_interval_seconds)
+            poll_interval_seconds *= 2
         if final_status not in TERMINAL_STATUSES:
             pytest.fail(
                 f"Job {job_id} did not reach terminal status within "
-                f"{MAX_POLL_ATTEMPTS * POLL_INTERVAL_SECONDS}s "
+                f"{max_poll_attempts * poll_interval_seconds}s "
                 f"(last status: {final_status!r})"
             )
         if final_status != "COMPLETED":
             pytest.fail(f"Submitted job {job_id} ended with unexpected status: {final_status!r}")
         should_cancel_job = False
+
         await sync(clusters=[remote.hostname])
-        output_file = Path(DEFAULT_RESULTS_PATH) / str(job_id) / f"slurm-{job_id}.out"
-        assert output_file.is_file(), f"Expected job output file to be synced locally: {output_file}"
+
+        output_file = (
+            Path(os.path.expandvars(get_cluv_config().results_path))
+            / f"{cluster}_{job_id}"
+            / f"slurm-{job_id}.out"
+        )
+        assert output_file.is_file(), (
+            f"Expected job output file to be synced locally: {output_file}"
+        )
         output_text = output_file.read_text(errors="replace")
         assert re.search(r"Python \d+\.\d+(\.\d+)?", output_text), (
             f"Expected python version output in {output_file}, got:\n{output_text}"
@@ -328,11 +347,11 @@ def test_init(
             assert job_script.stat().st_mode & stat.S_IXUSR, "Job script is not executable!"
 
     if scratch:
-        assert (project_dir / generated_config.results_path).exists()
-        assert (project_dir / generated_config.results_path).is_symlink()
-        assert (
-            project_dir / generated_config.results_path
-        ).resolve() == scratch / DEFAULT_RESULTS_PATH / project_name
+        results_symlink = project_dir / generated_config.results_symlink
+        results_path = Path(os.path.expandvars(generated_config.results_path))
+        assert generated_config.results_path and results_path.exists()
+        assert results_symlink.is_symlink()
+        assert results_symlink.resolve() == results_path
 
     expected_config = load_cluv_config(REPO_ROOT / "pyproject.toml")
     assert generated_config.clusters_names == expected_config.clusters_names

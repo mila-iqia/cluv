@@ -66,12 +66,12 @@ class ClusterConfig:
     def expandvars(self):
         return ClusterConfig(
             env=self.env,
-            results_path=Path(os.path.expandvars(self.results_path)),
+            results_path=Path(os.path.expandvars(str(self.results_path))),
             datasets_path=(
-                Path(os.path.expandvars(self.datasets_path)) if self.datasets_path else None
+                Path(os.path.expandvars(str(self.datasets_path))) if self.datasets_path else None
             ),
             job_script_path=(
-                Path(os.path.expandvars(self.job_script_path)) if self.job_script_path else None
+                Path(os.path.expandvars(str(self.job_script_path))) if self.job_script_path else None
             ),
         )
 

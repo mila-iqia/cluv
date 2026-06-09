@@ -31,6 +31,23 @@ def project_dir(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return project_dir
 
 
+def patch_submit(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    call_args: dict[str, object] = {}
+
+    async def fake_submit(
+        cluster: str, job_script: Path | None, sbatch_args: list[str], program_args: list[str]
+    ) -> None:
+        call_args.update(
+            cluster=cluster,
+            job_script=job_script,
+            sbatch_args=sbatch_args,
+            program_args=program_args,
+        )
+
+    monkeypatch.setattr(cluv_main, "submit", fake_submit)
+    return call_args
+
+
 class TestGetSbatchCommand:
     def test_generate_command_for_selected_cluster_with_correct_args_and_vars(
         self, project_dir: Path, fake_home: Path
@@ -147,19 +164,7 @@ class TestSubmitCliParsing:
     def test_job_script_can_be_omitted_when_using_separator(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        call_args: dict[str, object] = {}
-
-        async def fake_submit(
-            cluster: str, job_script: Path | None, sbatch_args: list[str], program_args: list[str]
-        ) -> None:
-            call_args.update(
-                cluster=cluster,
-                job_script=job_script,
-                sbatch_args=sbatch_args,
-                program_args=program_args,
-            )
-
-        monkeypatch.setattr(cluv_main, "submit", fake_submit)
+        call_args = patch_submit(monkeypatch)
 
         cluv_main.main(["submit", "tamia", "--", "python", "main.py"])
 
@@ -173,19 +178,7 @@ class TestSubmitCliParsing:
     def test_sbatch_args_are_not_mistaken_for_job_script(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        call_args: dict[str, object] = {}
-
-        async def fake_submit(
-            cluster: str, job_script: Path | None, sbatch_args: list[str], program_args: list[str]
-        ) -> None:
-            call_args.update(
-                cluster=cluster,
-                job_script=job_script,
-                sbatch_args=sbatch_args,
-                program_args=program_args,
-            )
-
-        monkeypatch.setattr(cluv_main, "submit", fake_submit)
+        call_args = patch_submit(monkeypatch)
 
         cluv_main.main(["submit", "tamia", "--mem=8G", "--", "python", "main.py"])
 
@@ -199,22 +192,10 @@ class TestSubmitCliParsing:
     def test_existing_hyphen_prefixed_path_is_kept_as_job_script(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        call_args: dict[str, object] = {}
+        call_args = patch_submit(monkeypatch)
         job_script = tmp_path / "-job.sh"
         job_script.write_text("#!/bin/bash\n")
         monkeypatch.chdir(tmp_path)
-
-        async def fake_submit(
-            cluster: str, job_script: Path | None, sbatch_args: list[str], program_args: list[str]
-        ) -> None:
-            call_args.update(
-                cluster=cluster,
-                job_script=job_script,
-                sbatch_args=sbatch_args,
-                program_args=program_args,
-            )
-
-        monkeypatch.setattr(cluv_main, "submit", fake_submit)
 
         cluv_main.main(["submit", "tamia", str(job_script)])
 

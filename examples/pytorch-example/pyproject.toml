@@ -49,16 +49,17 @@ SBATCH_MEM_PER_NODE="16G"
 [tool.cluv.clusters.mila]
 # Overrides specific to the Mila cluster.
 env = {UV_OFFLINE="0", WANDB_MODE="online"}
-results_path = "$SCRATCH/logs/cluv"
 
 [tool.cluv.clusters.tamia]
 
 [tool.cluv.clusters.killarney]
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
 datasets_path = "$HOME/datasets/cifar10"
-results_path = "$HOME/logs/cluv"
+results_path = "$HOME/logs/pytorch_example"
 
 [tool.cluv.clusters.vulcan]
+datasets_path = "$HOME/datasets/cifar10"
+results_path = "$HOME/logs/pytorch_example"
 
 [tool.cluv.clusters.rorqual]
 env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}

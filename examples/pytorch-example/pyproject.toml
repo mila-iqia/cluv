@@ -42,7 +42,7 @@ SBATCH_REQUEUE = "1"
 # Assume that compute nodes don't have internet access by default. Override below when they do.
 UV_OFFLINE="1"
 WANDB_MODE="offline"
-
+SBATCH_MEM_PER_NODE="16G"
 
 ###  --------------   Clusters Config   --------------  ###
 

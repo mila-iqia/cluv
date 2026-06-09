@@ -23,7 +23,7 @@ __all__ = ["submit"]
 
 async def submit(
     cluster: str,
-    job_script: Path,
+    job_script: Path | None,
     sbatch_args: list[str],
     program_args: list[str],
 ) -> int | None:
@@ -40,6 +40,7 @@ async def submit(
     Parameters:
         cluster: SSH hostname of the target cluster. Can be set to "first" to launch the job on all clusters and keep only the first one to starts.
         job_script: Path to the job script to submit, relative to the project root.
+            When omitted, uses the configured default for the target cluster.
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
 
@@ -63,19 +64,21 @@ async def submit(
     if cluster == "first":
         return await submit_first(job_script, sbatch_args, program_args, git_commit)
 
+    resolved_job_script = get_job_script_path(cluster, job_script)
+
     # Sync.
     remotes = await sync(clusters=[cluster])
 
     # Run the sbatch command over SSH.
     remote = remotes[0]
-    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
+    result = await sbatch(remote, resolved_job_script, sbatch_args, program_args, git_commit)
 
     if result.returncode != 0:
         console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
         return None
 
     job_id = int(result.stdout.strip())
-    save_job(job_id, cluster, str(job_script), git_commit, sbatch_args, program_args)
+    save_job(job_id, cluster, str(resolved_job_script), git_commit, sbatch_args, program_args)
 
     console.log(
         f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
@@ -86,7 +89,7 @@ async def submit(
 
 
 async def submit_first(
-    job_script: Path,
+    job_script: Path | None,
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
@@ -97,13 +100,16 @@ async def submit_first(
     # Sync with all clusters with an existing connections.
     remotes = await sync()
     clusters_to_remote = {remote.hostname: remote for remote in remotes}
+    job_scripts = {
+        remote.hostname: get_job_script_path(remote.hostname, job_script) for remote in remotes
+    }
 
     # Submit the job on all the clusters
     sbatch_results = await asyncio.gather(
         *[
             sbatch(
                 remote,
-                job_script,
+                job_scripts[remote.hostname],
                 sbatch_args,
                 program_args,
                 git_commit,
@@ -186,7 +192,14 @@ async def submit_first(
         await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)
 
     if start_job_id is not None and start_cluster is not None:
-        save_job(start_job_id, start_cluster, str(job_script), git_commit, sbatch_args, program_args)
+        save_job(
+            start_job_id,
+            start_cluster,
+            str(job_scripts[start_cluster]),
+            git_commit,
+            sbatch_args,
+            program_args,
+        )
 
     return start_job_id
 
@@ -225,6 +238,18 @@ def ensure_clean_git_state() -> str:
 
     # Capture current commit hash.
     return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+
+
+def get_job_script_path(cluster: str, job_script: Path | None) -> Path:
+    """Resolve the job script path for a cluster."""
+    if job_script is not None:
+        return job_script
+    configured_job_script = get_cluv_config().get_cluster_config(cluster).job_script_path
+    if configured_job_script is None:
+        raise ValueError(
+            f"No job script was provided and no [tool.cluv] job_script_path is configured for {cluster}."
+        )
+    return configured_job_script
 
 
 def get_sbatch_command(

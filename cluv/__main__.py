@@ -85,6 +85,9 @@ def main(argv: list[str] | None = None) -> None:
     function: Callable = args_dict.pop("func")
 
     if subcommand == "submit":
+        if args_dict["job_script"] is not None and str(args_dict["job_script"]).startswith("-"):
+            args_dict["sbatch_args"] = [str(args_dict["job_script"]), *args_dict["sbatch_args"]]
+            args_dict["job_script"] = None
         args_dict["program_args"] = submit_program_args
 
     try:
@@ -112,7 +115,7 @@ def add_submit_args(
         "submit",
         help="Submit a SLURM job on a remote cluster.",
         formatter_class=rich_argparse.RichHelpFormatter,
-        usage="cluv submit <cluster> <job.sh> [sbatch-args...] [-- program-args...]",
+        usage="cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]",
     )
     submit_parser.add_argument(
         "cluster",
@@ -126,8 +129,10 @@ def add_submit_args(
     submit_parser.add_argument(
         "job_script",
         metavar="<job.sh>",
+        nargs="?",
+        default=None,
         type=Path,
-        help="Path to the sbatch job script (relative to project root).",
+        help="Path to the sbatch job script (relative to project root). Defaults to config.",
     )
     submit_parser.add_argument(
         "sbatch_args",

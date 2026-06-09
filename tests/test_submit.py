@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command
+import cluv.__main__ as cluv_main
+from cluv.cli.submit import ensure_clean_git_state, get_job_script_path, get_sbatch_command
 from cluv.config import get_cluv_config
 
 
@@ -103,6 +104,95 @@ class TestGetSbatchCommand:
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
             "sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
         )
+
+
+class TestGetJobScriptPath:
+    def test_uses_cluster_specific_job_script_when_none_is_passed(self, project_dir: Path) -> None:
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            job_script_path = "scripts/job.sh"
+
+            [tool.cluv.clusters.tamia]
+            job_script_path = "scripts/tamia_job.sh"
+            """
+            )
+        )
+
+        assert get_job_script_path("tamia", None) == Path("scripts/tamia_job.sh")
+
+    def test_uses_global_job_script_default_when_cluster_override_is_missing(
+        self, project_dir: Path
+    ) -> None:
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            job_script_path = "scripts/job.sh"
+
+            [tool.cluv.clusters.tamia]
+            """
+            )
+        )
+
+        assert get_job_script_path("tamia", None) == Path("scripts/job.sh")
+
+
+class TestSubmitCliParsing:
+    def test_job_script_is_optional(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        call_args: dict[str, object] = {}
+
+        async def fake_submit(
+            cluster: str, job_script: Path | None, sbatch_args: list[str], program_args: list[str]
+        ) -> None:
+            call_args.update(
+                cluster=cluster,
+                job_script=job_script,
+                sbatch_args=sbatch_args,
+                program_args=program_args,
+            )
+
+        monkeypatch.setattr(cluv_main, "submit", fake_submit)
+
+        cluv_main.main(["submit", "tamia", "--", "python", "main.py"])
+
+        assert call_args == {
+            "cluster": "tamia",
+            "job_script": None,
+            "sbatch_args": [],
+            "program_args": ["python", "main.py"],
+        }
+
+    def test_sbatch_args_are_not_mistaken_for_job_script(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        call_args: dict[str, object] = {}
+
+        async def fake_submit(
+            cluster: str, job_script: Path | None, sbatch_args: list[str], program_args: list[str]
+        ) -> None:
+            call_args.update(
+                cluster=cluster,
+                job_script=job_script,
+                sbatch_args=sbatch_args,
+                program_args=program_args,
+            )
+
+        monkeypatch.setattr(cluv_main, "submit", fake_submit)
+
+        cluv_main.main(["submit", "tamia", "--mem=8G", "--", "python", "main.py"])
+
+        assert call_args == {
+            "cluster": "tamia",
+            "job_script": None,
+            "sbatch_args": ["--mem=8G"],
+            "program_args": ["python", "main.py"],
+        }
 
 
 class TestEnsureCleanGitState:

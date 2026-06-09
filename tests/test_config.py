@@ -5,13 +5,18 @@ from pathlib import Path
 import pytest
 from milatools.cli.init_command import DRAC_CLUSTERS
 
-from cluv.config import ClusterConfig, PartialClusterConfig, load_cluv_config
+from cluv.config import ClusterConfig, PartialClusterConfig, get_cluv_config, load_cluv_config
 
 
 def write_pyproject(tmp_path: Path, content: str) -> Path:
     p = tmp_path / "pyproject.toml"
     p.write_text(content)
     return p
+
+
+@pytest.fixture(autouse=True)
+def clear_get_cluv_config_cache() -> None:
+    get_cluv_config.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +119,43 @@ results_path = "logs"
         )
         cfg = load_cluv_config(p)
         assert cfg.env == {}
+
+    def test_job_script_path_defaults_to_scripts_job_sh(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+[tool.cluv.clusters.mila]
+""",
+        )
+        monkeypatch.chdir(tmp_path)
+        cfg = load_cluv_config(p)
+        assert cfg.job_script_path == "scripts/job.sh"
+        assert cfg.get_cluster_config("mila").job_script_path == Path("scripts/job.sh")
+
+    def test_cluster_job_script_path_overrides_global_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+job_script_path = "scripts/job.sh"
+
+[tool.cluv.clusters.mila]
+job_script_path = "scripts/mila_job.sh"
+
+[tool.cluv.clusters.rorqual]
+""",
+        )
+        monkeypatch.chdir(tmp_path)
+        cfg = load_cluv_config(p)
+        assert cfg.get_cluster_config("mila").job_script_path == Path("scripts/mila_job.sh")
+        assert cfg.get_cluster_config("rorqual").job_script_path == Path("scripts/job.sh")
 
 
 # ---------------------------------------------------------------------------

@@ -10,3 +10,11 @@ def fake_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fake_scratch.mkdir()
     monkeypatch.setenv("SCRATCH", str(fake_scratch))
     return fake_scratch
+
+
+@pytest.fixture(autouse=True)
+def reset_cluv_config():
+    """Reset the cluv config before each test to avoid state leakage."""
+    from cluv.config import get_cluv_config
+
+    get_cluv_config.cache_clear()

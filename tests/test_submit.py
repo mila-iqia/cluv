@@ -1,3 +1,4 @@
+import asyncio
 import shlex
 import subprocess
 import textwrap
@@ -261,14 +262,15 @@ async def test_can_submit_on_current_cluster(
     job_script.write_text("#!/bin/bash\necho Hello World\n")
     job_script.touch(0o755)
 
-    returned_jobid = await submit(
+    returned_job = await submit(
         cluster=here,
         job_script=job_script,
         sbatch_args=sbatch_args,
         program_args=program_args,
     )
 
-    assert returned_jobid == jobid
+    assert returned_job
+    assert returned_job.job_id == jobid
     mock_ensure_clean_git_state.assert_called_once()
     mock.assert_called_once()
 
@@ -287,8 +289,14 @@ async def test_submit_first_considers_current_cluster(
     run_commands: list[tuple[str, ...]] = []
     this_cluster_jobid = 123
     other_cluster_jobid = 456
-    this_cluster_wait_time = 1 if runs_first_on_current_cluster else 3
-    other_cluster_wait_time = 3 if runs_first_on_current_cluster else 1
+    this_cluster_wait_time = 1 if runs_first_on_current_cluster else 2
+    other_cluster_wait_time = 2 if runs_first_on_current_cluster else 1
+    scancel_received_on_this_cluster = False
+    scancel_received_on_other_cluster = False
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(
+        asyncio, "sleep", lambda x: real_sleep(0.01 * x)
+    )  # Speed up the test by patching sleep.
 
     async def fake_run(
         program_and_args: tuple[str, ...],
@@ -298,6 +306,7 @@ async def test_submit_first_considers_current_cluster(
         **other_kwargs,
     ) -> subprocess.CompletedProcess[str]:
         nonlocal this_cluster_wait_time, other_cluster_wait_time
+        nonlocal scancel_received_on_this_cluster, scancel_received_on_other_cluster
         full_command = shlex.join(program_and_args)
         run_commands.append(program_and_args)
 
@@ -315,6 +324,8 @@ async def test_submit_first_considers_current_cluster(
         # Querying for the job's state:
         if full_command.startswith(f"sacct -j {this_cluster_jobid} --format=State"):
             this_cluster_wait_time -= 1
+            if scancel_received_on_this_cluster:
+                return _result("CANCELLED")
             if this_cluster_wait_time > 0:
                 return _result("PENDING")
             return _result("RUNNING")
@@ -322,6 +333,8 @@ async def test_submit_first_considers_current_cluster(
             f"ssh {other_cluster} 'sacct -j {other_cluster_jobid} --format=State"
         ):
             other_cluster_wait_time -= 1
+            if scancel_received_on_other_cluster:
+                return _result("CANCELLED")
             if other_cluster_wait_time > 0:
                 return _result("PENDING")
             return _result("RUNNING")
@@ -331,8 +344,10 @@ async def test_submit_first_considers_current_cluster(
             runs_first_on_current_cluster
             and full_command == f"ssh {other_cluster} 'scancel {other_cluster_jobid}'"
         ):
+            scancel_received_on_other_cluster = True
             return _result("")
         if not runs_first_on_current_cluster and full_command == f"scancel {this_cluster_jobid}":
+            scancel_received_on_this_cluster = True
             return _result("")
         print(*run_commands, sep="\n")
         pytest.fail(f"Unexpected command: {full_command}, {runs_first_on_current_cluster=}")

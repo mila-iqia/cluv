@@ -532,19 +532,3 @@ async def cancel_job(remote: Remote | None, job_id: int, print: bool = False) ->
             console.print(f"Cancelled job {job_id} on the current cluster.")
         output = result.stdout
     return output
-
-
-async def cancel_all_jobs(
-    remotes: dict[str, Remote | None],
-    cluster_and_jobid: list[tuple[str, int]],
-    keep_cluster: str | None,
-    keep_job_id: int | None,
-) -> None:
-    """Cancel all jobs in cluster_to_jobid on their respective remotes."""
-    await asyncio.gather(
-        *[
-            cancel_job(remotes[cluster], job_id)
-            for cluster, job_id in cluster_and_jobid.items()
-            if cluster != keep_cluster and job_id != keep_job_id
-        ]
-    )

@@ -295,7 +295,7 @@ async def test_submit_first_considers_current_cluster(
     scancel_received_on_other_cluster = False
     real_sleep = asyncio.sleep
     monkeypatch.setattr(
-        asyncio, "sleep", lambda x: real_sleep(0.01 * x)
+        asyncio, "sleep", lambda x: real_sleep(0.1 * x)
     )  # Speed up the test by patching sleep.
 
     async def fake_run(

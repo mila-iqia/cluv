@@ -144,7 +144,9 @@ class TestGetJobScriptPath:
 
 
 class TestSubmitCliParsing:
-    def test_job_script_is_optional(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_job_script_can_be_omitted_when_using_separator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         call_args: dict[str, object] = {}
 
         async def fake_submit(

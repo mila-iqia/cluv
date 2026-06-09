@@ -85,12 +85,9 @@ def main(argv: list[str] | None = None) -> None:
     function: Callable = args_dict.pop("func")
 
     if subcommand == "submit":
-        if (
-            args_dict["job_script"] is not None
-            and str(args_dict["job_script"]).startswith("-")
-            and not args_dict["job_script"].exists()
-        ):
-            args_dict["sbatch_args"] = [str(args_dict["job_script"]), *args_dict["sbatch_args"]]
+        job_script = args_dict["job_script"]
+        if job_script is not None and str(job_script).startswith("-") and not job_script.exists():
+            args_dict["sbatch_args"] = [str(job_script), *args_dict["sbatch_args"]]
             args_dict["job_script"] = None
         args_dict["program_args"] = submit_program_args
 

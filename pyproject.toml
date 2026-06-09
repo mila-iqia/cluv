@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dynamic = ["version"]
 dependencies = [
     "milatools>=0.1.9",
+    "platformdirs>=4.9.6",
     "pydantic>=2.0",
     "rich>=13.0",
     "rich-argparse>=1.7.2",

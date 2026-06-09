@@ -255,6 +255,7 @@ name = "cluv"
 source = { editable = "." }
 dependencies = [
     { name = "milatools" },
+    { name = "platformdirs" },
     { name = "pydantic" },
     { name = "rich" },
     { name = "rich-argparse" },
@@ -279,6 +280,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "milatools", specifier = ">=0.1.9" },
+    { name = "platformdirs", specifier = ">=4.9.6" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "rich", specifier = ">=13.0" },
     { name = "rich-argparse", specifier = ">=1.7.2" },

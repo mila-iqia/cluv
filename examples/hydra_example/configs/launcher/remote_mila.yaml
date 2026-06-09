@@ -22,4 +22,9 @@ hydra:
       python: "uv run --directory=$HOME/repos/cluv/examples/hydra_example python"
       internet_access_on_compute_nodes: true
 
+    # Usual submitit arguments:
     stderr_to_stdout: true
+    timeout_min: 60
+    gpus_per_node: 1
+    cpus_per_task: 2
+    mem_gb: 16

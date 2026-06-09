@@ -377,6 +377,8 @@ async def wait_for_jobs_to_cancel(
 
         for (cluster, job_id), job_state in zip(to_cancel, job_states):
             logger.info(f"Job {job_id} on cluster {cluster} is in state: {job_state}")
+            if job_state.startswith("CANCELLED by"):
+                job_state = "CANCELLED"  # just to avoid confusing users.
             cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
             if job_state.startswith(("CANCELLED", "COMPLETED")):
                 console.print(f"Job {job_id} on cluster {cluster} is now {job_state}.")

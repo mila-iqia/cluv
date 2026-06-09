@@ -60,20 +60,20 @@ results_path = "$HOME/logs/cluv"
 
 [tool.cluv.clusters.vulcan]
 
-# [tool.cluv.clusters.rorqual]
-# env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
+[tool.cluv.clusters.rorqual]
+env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.fir]
-env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="def-bengioy"}
 
 [tool.cluv.clusters.nibi]
-env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="def-bengioy"}
 
 [tool.cluv.clusters.trillium]
-env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {SBATCH_TIMELIMIT="00:15:00", SBATCH_OUTPUT="/scratch/normandf/logs/pytorch-example/trillium_%j/slurm-%j.out"}
 
 [tool.cluv.clusters.trillium-gpu]
-env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
+env = {SBATCH_MEM_PER_NODE="0", SBATCH_OUTPUT="/scratch/normandf/logs/pytorch-example/trillium_%j/slurm-%j.out"}
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.

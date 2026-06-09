@@ -194,6 +194,35 @@ class TestSubmitCliParsing:
             "program_args": ["python", "main.py"],
         }
 
+    def test_existing_hyphen_prefixed_path_is_kept_as_job_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        call_args: dict[str, object] = {}
+        job_script = tmp_path / "-job.sh"
+        job_script.write_text("#!/bin/bash\n")
+        monkeypatch.chdir(tmp_path)
+
+        async def fake_submit(
+            cluster: str, job_script: Path | None, sbatch_args: list[str], program_args: list[str]
+        ) -> None:
+            call_args.update(
+                cluster=cluster,
+                job_script=job_script,
+                sbatch_args=sbatch_args,
+                program_args=program_args,
+            )
+
+        monkeypatch.setattr(cluv_main, "submit", fake_submit)
+
+        cluv_main.main(["submit", "tamia", str(job_script)])
+
+        assert call_args == {
+            "cluster": "tamia",
+            "job_script": job_script,
+            "sbatch_args": [],
+            "program_args": [],
+        }
+
 
 class TestEnsureCleanGitState:
     def test_prefers_branch_tip_in_github_actions_detached_head(

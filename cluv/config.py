@@ -98,7 +98,10 @@ class CluvConfig(BaseModel):
     """
 
     job_script_path: str | None = "scripts/job.sh"
-    """Default path to the job script to submit when one is not passed explicitly."""
+    """Default path to the job script to submit when one is not passed explicitly.
+
+    Defaults to `"scripts/job.sh"`.
+    """
 
     clusters: dict[str, PartialClusterConfig] = {}
     """Configuration options for each cluster.

@@ -10,6 +10,8 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
+import rich.panel
+import rich.syntax
 import rich.table
 import rich.text
 from rich.live import Live
@@ -164,13 +166,19 @@ async def submit_first(
                 cluster_to_jobid[cluster] = job_id
                 table.add_row(
                     cluster,
-                    f"{sbatch_command}\n[green]Job ID: {job_id}[/green]",
+                    rich.console.Group(
+                        rich.syntax.Syntax(sbatch_command, lexer="sh", word_wrap=True),
+                        rich.text.Text(f"Job ID: {job_id}", style="green"),
+                    ),
                     end_section=True,
                 )
             else:
                 table.add_row(
                     cluster,
-                    f"{sbatch_command}\n[red]Error: {sbatch_result.stderr.strip()}[/red]",
+                    rich.console.Group(
+                        rich.syntax.Syntax(sbatch_command, lexer="sh", word_wrap=True),
+                        rich.text.Text(f"Error: {sbatch_result.stderr.strip()}", style="red"),
+                    ),
                     end_section=True,
                 )
     console.print(table)
@@ -332,6 +340,8 @@ async def wait_for_jobs_to_cancel(
     )
     for (cluster, job_id), job_state in zip(to_cancel, job_states):
         logger.info(f"Job {job_id} on cluster {cluster} state: {job_state}")
+        if job_state.startswith("CANCELLED by"):
+            job_state = "CANCELLED"  # just to avoid confusing users.
         cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
 
     to_cancel = [

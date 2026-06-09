@@ -379,6 +379,11 @@ async def wait_for_jobs_to_cancel(
             logger.info(f"Job {job_id} on cluster {cluster} is in state: {job_state}")
             if job_state.startswith("CANCELLED by"):
                 job_state = "CANCELLED"  # just to avoid confusing users.
+            if job_state == "FAILED":
+                # Cheat slightly, but it's fine because this is usually just one of the job
+                # steps that is marked "FAILED" in sacct on some clusters, while the others are
+                # marked "CANCELLED". With "FAILED" in red, users might get a bit worried.
+                job_state = "CANCELLED"
             cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
             if job_state.startswith(("CANCELLED", "COMPLETED")):
                 console.print(f"Job {job_id} on cluster {cluster} is now {job_state}.")

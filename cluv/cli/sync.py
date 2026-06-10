@@ -161,9 +161,19 @@ async def get_active_remotes() -> list[Remote]:
 
 async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
-    project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_cluv_config()
     cluster = remote.hostname
+    cluster_config = config.get_cluster_config(remote.hostname)
+    project_path = cluster_config.project_dir or PurePosixPath(
+        find_pyproject().parent.relative_to(Path.home())
+    )
+    project_path = PurePosixPath(
+        (
+            await remote.get_output(
+                f"bash --login -c 'echo {project_path}'", hide=True, warn=True, display=False
+            )
+        ).strip()
+    )
 
     def _update_progress(progress: int, status: str, total: int):
         info = textwrap.shorten(status, 50, placeholder="...")
@@ -183,7 +193,7 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     _save()
 
     _update_progress(1, "Setting up project", num_tasks)
-    await clone_project(remote, project_state)
+    await clone_project(remote, project_path=project_path, project_state=project_state)
     _save()
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
@@ -276,7 +286,9 @@ def _github_pr_ref() -> str | None:
     return None
 
 
-async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
+async def clone_project(
+    remote: Remote, project_path: PurePosixPath, project_state: ProjectStateOnCluster
+):
     """Setup the project repo on all the remote clusters.
 
     New idea:
@@ -313,9 +325,18 @@ async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
     # Or configure the config credential-helper to store first?
 
     # Get the path to the root of the git repository
-    git_root_path = PurePosixPath(
-        subprocess.getoutput("git rev-parse --show-toplevel").strip()
-    ).relative_to(Path.home())
+    git_root_path = (
+        PurePosixPath(project_path)
+        if project_path is not None
+        else PurePosixPath(
+            subprocess.getoutput("git rev-parse --show-toplevel").strip()
+        ).relative_to(Path.home())
+    )
+    resolved_git_root_path = (
+        await remote.get_output(
+            f"bash --login -c 'echo {git_root_path}'", hide=True, warn=True, display=False
+        )
+    ).strip()
 
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
     safe_current_git_commit = shlex.quote(current_git_commit)
@@ -327,7 +348,7 @@ async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
     # If the project isn't cloned yet, clone it.
     _is_cloned_on_cluster = (
         await remote.run(
-            f"test -d {git_root_path}",
+            f"test -d {resolved_git_root_path}",
             warn=True,
             hide=True,
             display=False,
@@ -337,7 +358,8 @@ async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
     if not _is_cloned_on_cluster:
         logger.info(f"Project isn't cloned yet on {remote.hostname}.")
         await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True, env=gitenv)
-    await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True, env=gitenv)
+    await remote.run(f"git -C {resolved_git_root_path} fetch --all --prune", hide=True, env=gitenv)
+
     if detached_head:
         github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
         if github_head_ref:
@@ -364,22 +386,25 @@ async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
                 return
             safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
             await remote.run(
-                f"git -C {git_root_path} checkout -B {safe_head_ref} {safe_tracking_ref}",
+                f"git -C {resolved_git_root_path} checkout -B {safe_head_ref} {safe_tracking_ref}",
                 hide=False,
             )
             await remote.run(
-                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}",
+                f"git -C {resolved_git_root_path} pull {safe_remote_name} {safe_head_ref}",
                 hide=False,
                 env=gitenv,
             )
             return
 
         await remote.run(
-            f"git -C {git_root_path} checkout --detach {safe_current_git_commit}", hide=False
+            f"git -C {resolved_git_root_path} checkout --detach {safe_current_git_commit}",
+            hide=False,
         )
     else:
-        await remote.run(f"git -C {git_root_path} checkout {safe_current_git_branch}", hide=False)
-        await remote.run(f"git -C {git_root_path} pull", hide=False, env=gitenv)
+        await remote.run(
+            f"git -C {resolved_git_root_path} checkout {safe_current_git_branch}", hide=False
+        )
+        await remote.run(f"git -C {resolved_git_root_path} pull", hide=False, env=gitenv)
 
     project_state.checked_out_git_commit = current_git_commit
 
@@ -489,11 +514,17 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
     results_path_on_cluster = await remote.get_output(
         f"echo {results_path_on_cluster}", hide=False, display=True
     )
+    project_path_on_cluster = config.get_cluster_config(
+        remote.hostname
+    ).project_dir or PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     # Optional, but useful if it isn't already set up: Create a symlink at project_root/<symlink_name>
     # that points to the results_path (usually in $SCRATCH). This works with the example job script
     # templates, which have `--output=logs/%j/slurm-%j.out` (relative to the project root).
     await create_results_dir_with_symlink_to_scratch(
-        remote, config.results_symlink, results_path_on_cluster
+        remote,
+        project_dir=project_path_on_cluster,
+        results_symlink=config.results_symlink,
+        results_path=results_path_on_cluster,
     )
 
     await run(
@@ -517,15 +548,18 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
 
 
 async def create_results_dir_with_symlink_to_scratch(
-    remote: Remote, results_symlink: str, results_path: str
+    remote: Remote, project_dir: str | Path, results_symlink: str, results_path: str
 ):
     """On the remote, create results_path and symlink project/<results_symlink> -> results_path.
 
     results_path may contain env vars (e.g. $SCRATCH); they are resolved via the remote login shell.
     """
-    project_dir = find_pyproject().parent
-    project_dir_relative_to_home = project_dir.relative_to(Path.home())
-    symlink_path = project_dir_relative_to_home / results_symlink
+    project_dir = (
+        await remote.get_output(
+            f"bash --login -c 'echo {project_dir}'", hide=True, warn=True, display=False
+        )
+    ).strip()
+    symlink_path = PurePosixPath(project_dir) / results_symlink
 
     # Resolve env vars (e.g. $SCRATCH) in results_path using the remote login shell.
     resolved_path = (

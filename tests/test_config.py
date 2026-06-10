@@ -171,6 +171,7 @@ class TestClusterConfigHelpers:
             results_path=Path("$CLUV_TMP/results"),
             datasets_path=Path("$CLUV_TMP/data"),
             job_script_path=Path("$CLUV_TMP/scripts/job.sh"),
+            project_dir=None,
         )
 
         expanded = cfg.expandvars()
@@ -222,6 +223,35 @@ SBATCH_PARTITION = "main"
             "SBATCH_ACCOUNT": "def-bengioy",
             "SBATCH_PARTITION": "main",
         }
+
+    def test_top_level_project_dir_used_for_cluster(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+project_dir = "$HOME/repos/cluv"
+
+[tool.cluv.clusters.mila]
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.get_cluster_config("mila").project_dir == Path("$HOME/repos/cluv")
+
+    def test_cluster_project_dir_overrides_top_level(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+project_dir = "$HOME/repos/cluv"
+
+[tool.cluv.clusters.killarney]
+project_dir = "$SCRATCH/cluv"
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.get_cluster_config("killarney").project_dir == Path("$SCRATCH/cluv")
 
 
 # ---------------------------------------------------------------------------

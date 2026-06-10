@@ -39,6 +39,9 @@ class PartialClusterConfig:
     job_script_path: str | None = None
     """Path to the job script to use by default on this cluster."""
 
+    project_dir: str | None = None
+    """Path where the project should be cloned on this cluster."""
+
 
 @dataclass(frozen=True)
 class ClusterConfig:
@@ -61,6 +64,9 @@ class ClusterConfig:
     job_script_path: Path | None
     """Path to the job script to use by default on this cluster."""
 
+    project_dir: Path | None
+    """Path where the project should be cloned on this cluster."""
+
     def expandvars(self):
         return ClusterConfig(
             env=self.env,
@@ -73,6 +79,7 @@ class ClusterConfig:
                 if self.job_script_path
                 else None
             ),
+            project_dir=Path(os.path.expandvars(self.project_dir)) if self.project_dir else None,
         )
 
 
@@ -104,6 +111,9 @@ class CluvConfig(BaseModel):
     overridden on the fly by passing a different job script to `cluv submit`.
     """
 
+    project_dir: str | None = None
+    """Default path where the project should be cloned on clusters."""
+
     clusters: dict[str, PartialClusterConfig] = {}
     """Configuration options for each cluster.
 
@@ -119,15 +129,16 @@ class CluvConfig(BaseModel):
 
         The environment variables as part of paths will *not* be resolved.
         """
-        cluv_config = get_cluv_config()
-        cluster_config = cluv_config.clusters[cluster]
-        results_path = cluster_config.results_path or cluv_config.results_path
-        datasets_path = cluster_config.datasets_path or cluv_config.datasets_path
-        job_script_path = cluster_config.job_script_path or cluv_config.job_script_path
+        cluster_config = self.clusters[cluster]
+        results_path = cluster_config.results_path or self.results_path
+        datasets_path = cluster_config.datasets_path or self.datasets_path
+        job_script_path = cluster_config.job_script_path or self.job_script_path
+        project_dir = cluster_config.project_dir or self.project_dir
         return ClusterConfig(
-            env=cluv_config.env | cluster_config.env,
+            env=self.env | cluster_config.env,
             results_path=Path(results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
+            project_dir=Path(project_dir) if project_dir else None,
             job_script_path=Path(job_script_path) if job_script_path else None,
         )
 

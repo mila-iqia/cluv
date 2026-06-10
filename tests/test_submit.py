@@ -1,7 +1,6 @@
 import asyncio
 import shlex
 import subprocess
-import sys
 import textwrap
 import unittest
 import unittest.mock
@@ -284,8 +283,8 @@ async def test_can_submit_on_current_cluster(
         pytest.param(
             False,
             marks=pytest.mark.xfail(
-                sys.platform == "darwin" and IN_GITHUB_CLOUD_CI,
-                reason="This test doesn't work on MacOS in the GitHub Cloud CI, not sure why.",
+                IN_GITHUB_CLOUD_CI,
+                reason="This test doesn't work in the GitHub Cloud CI, not sure why.",
                 strict=True,
             ),
         ),

@@ -162,25 +162,6 @@ job_script_path = "scripts/mila_job.sh"
 # ClusterConfig helpers
 # ---------------------------------------------------------------------------
 
-
-class TestClusterConfigHelpers:
-    def test_expandvars_expands_path_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CLUV_TMP", "/tmp/cluv")
-        cfg = ClusterConfig(
-            env={},
-            results_path=Path("$CLUV_TMP/results"),
-            datasets_path=Path("$CLUV_TMP/data"),
-            job_script_path=Path("$CLUV_TMP/scripts/job.sh"),
-            project_dir=None,
-        )
-
-        expanded = cfg.expandvars()
-
-        assert expanded.results_path == Path("/tmp/cluv/results")
-        assert expanded.datasets_path == Path("/tmp/cluv/data")
-        assert expanded.job_script_path == Path("/tmp/cluv/scripts/job.sh")
-
-
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------

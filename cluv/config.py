@@ -8,7 +8,7 @@ import logging
 import os
 import tomllib
 from dataclasses import field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel
 from pydantic.dataclasses import dataclass
@@ -43,17 +43,20 @@ class PartialClusterConfig:
     """Path where the project should be cloned on this cluster."""
 
 
+# PathType = typing.TypeVar("PathType", bound=Path | PurePosixPath, default=PurePosixPath)
+
+
 @dataclass(frozen=True)
-class ClusterConfig:
+class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
     """Per-cluster configuration options."""
 
     env: dict[str, str]
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    results_path: Path
+    results_path: PathType
     """Path to the results directory for a specific cluster."""
 
-    datasets_path: Path | None
+    datasets_path: PathType | None
     """Different path where the datasets should be replicated on this cluster.
 
     When `None`, this defaults to the top-level config's `datasets_path`.
@@ -61,26 +64,11 @@ class ClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
-    job_script_path: Path | None
+    job_script_path: PathType | None
     """Path to the job script to use by default on this cluster."""
 
-    project_dir: Path | None
+    project_dir: PathType | None
     """Path where the project should be cloned on this cluster."""
-
-    def expandvars(self):
-        return ClusterConfig(
-            env=self.env,
-            results_path=Path(os.path.expandvars(str(self.results_path))),
-            datasets_path=(
-                Path(os.path.expandvars(str(self.datasets_path))) if self.datasets_path else None
-            ),
-            job_script_path=(
-                Path(os.path.expandvars(str(self.job_script_path)))
-                if self.job_script_path
-                else None
-            ),
-            project_dir=Path(os.path.expandvars(self.project_dir)) if self.project_dir else None,
-        )
 
 
 class CluvConfig(BaseModel):
@@ -140,10 +128,10 @@ class CluvConfig(BaseModel):
         project_dir = cluster_config.project_dir or self.project_dir
         return ClusterConfig(
             env=self.env | cluster_config.env,
-            results_path=Path(results_path),
-            datasets_path=Path(datasets_path) if datasets_path else None,
-            project_dir=Path(project_dir) if project_dir else None,
-            job_script_path=Path(job_script_path) if job_script_path else None,
+            results_path=PurePosixPath(results_path),
+            datasets_path=PurePosixPath(datasets_path) if datasets_path else None,
+            project_dir=PurePosixPath(project_dir) if project_dir else None,
+            job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
         )
 
 
@@ -176,7 +164,7 @@ def get_cluster_choices() -> list[str]:
     return get_cluv_config().clusters_names
 
 
-def current_cluster_config() -> ClusterConfig | None:
+def current_cluster_config() -> ClusterConfig[Path] | None:
     """Returns the `ClusterConfig` of the current cluster, or None if not currently on a cluster."""
     cluster = current_cluster()
     if not cluster:
@@ -189,4 +177,14 @@ def current_cluster_config() -> ClusterConfig | None:
         if cluster == source_cluster:
             # use the dataset path from the data_source setting as the datasets_path.
             config = dataclasses.replace(config, datasets_path=data_path)
-    return config.expandvars()
+    return ClusterConfig(
+        env=config.env,
+        results_path=Path(os.path.expandvars(config.results_path)),
+        datasets_path=(
+            Path(os.path.expandvars(config.datasets_path)) if config.datasets_path else None
+        ),
+        project_dir=Path(os.path.expandvars(config.project_dir)) if config.project_dir else None,
+        job_script_path=(
+            Path(os.path.expandvars(config.job_script_path)) if config.job_script_path else None
+        ),
+    )

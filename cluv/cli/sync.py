@@ -388,6 +388,7 @@ async def clone_project(
             await remote.run(
                 f"git -C {resolved_git_root_path} checkout -B {safe_head_ref} {safe_tracking_ref}",
                 hide=False,
+                env=gitenv,
             )
             await remote.run(
                 f"git -C {resolved_git_root_path} pull {safe_remote_name} {safe_head_ref}",
@@ -548,7 +549,7 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
 
 
 async def create_results_dir_with_symlink_to_scratch(
-    remote: Remote, project_dir: str | Path, results_symlink: str, results_path: str
+    remote: Remote, project_dir: str | PurePosixPath, results_symlink: str, results_path: str
 ):
     """On the remote, create results_path and symlink project/<results_symlink> -> results_path.
 
@@ -608,7 +609,9 @@ async def create_results_dir_with_symlink_to_scratch(
         )
 
 
-async def remote_test(flag: Literal["-d", "-e", "-L"], path: str | Path, remote: Remote) -> bool:
+async def remote_test(
+    flag: Literal["-d", "-e", "-L"], path: str | PurePosixPath, remote: Remote
+) -> bool:
     """Returns True if `test {flag} {path}` succeeds on the remote."""
     result = await remote.run(f"test {flag} {path}", warn=True, hide=True)
     return result.returncode == 0

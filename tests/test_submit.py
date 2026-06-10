@@ -277,12 +277,21 @@ async def test_can_submit_on_current_cluster(
     mock.assert_called_once()
 
 
-@pytest.mark.xfail(
-    sys.platform == "darwin" and IN_GITHUB_CLOUD_CI,
-    reason="This test doesn't work on MacOS in the GitHub Cloud CI, not sure why.",
-    strict=True,
+@pytest.mark.parametrize(
+    "runs_first_on_current_cluster",
+    [
+        True,
+        pytest.param(
+            False,
+            marks=pytest.mark.xfail(
+                sys.platform == "darwin" and IN_GITHUB_CLOUD_CI,
+                reason="This test doesn't work on MacOS in the GitHub Cloud CI, not sure why.",
+                strict=True,
+            ),
+        ),
+    ],
+    ids=["current_cluster_runs_first", "other_cluster_runs_first"],
 )
-@pytest.mark.parametrize("runs_first_on_current_cluster", [True, False])
 async def test_submit_first_considers_current_cluster(
     monkeypatch: pytest.MonkeyPatch,
     mock_current_cluster: str,

@@ -13,22 +13,32 @@ echo "CONTAINER_PATH=${CONTAINER_PATH:?CONTAINER_PATH is not set. Run 'cluv buil
 
 if [ ! -f "$CONTAINER_PATH" ]; then
     echo "FATAL: container not found at $CONTAINER_PATH" >&2
-    echo "Run 'cluv build <cluster>' to build one." >&2
+    echo "Run 'cluv build <cluster>' to build it (the image is tagged by uv.lock hash; rebuild after changing dependencies)." >&2
     exit 1
 fi
+
+# Set up the source code at the submitted commit in $SLURM_TMPDIR, so changes
+# to the project between submission and job start don't affect the job (same
+# approach as safe_job.sh; the container replaces only the venv).
+project_root_in_tmpdir="$SLURM_TMPDIR/$project_name"
+echo "Cloning the project at $GIT_COMMIT into $project_root_in_tmpdir"
+srun --ntasks-per-node=1 --ntasks=$SLURM_JOB_NUM_NODES bash -e <<END
+    cd $SLURM_TMPDIR
+    git clone $project_root
+    cd $project_root_in_tmpdir
+    git checkout --detach $GIT_COMMIT
+END
 
 module load apptainer 2>/dev/null || true
 
 echo "Running command: apptainer exec $CONTAINER_PATH $@"
 srun apptainer exec --nv \
-    --env PYTHONUNBUFFERED=1 \
-    --env "PYTHONPATH=$project_root" \
+    --env "PYTHONPATH=$project_root_in_tmpdir" \
     --env MPLCONFIGDIR=/tmp/mpl \
-    --env TORCHDYNAMO_DISABLE=1 \
-    --bind "$project_root":"$project_root" \
+    --bind "$SLURM_TMPDIR":"$SLURM_TMPDIR" \
     --bind /dev/shm:/dev/shm \
-    ${SLURM_TMPDIR:+--bind "$SLURM_TMPDIR":"$SLURM_TMPDIR"} \
     ${SCRATCH:+--bind "$SCRATCH":"$SCRATCH"} \
     ${PROJECT:+--bind /project:/project} \
+    --pwd "$project_root_in_tmpdir" \
     "$CONTAINER_PATH" \
     "$@"

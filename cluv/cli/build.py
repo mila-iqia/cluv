@@ -2,12 +2,17 @@
 
 Generates pinned requirements from uv.lock, uploads an Apptainer definition,
 builds a .sif image, and deploys it to the configured path.
+
+The image is tagged by a content hash of uv.lock + the container config
+(see ContainerConfig.image_tag), so rebuilding with unchanged dependencies
+is a no-op and `cluv submit` can pin jobs to the exact image.
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path, PurePosixPath
+import subprocess
+from pathlib import Path
 
 from cluv.cli.login import login
 from cluv.cli.sync import sync
@@ -52,7 +57,40 @@ def generate_def(base_image: str, extra_apt: list[str], extra_pip_args: str) -> 
     )
 
 
-async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -> str | None:
+def export_requirements(project_root: Path, extra: str | None) -> str | None:
+    """Export pinned requirements from uv.lock, locally.
+
+    Local export guarantees the requirements match the uv.lock that the image
+    tag is computed from. Returns None (with a console message) on failure.
+    """
+    cmd = [
+        "uv",
+        "export",
+        "--locked",
+        "--no-dev",
+        "--no-hashes",
+        "--no-annotate",
+        "--no-header",
+        "--no-emit-project",
+    ]
+    if extra:
+        cmd += ["--extra", extra]
+    cmd += ["--format", "requirements-txt"]
+    result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True)
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if "lock" in stderr.lower():
+            console.print(
+                "[red]uv.lock is out of sync with pyproject.toml. "
+                "Run 'uv lock', commit, and try again.[/red]"
+            )
+        else:
+            console.print(f"[red]uv export failed: {stderr}[/red]")
+        return None
+    return result.stdout
+
+
+async def build(cluster: str, no_sync: bool = False) -> str | None:
     """Build an Apptainer container on the given cluster.
 
     Returns the remote path to the built .sif, or None on failure.
@@ -67,35 +105,36 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
         return None
 
     container: ContainerConfig = cluster_config.container
+    project_root = find_pyproject().parent
+
+    lock_path = project_root / "uv.lock"
+    if not lock_path.exists():
+        console.print("[red]No uv.lock found. Run 'uv lock' first.[/red]")
+        return None
+
+    console.print("[bold]Exporting pinned requirements from uv.lock...[/bold]")
+    requirements = export_requirements(project_root, container.extra)
+    if requirements is None:
+        return None
+
+    sif_name = container.sif_filename(project_root.name, lock_path.read_bytes())
+    deploy_path = container.deploy_path
+    sif_path = f"{deploy_path}/{sif_name}"
 
     if not no_sync:
         remotes = await sync(clusters=[cluster])
     else:
         remotes = await login([cluster])
-
     remote = remotes[0]
-    project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
 
-    console.print("[bold]Exporting pinned requirements from uv.lock...[/bold]")
-    export_parts = [
-        "uv export --locked --no-dev --no-hashes --no-annotate --no-header --no-emit-project",
-    ]
-    if extra:
-        export_parts.append(f"--extra {extra}")
-    export_parts.append("--format requirements-txt")
-    export_cmd = f"bash -l -c 'cd ~/{project_path} && {' '.join(export_parts)}'"
-    result = await remote.run(export_cmd, display=True, hide="out")
-    if result.returncode != 0:
-        stderr = result.stderr.strip()
-        if "locked" in stderr.lower() or "lock" in stderr.lower():
-            console.print(
-                "[red]uv.lock is out of sync with pyproject.toml. "
-                "Run 'uv lock' locally, commit, and try again.[/red]"
-            )
-        else:
-            console.print(f"[red]uv export failed: {stderr}[/red]")
-        return None
-    requirements = result.stdout
+    # Same lock + config = same image: skip the build if it's already deployed.
+    result = await remote.run(f"test -f {sif_path}", warn=True, hide=True, display=False)
+    if result.returncode == 0:
+        await remote.run(
+            f"ln -sfn {sif_name} {deploy_path}/current.sif", warn=True, hide=True, display=False
+        )
+        console.print(f"[green]Image already deployed (dependencies unchanged): {sif_path}[/green]")
+        return sif_path
 
     console.print("[bold]Uploading build context...[/bold]")
     await remote.run("mkdir -p /tmp/cluv-build", hide=True)
@@ -107,13 +146,6 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
 
     def_content = generate_def(container.base_image, container.extra_apt, container.extra_pip_args)
     await remote.run("cat > /tmp/cluv-build/container.def", input=def_content, hide=True)
-
-    git_sha = await remote.get_output(
-        f"git -C ~/{project_path} rev-parse --short HEAD",
-    )
-    project_name = find_pyproject().parent.name
-    sif_name = f"{project_name}-{git_sha}.sif"
-    deploy_path = container.deploy_path
 
     console.print("[bold]Building container (this may take several minutes)...[/bold]")
 
@@ -165,7 +197,6 @@ async def build(cluster: str, extra: str | None = None, no_sync: bool = False) -
 
     await _cleanup_build_dir(remote)
 
-    sif_path = f"{deploy_path}/{sif_name}"
     console.print(f"[green]Container deployed: {sif_path}[/green]")
     console.print(f"[green]Symlink: {deploy_path}/current.sif -> {sif_name}[/green]")
     return sif_path

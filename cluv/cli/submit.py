@@ -291,9 +291,18 @@ def get_sbatch_command(
             )
         )
 
-    # Inject CONTAINER_PATH when the cluster has container config.
+    # Inject CONTAINER_PATH when the cluster has container config. Pin the
+    # content-hash-tagged image instead of the mutable current.sif symlink, so
+    # a build between submit and job start can't change what a queued job runs.
     if cluster_config.container and "CONTAINER_PATH" not in env_vars:
-        env_vars["CONTAINER_PATH"] = f"{cluster_config.container.deploy_path}/current.sif"
+        lock_path = project_root / "uv.lock"
+        if not lock_path.exists():
+            raise FileNotFoundError(
+                f"{lock_path} not found: it is needed to pin the container image "
+                f"for cluster '{cluster}'. Run 'uv lock' first."
+            )
+        sif_name = cluster_config.container.sif_filename(project_root.name, lock_path.read_bytes())
+        env_vars["CONTAINER_PATH"] = f"{cluster_config.container.deploy_path}/{sif_name}"
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     sbatch_args_str = " ".join(shlex.quote(f) for f in sbatch_args)

@@ -155,12 +155,6 @@ def add_build_args(subparsers: Subparsers) -> argparse.ArgumentParser:
         help="The cluster to build the container on.",
     )
     build_parser.add_argument(
-        "--extra",
-        metavar="<group>",
-        default=None,
-        help="Optional extras group to include (e.g. 'runtime').",
-    )
-    build_parser.add_argument(
         "--no-sync",
         action="store_true",
         default=False,

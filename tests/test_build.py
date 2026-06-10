@@ -44,6 +44,46 @@ class TestGenerateDef:
         assert "%test" in result
 
 
+class TestImageTag:
+    LOCK = b"fake uv.lock contents"
+
+    def test_deterministic(self):
+        cfg = ContainerConfig(deploy_path="/project/acct/containers")
+        assert cfg.image_tag(self.LOCK) == cfg.image_tag(self.LOCK)
+        assert len(cfg.image_tag(self.LOCK)) == 12
+
+    def test_changes_with_lock_contents(self):
+        cfg = ContainerConfig(deploy_path="/project/acct/containers")
+        assert cfg.image_tag(self.LOCK) != cfg.image_tag(b"different lock")
+
+    def test_changes_with_config(self):
+        base = ContainerConfig(deploy_path="/project/acct/containers")
+        tags = {
+            base.image_tag(self.LOCK),
+            ContainerConfig(
+                deploy_path="/project/acct/containers", base_image="python:3.13-slim"
+            ).image_tag(self.LOCK),
+            ContainerConfig(
+                deploy_path="/project/acct/containers", extra_apt=["gcc"]
+            ).image_tag(self.LOCK),
+            ContainerConfig(
+                deploy_path="/project/acct/containers", extra="runtime"
+            ).image_tag(self.LOCK),
+        }
+        assert len(tags) == 4
+
+    def test_independent_of_deploy_path(self):
+        # Same image contents deployed elsewhere keeps the same tag.
+        a = ContainerConfig(deploy_path="/project/acct/containers")
+        b = ContainerConfig(deploy_path="/project/other/containers")
+        assert a.image_tag(self.LOCK) == b.image_tag(self.LOCK)
+
+    def test_sif_filename(self):
+        cfg = ContainerConfig(deploy_path="/project/acct/containers")
+        name = cfg.sif_filename("my_project", self.LOCK)
+        assert name == f"my_project-{cfg.image_tag(self.LOCK)}.sif"
+
+
 class TestContainerConfig:
     def test_defaults(self):
         cfg = ContainerConfig(deploy_path="/project/acct/containers")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import hashlib
 import logging
 import os
 import tomllib
@@ -41,6 +42,25 @@ class ContainerConfig(BaseModel):
 
     extra_pip_args: str = ""
     """Extra arguments passed to pip install inside the container (e.g. '--extra-index-url ...')."""
+
+    extra: str | None = None
+    """Optional extras group from pyproject.toml baked into the image (e.g. 'runtime')."""
+
+    def image_tag(self, lock_bytes: bytes) -> str:
+        """Content hash of everything that determines the image: uv.lock + this config.
+
+        The image holds dependencies only, so the same tag means the same image.
+        `cluv build` uses this to skip rebuilds, and `cluv submit` to pin jobs to
+        the exact image they were submitted against (a `current.sif` symlink could
+        be repointed by a later build before a queued job starts).
+        """
+        h = hashlib.sha256(lock_bytes)
+        for part in (self.base_image, *self.extra_apt, self.extra_pip_args, self.extra or ""):
+            h.update(b"\x00" + part.encode())
+        return h.hexdigest()[:12]
+
+    def sif_filename(self, project_name: str, lock_bytes: bytes) -> str:
+        return f"{project_name}-{self.image_tag(lock_bytes)}.sif"
 
 
 @dataclass(frozen=True)

@@ -120,6 +120,7 @@ class TestGetSbatchCommand:
 
         (project_dir / "scripts").mkdir()
         (project_dir / "scripts" / "container_job.sh").touch()
+        (project_dir / "uv.lock").write_bytes(b"fake lock")
 
         sbatch_command = get_sbatch_command(
             cluster="rorqual",
@@ -129,7 +130,37 @@ class TestGetSbatchCommand:
             git_commit="abc1234",
         )
 
-        assert "CONTAINER_PATH=/project/acct/containers/current.sif" in sbatch_command
+        # Pinned to the content-hash-tagged image, not the mutable current.sif.
+        container = get_cluv_config().clusters["rorqual"].container
+        assert container is not None
+        sif_name = container.sif_filename("my_project", b"fake lock")
+        assert f"CONTAINER_PATH=/project/acct/containers/{sif_name}" in sbatch_command
+        assert "current.sif" not in sbatch_command
+
+    def test_container_path_requires_uv_lock(self, project_dir: Path) -> None:
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.rorqual.container]
+            deploy_path = "/project/acct/containers"
+            """
+            )
+        )
+
+        (project_dir / "scripts").mkdir()
+        (project_dir / "scripts" / "container_job.sh").touch()
+
+        with pytest.raises(FileNotFoundError, match="uv.lock"):
+            get_sbatch_command(
+                cluster="rorqual",
+                job_script=Path("scripts/container_job.sh"),
+                sbatch_args=[],
+                program_args=[],
+                git_commit="abc1234",
+            )
 
     def test_container_path_not_injected_without_container_config(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"
@@ -173,6 +204,7 @@ class TestGetSbatchCommand:
 
         (project_dir / "scripts").mkdir()
         (project_dir / "scripts" / "container_job.sh").touch()
+        (project_dir / "uv.lock").write_bytes(b"fake lock")
 
         sbatch_command = get_sbatch_command(
             cluster="rorqual",
@@ -183,7 +215,7 @@ class TestGetSbatchCommand:
         )
 
         assert "CONTAINER_PATH=/custom/path.sif" in sbatch_command
-        assert "CONTAINER_PATH=/project/acct/containers/current.sif" not in sbatch_command
+        assert "CONTAINER_PATH=/project/acct/containers" not in sbatch_command
 
 
 class TestEnsureCleanGitState:

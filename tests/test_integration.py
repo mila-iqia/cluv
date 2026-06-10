@@ -17,6 +17,7 @@ import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
+from cluv.cache import Job
 from cluv.cli.init import DEFAULT_RESULTS_PATH, init
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_cluster_status
@@ -201,14 +202,15 @@ async def test_submit(remote: Remote, fake_scratch: Path):
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
 
     should_cancel_job = True
-    job_id = await submit(
+    job = await submit(
         cluster=remote.hostname,
         job_script=Path("scripts/job.sh"),
         sbatch_args=["--time=00:00:30"],
         program_args=["python", "--version"],
     )
     cluster = remote.hostname
-    assert isinstance(job_id, int)
+    assert isinstance(job, Job)
+    job_id = job.job_id
     try:
         job_name = await remote.get_output(
             f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"

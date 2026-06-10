@@ -97,13 +97,11 @@ class CluvConfig(BaseModel):
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
-    job_script_path: str | None = "scripts/job.sh"
+    job_script_path: str | None = None
     """Default path to the job script to submit when one is not passed explicitly to `cluv submit`.
 
     This can be overridden for specific clusters in the `clusters` section, and can also be
     overridden on the fly by passing a different job script to `cluv submit`.
-
-    Defaults to `"scripts/job.sh"`.
     """
 
     clusters: dict[str, PartialClusterConfig] = {}

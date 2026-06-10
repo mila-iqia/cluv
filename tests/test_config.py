@@ -120,20 +120,19 @@ results_path = "logs"
         cfg = load_cluv_config(p)
         assert cfg.env == {}
 
-    def test_job_script_path_defaults_to_scripts_job_sh(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_job_script_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         p = write_pyproject(
             tmp_path,
             """
 [tool.cluv]
 results_path = "logs"
 [tool.cluv.clusters.mila]
+job_script_path = "scripts/job.sh"
 """,
         )
         monkeypatch.chdir(tmp_path)
         cfg = load_cluv_config(p)
-        assert cfg.job_script_path == "scripts/job.sh"
+        assert cfg.job_script_path is None
         assert cfg.get_cluster_config("mila").job_script_path == Path("scripts/job.sh")
 
     def test_cluster_job_script_path_overrides_global_default(
@@ -154,6 +153,7 @@ job_script_path = "scripts/mila_job.sh"
         )
         monkeypatch.chdir(tmp_path)
         cfg = load_cluv_config(p)
+        assert cfg.job_script_path == "scripts/job.sh"
         assert cfg.get_cluster_config("mila").job_script_path == Path("scripts/mila_job.sh")
         assert cfg.get_cluster_config("rorqual").job_script_path == Path("scripts/job.sh")
 

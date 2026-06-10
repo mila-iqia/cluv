@@ -1,11 +1,12 @@
 import subprocess
 import textwrap
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 import cluv.__main__ as cluv_main
-from cluv.cli.submit import ensure_clean_git_state, get_job_script_path, get_sbatch_command
+from cluv.cli.submit import ensure_clean_git_state, get_sbatch_command
 from cluv.config import get_cluv_config
 
 
@@ -29,23 +30,6 @@ def project_dir(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)  # Set current working dir
     return project_dir
-
-
-def patch_submit(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-    call_args: dict[str, object] = {}
-
-    async def fake_submit(
-        cluster: str, job_script: Path | None, sbatch_args: list[str], program_args: list[str]
-    ) -> None:
-        call_args.update(
-            cluster=cluster,
-            job_script=job_script,
-            sbatch_args=sbatch_args,
-            program_args=program_args,
-        )
-
-    monkeypatch.setattr(cluv_main, "submit", fake_submit)
-    return call_args
 
 
 class TestGetSbatchCommand:
@@ -123,88 +107,64 @@ class TestGetSbatchCommand:
         )
 
 
-class TestGetJobScriptPath:
-    def test_uses_cluster_specific_job_script_when_none_is_passed(self, project_dir: Path) -> None:
-        p = project_dir / "pyproject.toml"
-        p.write_text(
-            textwrap.dedent(
-                """\
-            [tool.cluv]
-            results_path = "results"
-            job_script_path = "scripts/job.sh"
-
-            [tool.cluv.clusters.tamia]
-            job_script_path = "scripts/tamia_job.sh"
-            """
-            )
-        )
-
-        assert get_job_script_path("tamia", None) == Path("scripts/tamia_job.sh")
-
-    def test_uses_global_job_script_default_when_cluster_override_is_missing(
-        self, project_dir: Path
-    ) -> None:
-        p = project_dir / "pyproject.toml"
-        p.write_text(
-            textwrap.dedent(
-                """\
-            [tool.cluv]
-            results_path = "results"
-            job_script_path = "scripts/job.sh"
-
-            [tool.cluv.clusters.tamia]
-            """
-            )
-        )
-
-        assert get_job_script_path("tamia", None) == Path("scripts/job.sh")
-
-
 class TestSubmitCliParsing:
     def test_job_script_can_be_omitted_when_using_separator(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        call_args = patch_submit(monkeypatch)
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
 
         cluv_main.main(["submit", "tamia", "--", "python", "main.py"])
 
-        assert call_args == {
-            "cluster": "tamia",
-            "job_script": None,
-            "sbatch_args": [],
-            "program_args": ["python", "main.py"],
-        }
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+            }
+        )
 
     def test_sbatch_args_are_not_mistaken_for_job_script(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        call_args = patch_submit(monkeypatch)
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
 
         cluv_main.main(["submit", "tamia", "--mem=8G", "--", "python", "main.py"])
 
-        assert call_args == {
-            "cluster": "tamia",
-            "job_script": None,
-            "sbatch_args": ["--mem=8G"],
-            "program_args": ["python", "main.py"],
-        }
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--mem=8G"],
+                "program_args": ["python", "main.py"],
+            }
+        )
 
     def test_existing_hyphen_prefixed_path_is_kept_as_job_script(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        call_args = patch_submit(monkeypatch)
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
         job_script = tmp_path / "-job.sh"
         job_script.write_text("#!/bin/bash\n")
         monkeypatch.chdir(tmp_path)
 
         cluv_main.main(["submit", "tamia", str(job_script)])
 
-        assert call_args == {
-            "cluster": "tamia",
-            "job_script": job_script,
-            "sbatch_args": [],
-            "program_args": [],
-        }
+        mock_submit.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": job_script,
+                "sbatch_args": [],
+                "program_args": [],
+            }
+        )
 
 
 class TestEnsureCleanGitState:

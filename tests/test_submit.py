@@ -367,12 +367,6 @@ async def test_submit_first_considers_current_cluster(
             return _result("")
         print(*run_commands, sep="\n")
         pytest.fail(f"Unexpected command: {full_command}, {runs_first_on_current_cluster=}")
-        # assert not ("ssh" in full_command and mock_current_cluster in full_command), (
-        #     "Should never try to ssh to the current cluster."
-        # )
-        # # assert " ".join(program_args) in full_command
-        # # assert " ".join(sbatch_args) in full_command
-        # # assert "sbatch --parsable" in full_command
 
     monkeypatch.setattr(
         cluv.remote, cluv.remote.run.__name__, _mock := unittest.mock.AsyncMock(wraps=fake_run)

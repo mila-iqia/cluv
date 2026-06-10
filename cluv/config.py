@@ -13,9 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from pydantic.dataclasses import dataclass
 
-from cluv.utils import current_cluster
-
-from cluv.utils import find_pyproject
+from cluv.utils import current_cluster, find_pyproject
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +69,9 @@ class ClusterConfig:
                 Path(os.path.expandvars(str(self.datasets_path))) if self.datasets_path else None
             ),
             job_script_path=(
-                Path(os.path.expandvars(str(self.job_script_path))) if self.job_script_path else None
+                Path(os.path.expandvars(str(self.job_script_path)))
+                if self.job_script_path
+                else None
             ),
         )
 
@@ -98,7 +98,10 @@ class CluvConfig(BaseModel):
     """
 
     job_script_path: str | None = "scripts/job.sh"
-    """Default path to the job script to submit when one is not passed explicitly.
+    """Default path to the job script to submit when one is not passed explicitly to `cluv submit`.
+
+    This can be overridden for specific clusters in the `clusters` section, and can also be
+    overridden on the fly by passing a different job script to `cluv submit`.
 
     Defaults to `"scripts/job.sh"`.
     """

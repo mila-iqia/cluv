@@ -85,9 +85,12 @@ def main(argv: list[str] | None = None) -> None:
     function: Callable = args_dict.pop("func")
 
     if subcommand == "submit":
-        job_script = args_dict["job_script"]
-        if job_script is not None and str(job_script).startswith("-") and not job_script.exists():
+        # job script is an optional positional argument. When not passed, an sbatch argument like
+        # --gpus will be parsed as the job script. We rectify that here.
+        job_script: Path | None = args_dict["job_script"]
+        if job_script and str(job_script).startswith("-") and not job_script.exists():
             args_dict["sbatch_args"] = [str(job_script), *args_dict["sbatch_args"]]
+            job_script = None
             args_dict["job_script"] = None
         args_dict["program_args"] = submit_program_args
 
@@ -109,9 +112,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(err.returncode)
 
 
-def add_submit_args(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
+def add_submit_args(subparsers: Subparsers):
     submit_parser = subparsers.add_parser(
         "submit",
         help="Submit a SLURM job on a remote cluster.",
@@ -145,7 +146,7 @@ def add_submit_args(
     return submit_parser
 
 
-def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+def add_status_args(subparsers: Subparsers):
     status_parser = subparsers.add_parser(
         "status",
         help="Get the status of clusters and jobs.",
@@ -163,9 +164,7 @@ def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     return status_parser
 
 
-def add_sync_args(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
+def add_sync_args(subparsers: Subparsers):
     sync_parser = subparsers.add_parser(
         "sync",
         help="Synchronizes the current project across clusters.",
@@ -209,7 +208,7 @@ def add_sync_args(
     return sync_parser
 
 
-def add_login_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+def add_login_args(subparsers: Subparsers):
     login_parser = subparsers.add_parser(
         "login",
         help="Login to the specified clusters.",
@@ -224,7 +223,7 @@ def add_login_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     return login_parser
 
 
-def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+def add_init_args(subparsers: Subparsers):
     init_parser = subparsers.add_parser(
         "init",
         help="Initialize the current project across clusters.",
@@ -242,9 +241,7 @@ def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     return init_parser
 
 
-def add_run_args(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
+def add_run_args(subparsers: Subparsers):
     run_parser = subparsers.add_parser(
         "run",
         help="Run a command on a cluster",

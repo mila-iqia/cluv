@@ -156,31 +156,26 @@ async def submit_first(
     table = rich.table.Table("Cluster", "Result", title="Jobs submitted on the clusters")
     for cluster, sbatch_result in cluster_to_sbatch_result.items():
         sbatch_command = sbatch_commands[cluster]
-        if isinstance(sbatch_result, BaseException):
-            table.add_row(
-                cluster, f"{sbatch_command}\n[red]Error: {sbatch_result}[/red]", end_section=True
+        if isinstance(sbatch_result, BaseException) or sbatch_result.returncode != 0:
+            error_message = (
+                str(sbatch_result)
+                if isinstance(sbatch_result, BaseException)
+                else sbatch_result.stderr.strip()
             )
+            output_text = rich.text.Text(f"Error: {error_message}", style="red")
         else:
-            if sbatch_result.returncode == 0:
-                job_id = int(sbatch_result.stdout.strip())
-                cluster_to_jobid[cluster] = job_id
-                table.add_row(
-                    cluster,
-                    rich.console.Group(
-                        rich.syntax.Syntax(sbatch_command, lexer="sh", word_wrap=True),
-                        rich.text.Text(f"Job ID: {job_id}", style="green"),
-                    ),
-                    end_section=True,
-                )
-            else:
-                table.add_row(
-                    cluster,
-                    rich.console.Group(
-                        rich.syntax.Syntax(sbatch_command, lexer="sh", word_wrap=True),
-                        rich.text.Text(f"Error: {sbatch_result.stderr.strip()}", style="red"),
-                    ),
-                    end_section=True,
-                )
+            job_id = int(sbatch_result.stdout.strip())
+            cluster_to_jobid[cluster] = job_id
+            output_text = rich.text.Text(f"Job ID: {job_id}", style="green")
+        table.add_row(
+            cluster,
+            rich.console.Group(
+                rich.syntax.Syntax(sbatch_command, lexer="sh", word_wrap=True),
+                output_text,
+            ),
+            end_section=True,
+        )
+
     console.print(table)
 
     if not cluster_to_jobid:

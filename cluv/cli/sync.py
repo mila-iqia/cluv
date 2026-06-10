@@ -389,9 +389,6 @@ async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: C
     """Push dataset from a local path to the remote cluster's datasets_path."""
 
     cache_file = f"push_datasets_{local_source.name}.txt"
-    # caching_period = datetime.timedelta(hours=1)
-    # only push datasets if they were last pushed more
-    # than an hour ago.
     last_local_source_edit_time = datetime.datetime.fromtimestamp(local_source.stat().st_mtime)
 
     if (

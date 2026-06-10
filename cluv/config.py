@@ -115,14 +115,12 @@ class CluvConfig(BaseModel):
 
         The environment variables as part of paths will *not* be resolved.
         """
-        cluv_config = get_cluv_config()
-        cluster_config = cluv_config.clusters[cluster]
-        datasets_path = cluster_config.datasets_path or cluv_config.datasets_path
-        results_path = cluster_config.results_path or cluv_config.results_path
+        cluster_config = self.clusters[cluster]
+        results_path = cluster_config.results_path or self.results_path
+        datasets_path = cluster_config.datasets_path or self.datasets_path
         return ClusterConfig(
-            env=cluv_config.env | cluster_config.env,
-            sbatch_args=cluv_config.sbatch_args | cluster_config.sbatch_args,
-            # TODO: Use the cluster-specific results_path if we add that option back in the future.
+            env=self.env | cluster_config.env,
+            sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
             results_path=Path(results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
         )

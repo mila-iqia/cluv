@@ -104,7 +104,7 @@ async def submit(
     console.log(
         f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
         f"Use `ssh {cluster} sacct -j {job_id}` to view its status, and `cluv sync {cluster}` to "
-        f"fetch results once it is complete.."
+        f"fetch results once it is complete."
     )
 
     return job

@@ -233,6 +233,18 @@ async def install_uv(remote: Remote):
         await remote.run(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
 
 
+def _github_pr_ref() -> str | None:
+    """The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
+
+    Unlike the PR head branch, this ref exists on the base repo even when the PR comes
+    from a fork, so the project clones on the clusters can fetch it from their remote.
+    """
+    github_ref = os.environ.get("GITHUB_REF", "").strip()
+    if re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref):
+        return github_ref
+    return None
+
+
 async def clone_project(remote: Remote):
     """Setup the project repo on all the remote clusters.
 
@@ -296,8 +308,22 @@ async def clone_project(remote: Remote):
             ):
                 raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
             safe_head_ref = shlex.quote(github_head_ref)
-            safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
             safe_remote_name = shlex.quote(git_remote_name)
+            github_pr_ref = _github_pr_ref()
+            if github_pr_ref:
+                # The head branch of a PR from a fork doesn't exist on the base repo, so
+                # fetch the PR ref instead and create the branch from FETCH_HEAD.
+                safe_pr_ref = shlex.quote(github_pr_ref)
+                await remote.run(
+                    f"git -C {git_root_path} fetch {safe_remote_name} {safe_pr_ref}",
+                    hide=False,
+                )
+                await remote.run(
+                    f"git -C {git_root_path} checkout -B {safe_head_ref} FETCH_HEAD",
+                    hide=False,
+                )
+                return
+            safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
             await remote.run(
                 f"git -C {git_root_path} checkout -B {safe_head_ref} {safe_tracking_ref}",
                 hide=False,

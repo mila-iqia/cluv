@@ -53,11 +53,11 @@ def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:
     for key, value in d.items():
         if value == "" or value is False:
             continue
-        short = len(key) == 1
+        is_short_flag = len(key) == 1
         if value is True:
-            flags.append(f"-{key}" if short else f"--{key}")
+            flags.append(f"-{key}" if is_short_flag else f"--{key}")
         else:
-            if short:
+            if is_short_flag:
                 flags.extend([f"-{key}", str(value)])
             else:
                 flags.append(f"--{key}={value}")

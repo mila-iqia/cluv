@@ -191,7 +191,7 @@ async def submit_first(
     # If the wait is interrupted, cancel all jobs.
     first_running_job: JobHandle | None = None
 
-    max_wait_time_seconds = 60
+    max_wait_time_seconds = 5
 
     cluster_and_jobid_to_jobstate: dict[tuple[str, int], str] = {
         (cluster, job_id): "UNKNOWN" for cluster, job_id in cluster_to_jobid.items()
@@ -297,7 +297,7 @@ async def wait_for_running_job(
     """Watch the jobs with sacct until one of them starts (or completes)."""
 
     first_running_job: JobHandle | None = None
-    wait_time = 10
+    wait_time = 1
 
     to_query = list(cluster_and_jobid_to_jobstate.keys())
 
@@ -331,7 +331,7 @@ async def wait_for_jobs_to_cancel(
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
 ) -> JobHandle | None:
-
+    start_wait_time = 5
     to_cancel = list(cluster_and_jobid_to_jobstate.keys())
     to_cancel.remove((first_running_job.cluster, first_running_job.job_id))
 
@@ -358,7 +358,8 @@ async def wait_for_jobs_to_cancel(
             for cluster, job_id in to_cancel
         ]
     )
-    wait_time = 5
+
+    wait_time = min(start_wait_time, max_wait_time_seconds)
 
     while not all(
         cluster_and_jobid_to_jobstate[cluster_jobid].startswith(

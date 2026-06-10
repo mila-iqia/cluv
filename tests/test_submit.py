@@ -289,8 +289,8 @@ async def test_submit_first_considers_current_cluster(
     run_commands: list[tuple[str, ...]] = []
     this_cluster_jobid = 123
     other_cluster_jobid = 456
-    this_cluster_wait_time = 1 if runs_first_on_current_cluster else 2
-    other_cluster_wait_time = 2 if runs_first_on_current_cluster else 1
+    this_cluster_wait_time = 1 if runs_first_on_current_cluster else 3
+    other_cluster_wait_time = 3 if runs_first_on_current_cluster else 1
     scancel_received_on_this_cluster = False
     scancel_received_on_other_cluster = False
     real_sleep = asyncio.sleep

@@ -129,7 +129,11 @@ class CluvConfig(BaseModel):
 
         The environment variables as part of paths will *not* be resolved.
         """
-        cluster_config = self.clusters[cluster]
+        cluster_config = self.clusters.get(cluster)
+        if cluster_config is None:
+            raise KeyError(
+                f"Cluster {cluster!r} is not configured. Available: {self.clusters_names}"
+            )
         results_path = cluster_config.results_path or self.results_path
         datasets_path = cluster_config.datasets_path or self.datasets_path
         job_script_path = cluster_config.job_script_path or self.job_script_path

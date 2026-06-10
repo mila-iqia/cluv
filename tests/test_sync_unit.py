@@ -1,6 +1,7 @@
 """Unit tests for sync helpers that don't require real cluster connections."""
 
 import importlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,7 +22,7 @@ class FakeRemote:
 
     async def run(self, command: str, **kwargs):
         self.commands.append(command)
-        return type("Result", (), {"returncode": 0})()
+        return SimpleNamespace(returncode=0)
 
 
 @pytest.mark.asyncio

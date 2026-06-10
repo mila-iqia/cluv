@@ -138,9 +138,13 @@ exclusive = true
 """,
         )
         cfg = load_cluv_config(p)
-        assert cfg.sbatch_args["time"] == "2:00:00"
-        assert cfg.sbatch_args["gpus"] == "1"
-        assert cfg.sbatch_args["exclusive"] is True
+        expected = {
+            "time": "2:00:00",
+            "gpus": "1",
+            "exclusive": True,
+        }
+        assert cfg.sbatch_args == expected
+        assert cfg.get_cluster_config("mila").sbatch_args == expected
 
     def test_per_cluster_sbatch_args_override_global(self, tmp_path: Path) -> None:
         p = write_pyproject(
@@ -164,10 +168,10 @@ gpus = ""
         )
         cfg = load_cluv_config(p)
         # Check that per-cluster sbatch_args are stored correctly
-        assert cfg.clusters["mila"].sbatch_args["gpus"] == "a100:2"
-        assert cfg.clusters["cpu_cluster"].sbatch_args["gpus"] == ""
+        assert cfg.get_cluster_config("mila").sbatch_args == {"time": "2:00:00", "gpus": "a100:2"}
+        assert cfg.get_cluster_config("cpu_cluster").sbatch_args == {"time": "2:00:00", "gpus": ""}
         # Global defaults are preserved in the global config
-        assert cfg.sbatch_args["time"] == "2:00:00"
+        assert cfg.sbatch_args == {"gpus": "1", "time": "2:00:00"}
 
     def test_missing_sbatch_args_defaults_to_empty(self, tmp_path: Path) -> None:
         p = write_pyproject(
@@ -180,7 +184,7 @@ results_path = "logs"
         )
         cfg = load_cluv_config(p)
         assert cfg.sbatch_args == {}
-        assert cfg.clusters["mila"].sbatch_args == {}
+        assert cfg.get_cluster_config("mila").sbatch_args == {}
 
 
 # ---------------------------------------------------------------------------

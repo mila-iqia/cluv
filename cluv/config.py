@@ -25,10 +25,10 @@ class PartialClusterConfig:
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
+    results_path: str | None = None
     """Path to the results directory for a specific cluster."""
 
-    datasets_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
+    datasets_path: str | None = None
     """Different path where the datasets should be replicated on this cluster.
 
     When `None`, this defaults to the top-level config's `datasets_path`.

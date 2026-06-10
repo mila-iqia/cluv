@@ -205,7 +205,7 @@ async def run_uv_sync(remote: Remote, project_path: PurePosixPath):
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
     if get_cache_content(remote.hostname, cache_filename) == current_git_commit:
         logger.info(
-            f"uv sync was already run for the current commit ({current_git_commit}) on cluster on "
+            f"uv sync was already run for the current commit ({current_git_commit}) on "
             f"{remote.hostname}. Skipping uv sync."
         )
         return

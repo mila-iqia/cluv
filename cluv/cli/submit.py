@@ -28,6 +28,42 @@ logger = logging.getLogger(__name__)
 __all__ = ["submit"]
 
 
+def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:
+    """Convert a dict of sbatch options to a list of command-line flags.
+
+    Key-to-flag conversion:
+
+    - multi-char key + non-empty string value → ``--key=value``
+    - single-char key + non-empty string value → ``-k value`` (two separate args)
+    - any key + ``True`` → bare flag (``--key`` or ``-k``)
+    - any key + ``""`` or ``False`` → omitted entirely
+
+    >>> sbatch_args_from_dict({"time": "2:00:00", "gpus": "1"})
+    ['--time=2:00:00', '--gpus=1']
+    >>> sbatch_args_from_dict({"exclusive": True})
+    ['--exclusive']
+    >>> sbatch_args_from_dict({"N": "2"})
+    ['-N', '2']
+    >>> sbatch_args_from_dict({"gpus": "", "requeue": False})
+    []
+    >>> sbatch_args_from_dict({"n": True})
+    ['-n']
+    """
+    flags: list[str] = []
+    for key, value in d.items():
+        if value == "" or value is False:
+            continue
+        short = len(key) == 1
+        if value is True:
+            flags.append(f"-{key}" if short else f"--{key}")
+        else:
+            if short:
+                flags.extend([f"-{key}", str(value)])
+            else:
+                flags.append(f"--{key}={value}")
+    return flags
+
+
 async def submit(
     cluster: str,
     job_script: Path,
@@ -495,7 +531,9 @@ def get_sbatch_command(
         )
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    sbatch_args_str = " ".join(shlex.quote(f) for f in sbatch_args)
+    config_sbatch_args = sbatch_args_from_dict(cluster_config.sbatch_args)
+    all_sbatch_args = config_sbatch_args + sbatch_args
+    sbatch_args_str = " ".join(shlex.quote(f) for f in all_sbatch_args)
     program_args_str = shlex.join(program_args)
 
     return (

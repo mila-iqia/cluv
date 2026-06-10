@@ -117,6 +117,73 @@ results_path = "logs"
 
 
 # ---------------------------------------------------------------------------
+# sbatch_args
+# ---------------------------------------------------------------------------
+
+
+class TestSbatchArgs:
+    def test_global_sbatch_args_parsed(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+
+[tool.cluv.sbatch_args]
+time = "2:00:00"
+gpus = "1"
+exclusive = true
+
+[tool.cluv.clusters.mila]
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.sbatch_args["time"] == "2:00:00"
+        assert cfg.sbatch_args["gpus"] == "1"
+        assert cfg.sbatch_args["exclusive"] is True
+
+    def test_per_cluster_sbatch_args_override_global(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+
+[tool.cluv.sbatch_args]
+gpus = "1"
+time = "2:00:00"
+
+[tool.cluv.clusters.mila]
+[tool.cluv.clusters.mila.sbatch_args]
+gpus = "a100:2"
+
+[tool.cluv.clusters.cpu_cluster]
+[tool.cluv.clusters.cpu_cluster.sbatch_args]
+gpus = ""
+""",
+        )
+        cfg = load_cluv_config(p)
+        # Check that per-cluster sbatch_args are stored correctly
+        assert cfg.clusters["mila"].sbatch_args["gpus"] == "a100:2"
+        assert cfg.clusters["cpu_cluster"].sbatch_args["gpus"] == ""
+        # Global defaults are preserved in the global config
+        assert cfg.sbatch_args["time"] == "2:00:00"
+
+    def test_missing_sbatch_args_defaults_to_empty(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+[tool.cluv.clusters.mila]
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.sbatch_args == {}
+        assert cfg.clusters["mila"].sbatch_args == {}
+
+
+# ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
 

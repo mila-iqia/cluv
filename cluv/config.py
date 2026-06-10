@@ -25,6 +25,9 @@ class PartialClusterConfig:
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
+    sbatch_args: dict[str, str | bool] = field(default_factory=dict)
+    """Per-cluster sbatch flags, overriding the global `sbatch_args`."""
+
     results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
     """Path to the results directory for a specific cluster."""
 
@@ -44,6 +47,9 @@ class ClusterConfig:
     env: dict[str, str]
     """Environment variables to set when running Slurm commands on this cluster."""
 
+    sbatch_args: dict[str, str | bool]
+    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
+
     results_path: Path
     """Path to the results directory for a specific cluster."""
 
@@ -58,6 +64,7 @@ class ClusterConfig:
     def expandvars(self):
         return ClusterConfig(
             env=self.env,
+            sbatch_args=self.sbatch_args,
             results_path=Path(os.path.expandvars(self.results_path)),
             datasets_path=(
                 Path(os.path.expandvars(self.datasets_path)) if self.datasets_path else None
@@ -70,6 +77,13 @@ class CluvConfig(BaseModel):
 
     env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""
+
+    sbatch_args: dict[str, str | bool] = {}
+    """Global sbatch flags applied on all clusters.
+
+    These are passed directly to `sbatch` and complement `env` (which sets `SBATCH_*` env vars).
+    See `[tool.cluv.clusters.<name>.sbatch_args]` for per-cluster overrides.
+    """
 
     results_path: str
     """Default path to the results directory for all clusters (may contain env vars like $SCRATCH)."""
@@ -107,6 +121,7 @@ class CluvConfig(BaseModel):
         results_path = cluster_config.results_path or cluv_config.results_path
         return ClusterConfig(
             env=cluv_config.env | cluster_config.env,
+            sbatch_args=cluv_config.sbatch_args | cluster_config.sbatch_args,
             # TODO: Use the cluster-specific results_path if we add that option back in the future.
             results_path=Path(results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,

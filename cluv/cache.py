@@ -17,7 +17,7 @@ def get_cluv_project_cache_dir() -> Path:
     return cache_dir
 
 
-def get_cache_path() -> Path:
+def get_cached_jobs_path() -> Path:
     """Should be like : ~/.cache/cluv/<PROJECT_NAME>/jobs.jsonl"""
     return get_cluv_project_cache_dir() / "jobs.jsonl"
 
@@ -34,7 +34,7 @@ class Job:
 
 
 def save_job(job: Job) -> None:
-    path = get_cache_path()
+    path = get_cached_jobs_path()
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
@@ -42,7 +42,7 @@ def save_job(job: Job) -> None:
 
 
 def load_jobs() -> list[Job]:
-    path = get_cache_path()
+    path = get_cached_jobs_path()
     if not path.exists():
         return []
     jobs = []

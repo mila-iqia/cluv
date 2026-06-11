@@ -260,7 +260,7 @@ async def test_submit(remote: Remote, fake_scratch: Path):
                     f"Job {job_id} is in state {job_state}, waiting for it to reach a terminal state..."
                 )
                 await asyncio.sleep(wait_time)
-                wait_time = min(wait_time * 2, 60)  # Don't wait more than 30s between polls
+                wait_time = min(wait_time * 2, 30)  # Don't wait more than 30s between polls
 
         # Wait until the job exits, then verify output content after syncing logs back locally.
         if job_state == "COMPLETED":

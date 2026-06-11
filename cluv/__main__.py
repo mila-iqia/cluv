@@ -134,7 +134,7 @@ def add_submit_args(subparsers: Subparsers):
         nargs="?",
         default=None,
         type=Path,
-        help="Path to the sbatch job script (relative to project root). Defaults to config.",
+        help="Path to the sbatch job script (relative to project root). Defaults to the job script specified in the config at 'job_script_path'.",
     )
     submit_parser.add_argument(
         "sbatch_args",

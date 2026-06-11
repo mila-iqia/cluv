@@ -123,7 +123,9 @@ async def submit(
     here = current_cluster()
 
     if cluster == "first":
-        job = await submit_first(job_script, sbatch_args, program_args, git_commit)
+        job = await submit_first(
+            job_script, sbatch_args, program_args, git_commit, _skip_sync=_skip_sync
+        )
         if job:
             save_job(job)
         return job
@@ -131,11 +133,13 @@ async def submit(
     resolved_job_script = get_job_script_path(cluster, job_script)
 
     if cluster != here:
-        # Sync.
-        remote = (await sync(clusters=[cluster]))[0]
-        # Run the sbatch command over SSH.
+        # The sbatch command will be run over SSH.
+        if _skip_sync:
+            remote = await Remote.connect(hostname=cluster)
+        else:
+            remote = (await sync(clusters=[cluster]))[0]
     else:
-        # Submitting to the current cluster.
+        # Submitting to the current cluster. The sbatch command will run locally.
         remote = None
     result = await sbatch(remote, resolved_job_script, sbatch_args, program_args, git_commit)
     submit_time = datetime.datetime.now()

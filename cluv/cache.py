@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 import platformdirs
+import pydantic
 import yaml
 
 from cluv.utils import find_pyproject
@@ -77,7 +78,8 @@ def _read_cache(cache_file: Path) -> CacheContent:
         logger.debug("Empty cache (file %s does not exist)", cache_file)
         return CacheContent()
     logger.debug("Reading cache from %s", cache_file)
-    return CacheContent(**yaml.safe_load(cache_file.read_text()))
+    raw_content = yaml.safe_load(cache_file.read_text())
+    return pydantic.TypeAdapter(CacheContent).validate_python(raw_content)
 
 
 def _write_cache(cache: CacheContent, cache_file: Path):

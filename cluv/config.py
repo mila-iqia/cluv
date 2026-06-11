@@ -121,12 +121,12 @@ class CluvConfig(BaseModel):
         """
         cluv_config = get_cluv_config()
         cluster_config = cluv_config.clusters[cluster]
+        results_path = cluster_config.results_path or cluv_config.results_path
         datasets_path = cluster_config.datasets_path or cluv_config.datasets_path
         job_script_path = cluster_config.job_script_path or cluv_config.job_script_path
         return ClusterConfig(
             env=cluv_config.env | cluster_config.env,
-            # TODO: Use the cluster-specific results_path if we add that option back in the future.
-            results_path=Path(cluv_config.results_path),
+            results_path=Path(results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
             job_script_path=Path(job_script_path) if job_script_path else None,
         )

@@ -280,17 +280,15 @@ def setup_logging(verbose: int | None, force: bool = False) -> None:
     # )
     cluv_logger = logging.getLogger("cluv")
     cluv_logger.addHandler(handler)
-
-    # if verbose == 0:
-    #     # logger.setLevel(logging.ERROR)
-    #     logger.setLevel(logging.WARNING)
-    #     cluv_logger.setLevel(logging.WARNING)
-    # elif verbose == 1:
-    #     logger.setLevel(logging.INFO)
-    #     cluv_logger.setLevel(logging.INFO)
-    # elif verbose >= 2:
-    #     logger.setLevel(logging.DEBUG)
-    #     cluv_logger.setLevel(logging.DEBUG)
+    if verbose == 0:
+        logger.setLevel(logging.WARNING)
+        cluv_logger.setLevel(logging.WARNING)
+    elif verbose == 1:
+        logger.setLevel(logging.INFO)
+        cluv_logger.setLevel(logging.INFO)
+    elif verbose >= 2:
+        logger.setLevel(logging.DEBUG)
+        cluv_logger.setLevel(logging.DEBUG)
 
 
 def _add_v_arg(parser: argparse.ArgumentParser) -> None:

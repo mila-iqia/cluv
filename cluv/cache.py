@@ -1,25 +1,16 @@
-from __future__ import annotations
-
+import dataclasses
 import json
+import logging
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 
 import platformdirs
+import yaml
 
 from cluv.utils import find_pyproject
 
-
-def get_cluv_project_cache_dir() -> Path:
-    """Get the path to the cluv cache directory for the current project."""
-    project_name = find_pyproject().parent.name
-    cache_dir = Path(platformdirs.PlatformDirs("cluv").user_cache_dir) / project_name
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    return cache_dir
-
-
-def get_cached_jobs_path() -> Path:
-    """Should be like : ~/.cache/cluv/<PROJECT_NAME>/jobs.jsonl"""
-    return get_cluv_project_cache_dir() / "jobs.jsonl"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -33,8 +24,26 @@ class Job:
     program_args: list[str]
 
 
+@dataclass
+class ProjectStateOnCluster:
+    """The cached info we have about the state of the project on a cluster.
+
+    This is used to avoid redoing a sync unless necessary.
+    """
+
+    uv_version: str | None = None
+    last_uv_sync_git_commit: str | None = None
+    last_pushed_datasets: datetime | None = None
+    checked_out_git_commit: str | None = None
+
+
+@dataclass
+class CacheContent:
+    project_states: dict[str, ProjectStateOnCluster] = dataclasses.field(default_factory=dict)
+
+
 def save_job(job: Job) -> None:
-    path = get_cached_jobs_path()
+    path = _get_cached_jobs_path()
 
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
@@ -42,7 +51,7 @@ def save_job(job: Job) -> None:
 
 
 def load_jobs() -> list[Job]:
-    path = get_cached_jobs_path()
+    path = _get_cached_jobs_path()
     if not path.exists():
         return []
     jobs = []
@@ -54,22 +63,42 @@ def load_jobs() -> list[Job]:
     return jobs
 
 
-def _get_cache_file(cluster: str, filename: str) -> Path:
-    """Get the path to a cache file on the remote cluster."""
-    uv_cache_dir = get_cluv_project_cache_dir()
-    uv_cache_dir.mkdir(parents=True, exist_ok=True)
-    return uv_cache_dir / f"{cluster}_{filename}"
+def read_cache() -> CacheContent:
+    """Read the cache content from the local cache file."""
+    return _read_cache(_get_cache_file())
 
 
-def get_cache_content(cluster: str, filename: str) -> str | None:
-    """Get the content of a local cache file with respect to an operation done on this cluster."""
-    cache_file = _get_cache_file(cluster, filename)
+def write_cache(cache: CacheContent):
+    """Write the cache content to the local cache file."""
+    _write_cache(cache, _get_cache_file())
+
+
+def _read_cache(cache_file: Path) -> CacheContent:
     if not cache_file.exists():
-        return None
-    return cache_file.read_text().strip()
+        logger.debug("Empty cache (file %s does not exist)", cache_file)
+        return CacheContent()
+    logger.debug("Reading cache from %s", cache_file)
+    return CacheContent(**yaml.safe_load(cache_file.read_text()))
 
 
-def write_cache_content(cluster: str, filename: str, content: str):
-    """Write content to a local cache file with respect to an operation done on this cluster."""
-    cache_file = _get_cache_file(cluster, filename)
-    cache_file.write_text(content)
+def _write_cache(cache: CacheContent, cache_file: Path):
+    logger.debug("Writing cache to %s: %s", cache_file, cache)
+    cache_file.write_text(yaml.dump(asdict(cache), indent=2))
+
+
+def _get_cached_jobs_path() -> Path:
+    """Should be like : ~/.cache/cluv/<PROJECT_NAME>/jobs.jsonl"""
+    return _get_cache_dir() / "jobs.jsonl"
+
+
+def _get_cache_file() -> Path:
+    """Get the path to a cache file on the remote cluster."""
+    return _get_cache_dir() / "cluv_cache.yaml"
+
+
+def _get_cache_dir() -> Path:
+    """Get the path to the cluv cache directory for the current project."""
+    project_name = find_pyproject().parent.name
+    cache_dir = Path(platformdirs.PlatformDirs("cluv").user_cache_dir) / project_name
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir

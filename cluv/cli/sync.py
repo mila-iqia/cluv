@@ -23,13 +23,9 @@ from milatools.utils.parallel_progress import (
     run_async_tasks_with_progress_bar,
 )
 
-from cluv.cache import get_cache_content, write_cache_content
+from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.config import (
-    CluvConfig,
-    find_pyproject,
-    get_cluv_config,
-)
+from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import get_datasets_path
 from cluv.remote import Remote, get_ssh_options_for_host, run
 from cluv.utils import console, console_lock, current_cluster
@@ -167,6 +163,7 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_cluv_config()
+    cluster = remote.hostname
 
     def _update_progress(progress: int, status: str, total: int):
         info = textwrap.shorten(status, 50, placeholder="...")
@@ -174,14 +171,24 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
 
     num_tasks = 5 if config.data_source else 4
 
+    cache = read_cache()
+    project_state = cache.project_states.setdefault(cluster, ProjectStateOnCluster())
+
+    def _save():
+        assert cache.project_states[cluster] is project_state
+        write_cache(cache)
+
     _update_progress(0, "Checking/Installing UV", num_tasks)
-    await install_uv(remote)
+    await install_uv(remote, project_state)
+    _save()
 
     _update_progress(1, "Setting up project", num_tasks)
-    await clone_project(remote)
+    await clone_project(remote, project_state)
+    _save()
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
-    await run_uv_sync(remote, project_path)
+    await run_uv_sync(remote, project_path, project_state)
+    _save()
 
     _update_progress(3, "Fetching results", num_tasks)
     new_runs = await fetch_results(remote, config)
@@ -194,27 +201,29 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
             raise RuntimeError("data_source is set, so dataset_path should also be set!")
         local_dataset_path = Path(os.path.expandvars(local_dataset_path))
 
-        await _push_datasets_to_remote(local_dataset_path, remote, config)
+        await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
+        _save()
 
     _update_progress(num_tasks, "Done", num_tasks)
     return new_runs
 
 
-async def run_uv_sync(remote: Remote, project_path: PurePosixPath):
-    cache_filename = "uv_sync.txt"
+async def run_uv_sync(
+    remote: Remote, project_path: PurePosixPath, project_state: ProjectStateOnCluster
+):
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
-    if get_cache_content(remote.hostname, cache_filename) == current_git_commit:
+
+    if project_state.last_uv_sync_git_commit == current_git_commit:
         logger.info(
             f"uv sync was already run for the current commit ({current_git_commit}) on "
             f"{remote.hostname}. Skipping uv sync."
         )
         return
     await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
-    write_cache_content(remote.hostname, cache_filename, current_git_commit)
+    project_state.last_uv_sync_git_commit = current_git_commit
 
 
-async def install_uv(remote: Remote):
-    cache_filename = "uv_version.txt"
+async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
     # todo: These parts are common. No need to do them for each cluster. Not a big deal though.
     if not shutil.which("uv"):
         logger.error(
@@ -228,10 +237,10 @@ async def install_uv(remote: Remote):
         # uv --version outputs e.g. 'uv 0.11.0 (aarch64-unknown-linux-gnu)'.
         subprocess.getoutput("uv --version").strip().split()[1]
     )
-    logger.info(
+    logger.debug(
         f"[green]Using uv version {uv_version_here} everywhere, since this is the version on this machine.[/green]"
     )
-    if get_cache_content(remote.hostname, cache_filename) == uv_version_here:
+    if project_state.uv_version == uv_version_here:
         logger.info(
             f"uv version {uv_version_here} is already installed on {remote.hostname}, skipping."
         )
@@ -252,17 +261,16 @@ async def install_uv(remote: Remote):
         logger.info(f"Updating uv to version {uv_version_here} on the {remote.hostname} cluster.")
         await remote.run(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
 
-    write_cache_content(remote.hostname, cache_filename, uv_version_here)
+    project_state.uv_version = uv_version_here
 
 
-async def clone_project(remote: Remote):
+async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
     """Setup the project repo on all the remote clusters.
 
     New idea:
     - Assume GitHub. Push to GitHub if needed. Clone from github on the remotes.
     - Worry about authentication later, just raise an error if need be for now.
     """
-    cache_filename = "clone_project.txt"
     # TODO: This git info is shared, but currently repeatedly executed for each cluster.
     # Could be done only once.
     current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
@@ -299,7 +307,7 @@ async def clone_project(remote: Remote):
 
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
     safe_current_git_commit = shlex.quote(current_git_commit)
-    if get_cache_content(remote.hostname, cache_filename) == current_git_commit:
+    if project_state.checked_out_git_commit == current_git_commit:
         logger.info(
             f"Git commit {current_git_commit} is already checked out on {remote.hostname}, skipping."
         )
@@ -314,7 +322,7 @@ async def clone_project(remote: Remote):
         )
     ).returncode == 0
     if not _is_cloned_on_cluster:
-        logger.debug(f"Project isn't cloned yet on {remote.hostname}.")
+        logger.info(f"Project isn't cloned yet on {remote.hostname}.")
         await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True)
     await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True)
     if detached_head:
@@ -344,14 +352,15 @@ async def clone_project(remote: Remote):
         await remote.run(f"git -C {git_root_path} checkout {safe_current_git_branch}", hide=False)
         await remote.run(f"git -C {git_root_path} pull", hide=False)
 
-    write_cache_content(remote.hostname, cache_filename, current_git_commit)
+    project_state.checked_out_git_commit = current_git_commit
 
 
 async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):
     """Pull from source to the locally-resolved datasets_path."""
     # Resolve the env vars on the remote.
     source_host = source_remote.hostname
-    source_path = await source_remote.get_output(f"echo {source_path}")
+    if "$" in source_path:
+        source_path = await source_remote.get_output(f"echo {source_path}")
     if "$" in str(local_datasets_path):
         # Important to stop here if there is $SCRATCH in the datasets_path and it is not set on
         # this machine.
@@ -367,7 +376,8 @@ async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets
     console.log(
         f"[green]Pulling datasets:[/green] {source_host}:{source_path} -> {local_datasets_path}"
     )
-    source_path = await source_remote.get_output(f"echo {source_path}")
+    if "$" in source_path:
+        source_path = await source_remote.get_output(f"echo {source_path}")
     await run(
         (
             "rsync",
@@ -385,18 +395,16 @@ async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets
     )
 
 
-async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: CluvConfig):
+async def _push_datasets_to_remote(
+    local_source: Path, remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
+):
     """Push dataset from a local path to the remote cluster's datasets_path."""
+    last_datasets_dir_edit_time = datetime.datetime.fromtimestamp(local_source.stat().st_mtime)
 
-    cache_file = f"push_datasets_{local_source.name}.txt"
-    last_local_source_edit_time = datetime.datetime.fromtimestamp(local_source.stat().st_mtime)
-
+    # Skip if we pushed after the last edit to the local source path.
     if (
-        (last_push_datetime_str := get_cache_content(remote.hostname, cache_file))
-        and (last_push_datetime := datetime.datetime.fromisoformat(last_push_datetime_str))
-        # Skip if we pushed after the last edit to the local source path.
-        and last_push_datetime > last_local_source_edit_time
-    ):
+        last_push_datasets_time := project_state.last_pushed_datasets
+    ) and last_push_datasets_time > last_datasets_dir_edit_time:
         logger.info(
             f"Datasets at {local_source} were already pushed to {remote.hostname} and have not "
             f"changed since. Skipping."
@@ -405,11 +413,13 @@ async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: C
     datasets_path_template = str(config.get_cluster_config(remote.hostname).datasets_path)
     resolved_path = (
         await remote.get_output(
-            f"bash -l -c 'echo {datasets_path_template}'", hide=True, display=False
+            f"bash --login -c 'echo {datasets_path_template}'", hide=True, display=False
         )
+        if "$" in datasets_path_template
+        else datasets_path_template
     ).strip()
     await remote.run(f"mkdir -p {resolved_path}", hide=True)
-    result = await run(
+    await run(
         (
             "rsync",
             "--archive",
@@ -424,9 +434,8 @@ async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: C
         ),
         _display=True,
     )
-    if result.returncode == 0:
-        last_push_datetime = datetime.datetime.now()
-        write_cache_content(remote.hostname, cache_file, last_push_datetime.isoformat())
+    last_push_datetime = datetime.datetime.now()
+    project_state.last_pushed_datasets = last_push_datetime
 
 
 async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:

@@ -17,10 +17,11 @@ import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
+from cluv.cache import Job
 from cluv.cli.init import DEFAULT_RESULTS_PATH, init
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.cli.status import ClusterStatus, get_cluster_status
-from cluv.cli.submit import submit
+from cluv.cli.submit import get_job_state, submit
 from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
@@ -186,8 +187,24 @@ async def test_status_storage(cluster_status: ClusterStatus):
     assert cluster_status.storage.scratch_used >= 0
 
 
+TEST_SUBMIT_TIMEOUT_SECONDS = 180
+
+
+@pytest.mark.parametrize(
+    cluster.__name__,
+    [
+        "mila",
+        pytest.param(
+            "rorqual",
+            marks=pytest.mark.xfail(
+                reason="Rorqual might take a long time for the job to actually run."
+            ),
+        ),
+    ],
+    indirect=True,
+)
 @pytest.mark.slow
-@pytest.mark.timeout(180)
+@pytest.mark.timeout(TEST_SUBMIT_TIMEOUT_SECONDS)
 async def test_submit(remote: Remote, fake_scratch: Path):
     """End-to-end: actually submit scripts/job.sh to a slurm cluster via sbatch.
 
@@ -201,21 +218,23 @@ async def test_submit(remote: Remote, fake_scratch: Path):
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
 
     should_cancel_job = True
-    job_id = await submit(
+    job = await submit(
         cluster=remote.hostname,
         job_script=Path("scripts/job.sh"),
         sbatch_args=["--time=00:00:30"],
         program_args=["python", "--version"],
     )
     cluster = remote.hostname
-    assert isinstance(job_id, int)
+    assert isinstance(job, Job)
+    job_id = job.job_id
+
     try:
         job_name = await remote.get_output(
             f"sacct -j {job_id} --format=JobName --noheader --parsable2 | head -1"
         )
         assert job_name.strip().startswith("cluv-")
-        # Wait until the job exits, then verify output content after syncing logs back locally.
-        TERMINAL_STATUSES = {
+        wait_time = 5
+        TERMINAL_STATES = {
             "COMPLETED",
             "FAILED",
             "CANCELLED",
@@ -226,36 +245,24 @@ async def test_submit(remote: Remote, fake_scratch: Path):
             "BOOT_FAIL",
             "DEADLINE",
         }
-        final_status = "UNKNOWN"
-        max_poll_attempts = 5
-        poll_interval_seconds = 5
-        # Poll for terminal state, leaving a bit of room in the
-        # 180s test timeout for sync + output validation.
-        for _ in range(max_poll_attempts):
-            status_output = await remote.get_output(
-                f"sacct -j {job_id} --format=State --noheader --parsable2 --allocations | head -1",
-                warn=True,
-                hide=True,
-                display=False,
-            )
-            # --parsable2 uses pipe-delimited output (`STATE|...`), so keep only the state field.
-            final_status = status_output.strip().partition("|")[0].strip()
-            if final_status in TERMINAL_STATUSES:
-                break
-            await asyncio.sleep(poll_interval_seconds)
-            poll_interval_seconds *= 2
-        if final_status not in TERMINAL_STATUSES:
-            pytest.fail(
-                f"Job {job_id} did not reach terminal status within "
-                f"{max_poll_attempts * poll_interval_seconds}s "
-                f"(last status: {final_status!r})"
-            )
-        if final_status != "COMPLETED":
-            pytest.fail(f"Submitted job {job_id} ended with unexpected status: {final_status!r}")
-        should_cancel_job = False
+        async with asyncio.timeout(TEST_SUBMIT_TIMEOUT_SECONDS):
+            while (job_state := await get_job_state(remote, job_id)) not in TERMINAL_STATES:
+                print(
+                    f"Job {job_id} is in state {job_state}, waiting for it to reach a terminal state..."
+                )
+                await asyncio.sleep(wait_time)
+                wait_time = min(wait_time * 2, 60)  # Don't wait more than 30s between polls
+
+        # Wait until the job exits, then verify output content after syncing logs back locally.
+        if job_state == "COMPLETED":
+            should_cancel_job = False  # No need to cancel a completed job
+        else:
+            pytest.fail(f"Submitted job {job_id} ended with unexpected status: {job_state!r}")
 
         await sync(clusters=[remote.hostname])
 
+        # TODO: get the results dir based on the `job` object somehow, instead of assuming
+        # {cluster}_{job_id} which is just the default for a 'regular' job (no chunking or packing).
         output_file = (
             Path(os.path.expandvars(get_cluv_config().results_path))
             / f"{cluster}_{job_id}"
@@ -265,9 +272,13 @@ async def test_submit(remote: Remote, fake_scratch: Path):
             f"Expected job output file to be synced locally: {output_file}"
         )
         output_text = output_file.read_text(errors="replace")
+
+        # TODO: Reuse this test for the pytorch example by checking for a different output.
         assert re.search(r"Python \d+\.\d+(\.\d+)?", output_text), (
             f"Expected python version output in {output_file}, got:\n{output_text}"
         )
+    except asyncio.TimeoutError:
+        pytest.fail(f"Job {job_id} did not reach a terminal state within the timeout period.")
     finally:
         if should_cancel_job:
             await remote.run(f"scancel {job_id}", warn=True, hide=True, display=True)
@@ -319,6 +330,7 @@ def project_dir(fake_home: Path, project_name: str, is_existing_project: bool) -
         job_script.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
     return project_dir
 
+
 @pytest.fixture(autouse=True)
 def return_to_start_dir():
     start_dir = Path.cwd()
@@ -326,6 +338,7 @@ def return_to_start_dir():
         yield
     finally:
         os.chdir(start_dir)
+
 
 @pytest.mark.timeout(5)
 def test_init(

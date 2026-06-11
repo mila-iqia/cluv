@@ -139,9 +139,7 @@ async def sync(
     cwd = Path.cwd()
     for remote, new_runs in zip(remotes, per_cluster_new_runs):
         if new_runs:
-            console.print(
-                f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]"
-            )
+            console.print(f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]")
             for run_path in sorted(new_runs):
                 try:
                     display_path = run_path.relative_to(cwd)
@@ -155,6 +153,8 @@ async def sync(
 async def get_active_remotes() -> list[Remote]:
     """Returns the Remotes for each cluster which has an active SSH connection."""
     clusters = get_cluv_config().clusters_names
+    if (this_cluster := current_cluster()) and this_cluster in clusters:
+        clusters.remove(this_cluster)
     connections = await asyncio.gather(
         *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
     )
@@ -391,7 +391,9 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
 
     # Snapshot the runs already present locally before syncing.
     existing_runs: set[Path] = (
-        {p for p in results_path_here.iterdir() if p.is_dir()} if results_path_here.exists() else set()
+        {p for p in results_path_here.iterdir() if p.is_dir()}
+        if results_path_here.exists()
+        else set()
     )
 
     # Resolve any environment variables in the results_path on the remote before rsync, otherwise

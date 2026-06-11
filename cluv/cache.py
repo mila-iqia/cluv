@@ -44,7 +44,6 @@ class CacheContent:
 
 def save_job(job: Job) -> None:
     path = _get_cached_jobs_path()
-
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
         f.write(json.dumps(asdict(job)) + "\n")
@@ -64,12 +63,12 @@ def load_jobs() -> list[Job]:
 
 
 def read_cache() -> CacheContent:
-    """Read the cache content from the local cache file."""
+    """Read the cache content from the (local) cache file."""
     return _read_cache(_get_cache_file())
 
 
 def write_cache(cache: CacheContent):
-    """Write the cache content to the local cache file."""
+    """Write the cache content to the (local) cache file."""
     _write_cache(cache, _get_cache_file())
 
 
@@ -97,7 +96,7 @@ def _get_cache_file() -> Path:
 
 
 def _get_cache_dir() -> Path:
-    """Get the path to the cluv cache directory for the current project."""
+    """Returns the cluv cache directory (and create it if needed) for the current project."""
     project_name = find_pyproject().parent.name
     cache_dir = Path(platformdirs.PlatformDirs("cluv").user_cache_dir) / project_name
     cache_dir.mkdir(parents=True, exist_ok=True)

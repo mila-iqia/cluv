@@ -28,7 +28,7 @@ from .cli.submit import submit
 from .cli.sync import sync
 from .utils import console
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("cluv")
 if typing.TYPE_CHECKING:
     Subparsers = argparse._SubParsersAction[simple_parsing.ArgumentParser]
 
@@ -80,12 +80,18 @@ def main(argv: list[str] | None = None) -> None:
     args_dict = vars(args)
 
     verbose: int = args_dict.pop("verbose")
-    setup_logging(verbose=verbose, force=True)
+    quiet: bool = args_dict.pop("quiet", False)
+    setup_logging(verbose=verbose, quiet=quiet)
     subcommand = args_dict.pop("<command>")
     function: Callable = args_dict.pop("func")
 
     if subcommand == "submit":
         args_dict["program_args"] = submit_program_args
+
+    if subcommand == "status" and quiet:
+        console.print("[yellow]Warning: --quiet has no effect with the 'status' command.[/yellow]")
+        quiet = False
+    console.quiet = quiet
 
     try:
         if inspect.iscoroutinefunction(function):
@@ -261,7 +267,7 @@ def add_run_args(
     return run_parser
 
 
-def setup_logging(verbose: int | None, force: bool = False) -> None:
+def setup_logging(verbose: int | None, quiet: bool = False) -> None:
     verbose = verbose or 0
     handler = rich.logging.RichHandler(
         console=console,
@@ -269,23 +275,15 @@ def setup_logging(verbose: int | None, force: bool = False) -> None:
         rich_tracebacks=True,
         markup=True,
     )
-    # logging.basicConfig(
-    #     level=logging.WARNING,
-    #     format="%(message)s",
-    #     handlers=[handler],
-    #     force=force,
-    # )
-    cluv_logger = logging.getLogger("cluv")
-    cluv_logger.addHandler(handler)
-    if verbose == 0:
+    logger.addHandler(handler)
+    if quiet:
+        logger.setLevel(logging.CRITICAL)
+    elif verbose == 0:
         logger.setLevel(logging.WARNING)
-        cluv_logger.setLevel(logging.WARNING)
     elif verbose == 1:
         logger.setLevel(logging.INFO)
-        cluv_logger.setLevel(logging.INFO)
     elif verbose >= 2:
         logger.setLevel(logging.DEBUG)
-        cluv_logger.setLevel(logging.DEBUG)
 
 
 def _add_v_arg(parser: argparse.ArgumentParser) -> None:
@@ -295,6 +293,13 @@ def _add_v_arg(parser: argparse.ArgumentParser) -> None:
         dest="verbose",
         action="count",
         help="Increase logging verbosity",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        dest="quiet",
+        action="store_true",
+        help="Disable command output.",
     )
 
 

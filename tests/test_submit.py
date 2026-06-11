@@ -59,6 +59,7 @@ class TestGetSbatchCommand:
             sbatch_args=["--account=my_account", "--mem=8G"],
             program_args=["program_arg_1", "program_arg_2"],
             git_commit="abecdef",
+            job_chunking=False,
         )
         job_script_relative_path = sbatch_script.relative_to(fake_home)
 
@@ -96,12 +97,47 @@ class TestGetSbatchCommand:
             sbatch_args=[],
             program_args=[],
             git_commit="abecdef",
+            job_chunking=False,
         )
 
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
             "sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
+        )
+
+    def test_use_correct_time_value_when_chunking(self, project_dir: Path) -> None:
+        p = project_dir / "pyproject.toml"
+        results_path = "results"
+        p.write_text(
+            textwrap.dedent(
+                f"""\
+            [tool.cluv]
+            results_path = "{results_path}"
+            [tool.cluv.env]
+            SBATCH_TIMELIMIT="5:00:00"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "scripts" / "my_script.sh"
+        job_script.parent.mkdir()
+        job_script.write_text("#SBATCH --time=20:00:00")
+
+        sbatch_command = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args=["--time=10:00:00"],
+            program_args=[],
+            git_commit="abecdef",
+            job_chunking=True,
+        )
+
+        assert sbatch_command == (
+            "bash --login -c 'SBATCH_TIMELIMIT=5:00:00 SBATCH_JOB_NAME=cluv-my_script "
+            f"GIT_COMMIT=abecdef SBATCH_OUTPUT={results_path}/mila_%A/slurm-%A_%a.out "
+            "sbatch --parsable --chdir=my_project --time=3:00:00 --array=0-3%1 "
+            "~/my_project/scripts/my_script.sh '"
         )
 
 

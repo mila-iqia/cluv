@@ -235,7 +235,7 @@ def get_sbatch_command(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-    in_job_chunking: bool,
+    job_chunking: bool,
 ) -> str:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
@@ -258,7 +258,6 @@ def get_sbatch_command(
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
-    # in_job_chunking = False
     in_job_packing = False
 
     assert not in_job_packing, "todo"
@@ -266,7 +265,7 @@ def get_sbatch_command(
     cluster_results_path = PurePosixPath(cluster_config.results_path)
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
 
-    if in_job_chunking:
+    if job_chunking:
         assert not in_job_packing, "can't do both right now."
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
 

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path, PurePosixPath
 
 from cluv.cache import save_job
-from cluv.cli.submit_utils.chunking import get_n_chunks
+from cluv.cli.submit_utils.chunking import chunking_update_sbatch_ars
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote
@@ -267,21 +267,7 @@ def get_sbatch_command(
     if job_chunking:
         assert not in_job_packing, "can't do both right now."
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
-
-        # Add job array
-        n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
-        sbatch_args.append(f"--array=0-{n_chunks - 1}%1")
-
-        # Update the time limit (add --time=3:00:00 to sbatch args if not already set,
-        # or update the existing time limit to be at most 3h)
-        if not any(arg.startswith(("--time", "-t")) for arg in sbatch_args):
-            sbatch_args.append("--time=3:00:00")
-        else:
-            for i, arg in enumerate(sbatch_args):
-                if arg.startswith(("--time", "-t")):
-                    sbatch_args[i] = "--time=3:00:00"
-                    break
-
+        sbatch_args = chunking_update_sbatch_ars(sbatch_args, env_vars, job_script)
     elif in_job_packing:
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j_%t/slurm-%j_%t.out"
     else:

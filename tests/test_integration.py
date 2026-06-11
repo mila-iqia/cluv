@@ -128,8 +128,17 @@ async def test_login(remote: Remote):
 
 
 @pytest_asyncio.fixture(scope="session")
-async def cluster_status(cluster: str) -> ClusterStatus:
-    return await get_cluster_status(cluster)
+async def _all_cluster_statuses() -> dict[str, ClusterStatus]:
+    """Fetch all supported cluster statuses in parallel (one SSH round-trip each)."""
+    results = await asyncio.gather(*(get_cluster_status(c) for c in STATUS_SUPPORTED_CLUSTERS))
+    return dict(zip(STATUS_SUPPORTED_CLUSTERS, results))
+
+
+@pytest_asyncio.fixture(scope="session")
+async def cluster_status(cluster: str, _all_cluster_statuses: dict) -> ClusterStatus:
+    if cluster not in STATUS_SUPPORTED_CLUSTERS:
+        pytest.skip(f"Status not supported for cluster {cluster}.")
+    return _all_cluster_statuses[cluster]
 
 
 @pytest.mark.slow

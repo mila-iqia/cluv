@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> None:
         formatter_class=rich_argparse.RichHelpFormatter,
         epilog="For more information, see the documentation. You rock.",
     )
-    _add_v_arg(parser)  # add -v/--verbose on the top-level parser.
+    _add_v_arg(parser, _root=True)  # add -v/--verbose on the top-level parser.
 
     subparsers = parser.add_subparsers(dest="<command>", required=True)
 
@@ -79,8 +79,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     args_dict = vars(args)
 
-    verbose: int = args_dict.pop("verbose")
-    quiet: bool = args_dict.pop("quiet", False)
+    # These flags can be passed either to the root logger or the subcommand loggers.
+    verbose: int = max(args_dict.pop("verbose", 0), args_dict.pop("_verbose", 0))
+    quiet: bool = max(args_dict.pop("quiet", False), args_dict.pop("_quiet", False))
     setup_logging(verbose=verbose, quiet=quiet)
     subcommand = args_dict.pop("<command>")
     function: Callable = args_dict.pop("func")
@@ -286,18 +287,19 @@ def setup_logging(verbose: int | None, quiet: bool = False) -> None:
         logger.setLevel(logging.DEBUG)
 
 
-def _add_v_arg(parser: argparse.ArgumentParser) -> None:
+def _add_v_arg(parser: argparse.ArgumentParser, _root: bool = False) -> None:
     parser.add_argument(
         "-v",
         "--verbose",
-        dest="verbose",
+        dest="_verbose" if _root else "verbose",
         action="count",
+        default=0,
         help="Increase logging verbosity",
     )
     parser.add_argument(
         "-q",
         "--quiet",
-        dest="quiet",
+        dest="_quiet" if _root else "quiet",
         action="store_true",
         help="Disable command output.",
     )

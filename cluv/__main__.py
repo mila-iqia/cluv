@@ -76,7 +76,10 @@ def main(argv: list[str] | None = None) -> None:
     status_parser = add_status_args(subparsers)
     _add_v_arg(status_parser)
 
-    args = parser.parse_args(argv)
+    # args = parser.parse_args(argv)
+    args, unused = parser.parse_known_args(
+        argv
+    )  # parse twice to avoid errors with REMAINDER args in some subcommands.
     args_dict = vars(args)
 
     verbose: int = args_dict.pop("verbose")
@@ -85,7 +88,13 @@ def main(argv: list[str] | None = None) -> None:
     function: Callable = args_dict.pop("func")
 
     if subcommand == "submit":
+        args_dict["sbatch_args"] = (
+            unused  # pass the unparsed args to the submit function, which will handle them as sbatch args.
+        )
         args_dict["program_args"] = submit_program_args
+    else:
+        # parser.parse_args
+        assert not unused, f"Unexpected extra arguments: {unused}"
 
     try:
         if inspect.iscoroutinefunction(function):
@@ -130,11 +139,18 @@ def add_submit_args(
         help="Path to the sbatch job script (relative to project root).",
     )
     submit_parser.add_argument(
-        "sbatch_args",
-        nargs=argparse.REMAINDER,
-        metavar="...",
-        help="sbatch flags (before --) and/or program arguments (after --).",
+        "--chunking",
+        dest="chunking",
+        action="store_true",
+        default=False,
+        help="Convert the job to a job array.",
     )
+    # submit_parser.add_argument(
+    #     "sbatch_args",
+    #     nargs=argparse.REMAINDER,
+    #     metavar="...",
+    #     help="sbatch flags (before --) and/or program arguments (after --).",
+    # )
     submit_parser.set_defaults(func=submit)
     return submit_parser
 

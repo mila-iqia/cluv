@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -15,6 +17,7 @@ from cluv.remote import Remote
 from cluv.slurm import FAILED_JOB_STATES
 from cluv.utils import console
 
+DEFAULT_CHUNCK_TIME = "3:00:00"
 RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
 logger = logging.getLogger(__name__)
 
@@ -24,6 +27,7 @@ __all__ = ["submit"]
 async def submit(
     cluster: str,
     job_script: Path,
+    chunking: bool,
     sbatch_args: list[str],
     program_args: list[str],
 ) -> int | None:
@@ -40,6 +44,7 @@ async def submit(
     Parameters:
         cluster: SSH hostname of the target cluster. Can be set to "first" to launch the job on all clusters and keep only the first one to starts.
         job_script: Path to the job script to submit, relative to the project root.
+        chunking: TODO
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
 
@@ -61,14 +66,14 @@ async def submit(
     git_commit = ensure_clean_git_state()
 
     if cluster == "first":
-        return await submit_first(job_script, sbatch_args, program_args, git_commit)
+        return await submit_first(job_script, sbatch_args, program_args, git_commit, chunking)
 
     # Sync.
     remotes = await sync(clusters=[cluster])
 
     # Run the sbatch command over SSH.
     remote = remotes[0]
-    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
+    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit, chunking)
 
     if result.returncode != 0:
         console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
@@ -90,6 +95,7 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    chunking: bool,
 ) -> int | None:
     """Submit the job on all clusters, and wait until one of them starts.
     Once one starts, cancel the others.
@@ -101,13 +107,7 @@ async def submit_first(
     # Submit the job on all the clusters
     sbatch_results = await asyncio.gather(
         *[
-            sbatch(
-                remote,
-                job_script,
-                sbatch_args,
-                program_args,
-                git_commit,
-            )
+            sbatch(remote, job_script, sbatch_args, program_args, git_commit, chunking)
             for remote in remotes
         ],
         return_exceptions=True,
@@ -186,7 +186,9 @@ async def submit_first(
         await cancel_all_jobs(clusters_to_remote, cluster_to_jobid, start_cluster)
 
     if start_job_id is not None and start_cluster is not None:
-        save_job(start_job_id, start_cluster, str(job_script), git_commit, sbatch_args, program_args)
+        save_job(
+            start_job_id, start_cluster, str(job_script), git_commit, sbatch_args, program_args
+        )
 
     return start_job_id
 
@@ -233,6 +235,7 @@ def get_sbatch_command(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    in_job_chunking: bool,
 ) -> str:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
@@ -255,10 +258,10 @@ def get_sbatch_command(
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
-    in_job_chunking = False
+    # in_job_chunking = False
     in_job_packing = False
-    # SBATCH --output=logs/%j/slurm-%j.out
-    assert not in_job_chunking and not in_job_packing, "todo"
+
+    assert not in_job_packing, "todo"
     # might contain unresolved env vars.
     cluster_results_path = PurePosixPath(cluster_config.results_path)
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
@@ -266,6 +269,21 @@ def get_sbatch_command(
     if in_job_chunking:
         assert not in_job_packing, "can't do both right now."
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
+
+        # Add job array
+        n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
+        sbatch_args.append(f"--array=0-{n_chunks - 1}%1")
+
+        # Update the time limit (add --time=3:00:00 to sbatch args if not already set,
+        # or update the existing time limit to be at most 3h)
+        if not any(arg.startswith(("--time", "-t")) for arg in sbatch_args):
+            sbatch_args.append("--time=3:00:00")
+        else:
+            for i, arg in enumerate(sbatch_args):
+                if arg.startswith(("--time", "-t")):
+                    sbatch_args[i] = "--time=3:00:00"
+                    break
+
     elif in_job_packing:
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j_%t/slurm-%j_%t.out"
     else:
@@ -301,17 +319,89 @@ def get_sbatch_command(
     )
 
 
+def get_n_chunks(sbatch_args_str: list[str], env_vars: dict[str, str], job_script: Path) -> int:
+    """TODO"""
+    # The time of a job can be set at different places :
+    #   - As an env variable in the Cluv or the cluster config (with SBATCH_TIMELIMIT)
+    #   - As an arg to sbatch (with --time or -t)
+    #   - As a directive in the job script header (#SBATCH --time)
+    time = (
+        _get_time_from_sbatch_args(sbatch_args_str)
+        or env_vars.get("SBATCH_TIMELIMIT")
+        or _get_time_from_job_script_header(job_script)
+    )
+    console.log(env_vars.get("SBATCH_TIMELIMIT"))
+    console.log(_get_time_from_sbatch_args(sbatch_args_str))
+    console.log(_get_time_from_job_script_header(job_script))
+    console.log(
+        f"Chunking is enabled. Determining the number of chunks based on the job time limit (found {time})."
+    )
+
+    if not time:
+        raise ValueError(
+            "Could not find a time value for the job, which is required for chunking."
+        )
+
+    total_time = parse_time_arg(time)
+    total_hours = total_time.total_seconds() / 3600  # Total hours
+
+    # Split the total time into 3h chunks, and round up.
+    chunk_hours = 3
+    n_chunks = int((total_hours + chunk_hours - 1) // chunk_hours)
+
+    return n_chunks
+
+
+def parse_time_arg(time: str) -> datetime.timedelta:
+    """Parse a time value from the sbatch format to a timedelta object."""
+    # The SLURM time format is days-hours:minutes:seconds, with the days part optionnal.
+    match = re.match(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", time)
+    if not match:
+        raise ValueError(f"Could not parse time value: {time}")
+
+    return datetime.timedelta(
+        days=int(match.group(1) or 0),
+        hours=int(match.group(2)),
+        minutes=int(match.group(3)),
+        seconds=int(match.group(4)),
+    )
+
+
+def _get_time_from_sbatch_args(sbatch_args_str: list[str]) -> str | None:
+    """TODO"""
+    for arg in sbatch_args_str:
+        if arg.startswith(("--time", "-t")):
+            # Like "--time=00:10:00" or "-t=1-02:00:00"
+            return arg.split("=")[1]
+
+    return None
+
+
+def _get_time_from_job_script_header(job_script: Path) -> str | None:
+    """TODO"""
+    for line in job_script.read_text().splitlines():
+        if line.startswith("#SBATCH") and "--time=" in line:
+            # Like "#SBATCH --time=1:00:00"
+            return line[line.index("--time=") + len("--time=") :].split()[0]
+
+        if not line.strip().startswith("#"):
+            # Stop parsing once we leave the header.
+            return
+
+
 async def sbatch(
     remote: Remote,
     job_script: Path,
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    chunking: bool,
 ) -> subprocess.CompletedProcess[str]:
     """Submit the job via sbatch on the remote cluster, and return the job id."""
-    cluster = remote.hostname
+    remote_cmd = get_sbatch_command(
+        remote.hostname, job_script, sbatch_args, program_args, git_commit, chunking
+    )
 
-    remote_cmd = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
     return await remote.run(remote_cmd, display=True, warn=True, hide=True)
 
 

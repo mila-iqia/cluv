@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import logging
 import os
-import re
 import shlex
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
 from cluv.cache import save_job
+from cluv.cli.submit_utils.chunking import get_n_chunks
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote
@@ -316,76 +315,6 @@ def get_sbatch_command(
         f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={project_root_relative_to_home} "
         f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
-
-
-def get_n_chunks(sbatch_args_str: list[str], env_vars: dict[str, str], job_script: Path) -> int:
-    """TODO"""
-    # The time of a job can be set at different places :
-    #   - As an env variable in the Cluv or the cluster config (with SBATCH_TIMELIMIT)
-    #   - As an arg to sbatch (with --time or -t)
-    #   - As a directive in the job script header (#SBATCH --time)
-    time = (
-        _get_time_from_sbatch_args(sbatch_args_str)
-        or env_vars.get("SBATCH_TIMELIMIT")
-        or _get_time_from_job_script_header(job_script)
-    )
-    console.log(env_vars.get("SBATCH_TIMELIMIT"))
-    console.log(_get_time_from_sbatch_args(sbatch_args_str))
-    console.log(_get_time_from_job_script_header(job_script))
-    console.log(
-        f"Chunking is enabled. Determining the number of chunks based on the job time limit (found {time})."
-    )
-
-    if not time:
-        raise ValueError(
-            "Could not find a time value for the job, which is required for chunking."
-        )
-
-    total_time = parse_time_arg(time)
-    total_hours = total_time.total_seconds() / 3600  # Total hours
-
-    # Split the total time into 3h chunks, and round up.
-    chunk_hours = 3
-    n_chunks = int((total_hours + chunk_hours - 1) // chunk_hours)
-
-    return n_chunks
-
-
-def parse_time_arg(time: str) -> datetime.timedelta:
-    """Parse a time value from the sbatch format to a timedelta object."""
-    # The SLURM time format is days-hours:minutes:seconds, with the days part optionnal.
-    match = re.match(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", time)
-    if not match:
-        raise ValueError(f"Could not parse time value: {time}")
-
-    return datetime.timedelta(
-        days=int(match.group(1) or 0),
-        hours=int(match.group(2)),
-        minutes=int(match.group(3)),
-        seconds=int(match.group(4)),
-    )
-
-
-def _get_time_from_sbatch_args(sbatch_args_str: list[str]) -> str | None:
-    """TODO"""
-    for arg in sbatch_args_str:
-        if arg.startswith(("--time", "-t")):
-            # Like "--time=00:10:00" or "-t=1-02:00:00"
-            return arg.split("=")[1]
-
-    return None
-
-
-def _get_time_from_job_script_header(job_script: Path) -> str | None:
-    """TODO"""
-    for line in job_script.read_text().splitlines():
-        if line.startswith("#SBATCH") and "--time=" in line:
-            # Like "#SBATCH --time=1:00:00"
-            return line[line.index("--time=") + len("--time=") :].split()[0]
-
-        if not line.strip().startswith("#"):
-            # Stop parsing once we leave the header.
-            return
 
 
 async def sbatch(

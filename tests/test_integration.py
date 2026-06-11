@@ -196,7 +196,7 @@ async def test_status_storage(cluster_status: ClusterStatus):
     assert cluster_status.storage.scratch_used >= 0
 
 
-TEST_SUBMIT_TIMEOUT_SECONDS = 180
+TEST_SUBMIT_TIMEOUT_SECONDS = 30
 
 
 @pytest.mark.parametrize(

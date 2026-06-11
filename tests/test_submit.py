@@ -50,18 +50,6 @@ def project_dir(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(project_dir)  # Set current working dir
 
-    # def uv_init_without_git():
-    #     subprocess.check_output(("uv", "init", "--package", "--vcs", "none"), text=True)
-
-    # # from cluv.cli.init import run_uv_init
-
-    # monkeypatch.setattr(
-    #     "cluv.cli.init",
-    #     run_uv_init.__name__,
-    #     mock := unittest.mock.Mock(uv_init_without_git),
-    # )
-    # from cluv.cli import init
-
     cluv.cli.init()
     # mock.assert_called_once()
     return project_dir

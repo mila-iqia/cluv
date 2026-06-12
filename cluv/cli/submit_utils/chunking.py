@@ -27,7 +27,7 @@ def chunking_update_sbatch_ars(
 
 
 def get_n_chunks(sbatch_args: list[str], env_vars: dict[str, str], job_script: Path) -> int:
-    """Get the number of chuncks required from the current time limit."""
+    """Get the number of chunks required from the current time limit."""
     # The time limit of a job can be set multiple way :
     # 1. As an arg to sbatch (with --time or -t)
     # 2. As an env variable in the Cluv or the cluster config (with SBATCH_TIMELIMIT)
@@ -76,7 +76,7 @@ def get_time_from_job_script_header(job_script: Path) -> str | None:
 
 def parse_slurm_time(time: str) -> datetime.timedelta:
     """Parse a time value from the sbatch format to a timedelta object."""
-    # The SLURM time format is days-hours:minutes:seconds, with the days part optionnal.
+    # The SLURM time format is days-hours:minutes:seconds, with the days part optional.
     match = re.match(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", time)
     if not match:
         raise ValueError(f"Could not parse time value: {time}")

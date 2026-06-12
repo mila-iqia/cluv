@@ -73,7 +73,7 @@ async def submit(
     here = current_cluster()
 
     if cluster == "first":
-        job = await submit_first(job_script, sbatch_args, program_args, git_commit)
+        job = await submit_first(job_script, sbatch_args, program_args, git_commit, chunking)
         if job:
             save_job(job)
         return job
@@ -85,7 +85,7 @@ async def submit(
     else:
         # Submitting to the current cluster.
         remote = None
-    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
+    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit, chunking)
     submit_time = datetime.datetime.now()
 
     if result.returncode != 0:
@@ -135,7 +135,9 @@ async def submit_first(
 
     # Submit the job on all the clusters (and possibly locally).
     sbatch_commands = {
-        cluster: get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
+        cluster: get_sbatch_command(
+            cluster, job_script, sbatch_args, program_args, git_commit, chunking
+        )
         for cluster in cluster_to_remote
     }
     sbatch_results = await asyncio.gather(
@@ -146,6 +148,7 @@ async def submit_first(
                 sbatch_args=sbatch_args,
                 program_args=program_args,
                 git_commit=git_commit,
+                chunking=chunking,
             )
             for remote in cluster_to_remote.values()
         ],

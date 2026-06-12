@@ -95,9 +95,8 @@ async def submit(
         console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
         return None
 
-    job_id = int(result.stdout.strip())
     job = Job(
-        job_id=job_id,
+        job_id=int(result.stdout.strip()),
         cluster=cluster,
         job_script=str(job_script),
         git_commit=git_commit,
@@ -108,8 +107,8 @@ async def submit(
     save_job(job)
 
     console.log(
-        f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
-        f"Use `ssh {cluster} sacct -j {job_id}` to view its status, and `cluv sync {cluster}` to "
+        f"Successfully submitted job {job.job_id} on the {cluster} cluster.\n"
+        f"Use `ssh {cluster} sacct -j {job.job_id}` to view its status, and `cluv sync {cluster}` to "
         f"fetch results once it is complete."
     )
 
@@ -328,7 +327,7 @@ def get_sbatch_command(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-    job_chunking: bool,
+    chunking: bool,
 ) -> str:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
@@ -358,7 +357,7 @@ def get_sbatch_command(
     cluster_results_path = PurePosixPath(cluster_config.results_path)
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
 
-    if job_chunking:
+    if chunking:
         assert not in_job_packing, "can't do both right now."
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
         sbatch_args = chunking_update_sbatch_ars(sbatch_args, env_vars, job_script)

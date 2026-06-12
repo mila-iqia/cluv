@@ -8,6 +8,7 @@ CHUNK_SIZE = 3  # In hours
 def chunking_update_sbatch_ars(
     sbatch_args: list[str], env_vars: dict[str, str], job_script: Path
 ) -> list[str]:
+    """Add the sbatch args (--array and --time) for chunking the job into multiple smaller jobs."""
     # Add job array
     n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
     sbatch_args.append(f"--array=0-{n_chunks - 1}%1")
@@ -26,24 +27,24 @@ def chunking_update_sbatch_ars(
 
 
 def get_n_chunks(sbatch_args: list[str], env_vars: dict[str, str], job_script: Path) -> int:
-    """TODO"""
-    # The time of a job can be set at different places :
-    #   - As an env variable in the Cluv or the cluster config (with SBATCH_TIMELIMIT)
-    #   - As an arg to sbatch (with --time or -t)
-    #   - As a directive in the job script header (#SBATCH --time)
-    time = (
-        _get_time_from_sbatch_args(sbatch_args)
+    """Get the number of chuncks required from the current time limit."""
+    # The time limit of a job can be set multiple way :
+    # 1. As an arg to sbatch (with --time or -t)
+    # 2. As an env variable in the Cluv or the cluster config (with SBATCH_TIMELIMIT)
+    # 3. As a directive in the job script header (#SBATCH --time)
+    slurm_time = (
+        get_time_from_sbatch_args(sbatch_args)
         or env_vars.get("SBATCH_TIMELIMIT")
-        or _get_time_from_job_script_header(job_script)
+        or get_time_from_job_script_header(job_script)
     )
 
-    if not time:
+    if not slurm_time:
         raise ValueError(
             "Could not find a time value for the job, which is required for chunking."
         )
 
-    total_time = parse_time_arg(time)
-    total_hours = total_time.total_seconds() / 3600  # Total hours
+    time = parse_slurm_time(slurm_time)
+    total_hours = time.total_seconds() / 3600  # Convert to hours
 
     # Split the total time into chunks, and round up.
     n_chunks = int((total_hours + CHUNK_SIZE - 1) // CHUNK_SIZE)
@@ -51,7 +52,7 @@ def get_n_chunks(sbatch_args: list[str], env_vars: dict[str, str], job_script: P
     return n_chunks
 
 
-def _get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
+def get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
     """Return the SLURM time limit from the sbatch args if it exists."""
     for arg in sbatch_args:
         if arg.startswith(("--time", "-t")):
@@ -61,7 +62,7 @@ def _get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
     return None
 
 
-def _get_time_from_job_script_header(job_script: Path) -> str | None:
+def get_time_from_job_script_header(job_script: Path) -> str | None:
     """Return the SLURM time limit from the job script header if it exists."""
     for line in job_script.read_text().splitlines():
         if line.startswith("#SBATCH") and "--time=" in line:
@@ -73,7 +74,7 @@ def _get_time_from_job_script_header(job_script: Path) -> str | None:
             return
 
 
-def parse_time_arg(time: str) -> datetime.timedelta:
+def parse_slurm_time(time: str) -> datetime.timedelta:
     """Parse a time value from the sbatch format to a timedelta object."""
     # The SLURM time format is days-hours:minutes:seconds, with the days part optionnal.
     match = re.match(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", time)

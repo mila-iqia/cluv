@@ -16,7 +16,6 @@ from cluv.remote import Remote
 from cluv.slurm import FAILED_JOB_STATES
 from cluv.utils import console
 
-DEFAULT_CHUNCK_TIME = "3:00:00"
 RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
 logger = logging.getLogger(__name__)
 

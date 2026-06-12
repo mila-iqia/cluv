@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from rich import box
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -23,6 +22,7 @@ from cluv.slurm import (
     parse_savail,
     parse_sinfo_nodes,
 )
+from cluv.utils import console
 
 logger = logging.getLogger(__name__)
 __all__ = ["status"]
@@ -425,7 +425,6 @@ async def status(table: str) -> None:
     The "jobs" table shows one row per job from the cache, with live status info (state,
     elapsed time, wait time).
     """
-    console = Console()
     clusters = get_cluv_config().clusters_names
 
     console.print()

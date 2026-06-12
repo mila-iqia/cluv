@@ -39,29 +39,30 @@ datasets_path = "$SCRATCH/datasets/cifar10"
 # Environment variables applied when using Slurm commands on all clusters.
 SBATCH_TIME = "3:00:00"
 SBATCH_REQUEUE = "1"
+SBATCH_MEM_PER_NODE="16G"
 # Assume that compute nodes don't have internet access by default. Override below when they do.
 UV_OFFLINE="1"
 WANDB_MODE="offline"
-
 
 ###  --------------   Clusters Config   --------------  ###
 
 [tool.cluv.clusters.mila]
 # Overrides specific to the Mila cluster.
 env = {UV_OFFLINE="0", WANDB_MODE="online"}
-results_path = "$SCRATCH/logs/cluv"
 
 [tool.cluv.clusters.tamia]
 
 [tool.cluv.clusters.killarney]
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
 datasets_path = "$HOME/datasets/cifar10"
-results_path = "$HOME/logs/cluv"
+results_path = "$HOME/logs/pytorch_example"
 
 [tool.cluv.clusters.vulcan]
+datasets_path = "$HOME/datasets/cifar10"
+results_path = "$HOME/logs/pytorch_example"
 
-# [tool.cluv.clusters.rorqual]
-# env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
+[tool.cluv.clusters.rorqual]
+env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.fir]
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
@@ -69,11 +70,14 @@ env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 [tool.cluv.clusters.nibi]
 env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
-[tool.cluv.clusters.trillium]
-env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
+# TODO: There are issues with the job output script being created in $HOME. Once #87 is implemented,
+# uncomment these to also submit on Trillium and Trillium-gpu.
+# See also: #61
+# [tool.cluv.clusters.trillium]
+# env = {SBATCH_TIMELIMIT="00:15:00"}
 
-[tool.cluv.clusters.trillium-gpu]
-env = {SBATCH_ACCOUNT="rrg-bengioy-ad"}
+# [tool.cluv.clusters.trillium-gpu]
+# env = {SBATCH_GPUS_PER_NODE="1", SBATCH_ACCOUNT="rrg-bengioy-ad""}
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.

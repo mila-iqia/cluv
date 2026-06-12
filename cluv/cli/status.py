@@ -11,7 +11,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from cluv.cache import CachedJob, load_jobs
+from cluv.cache import Job, load_jobs
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_cluv_config
 from cluv.slurm import (
@@ -315,10 +315,7 @@ def _build_cluster_table(
     return table
 
 
-def _build_cluv_jobs_table(
-        cached_jobs: list[CachedJob],
-        live_info: dict[int, LiveJobInfo]
-) -> Table:
+def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobInfo]) -> Table:
     """Build the jobs overview table with one row per cached job, enriched with live status info."""
     table = Table(
         title="Jobs Overview",
@@ -380,8 +377,7 @@ def _build_legend() -> Panel:
 
 
 async def get_job_infos(
-    cached_jobs: list[CachedJob],
-    clusters: list[str]
+    cached_jobs: list[Job], clusters: list[str]
 ) -> tuple[dict[int, LiveJobInfo], dict[str, JobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
     # Regroup jobs by cluster

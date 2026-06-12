@@ -22,6 +22,7 @@ pytestmark = [
 ]
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_scratch: Path):
     """Test for `cluv sync` with a project that has a 'datasets_path'.

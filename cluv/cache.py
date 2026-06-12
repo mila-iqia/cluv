@@ -3,7 +3,6 @@ from __future__ import annotations
 import functools
 import json
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 from cluv.utils import find_pyproject
@@ -17,7 +16,7 @@ def get_cache_path() -> Path:
 
 
 @dataclass
-class CachedJob:
+class Job:
     job_id: int
     cluster: str
     job_script: str
@@ -27,23 +26,7 @@ class CachedJob:
     program_args: list[str]
 
 
-def save_job(
-    job_id: int,
-    cluster: str,
-    job_script: str,
-    git_commit: str,
-    sbatch_args: list[str],
-    program_args: list[str],
-) -> None:
-    job = CachedJob(
-        job_id=job_id,
-        cluster=cluster,
-        job_script=job_script,
-        git_commit=git_commit,
-        submitted_at=datetime.now(timezone.utc).isoformat(),
-        sbatch_args=sbatch_args,
-        program_args=program_args,
-    )
+def save_job(job: Job) -> None:
     path = get_cache_path()
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,14 +34,14 @@ def save_job(
         f.write(json.dumps(asdict(job)) + "\n")
 
 
-def load_jobs() -> list[CachedJob]:
+def load_jobs() -> list[Job]:
     path = get_cache_path()
     if not path.exists():
         return []
     jobs = []
     for line in path.read_text().splitlines():
         try:
-            jobs.append(CachedJob(**json.loads(line)))
+            jobs.append(Job(**json.loads(line)))
         except Exception:
             pass
     return jobs

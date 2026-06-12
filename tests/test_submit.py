@@ -84,7 +84,7 @@ class TestGetSbatchCommand:
             sbatch_args=["--account=my_account", "--mem=8G"],
             program_args=["program_arg_1", "program_arg_2"],
             git_commit="abecdef",
-            job_chunking=False,
+            chunking=False,
         )
         job_script_relative_path = sbatch_script.relative_to(fake_home)
 
@@ -122,7 +122,7 @@ class TestGetSbatchCommand:
             sbatch_args=[],
             program_args=[],
             git_commit="abecdef",
-            job_chunking=False,
+            chunking=False,
         )
 
         assert sbatch_command == (
@@ -155,7 +155,7 @@ class TestGetSbatchCommand:
             sbatch_args=["--time=10:00:00"],
             program_args=[],
             git_commit="abecdef",
-            job_chunking=True,
+            chunking=True,
         )
 
         assert sbatch_command == (
@@ -290,6 +290,7 @@ async def test_can_submit_on_current_cluster(
     returned_job = await submit(
         cluster=here,
         job_script=job_script,
+        chunking=False,
         sbatch_args=sbatch_args,
         program_args=program_args,
     )
@@ -422,6 +423,7 @@ async def test_submit_first_considers_current_cluster(
     returned_job = await submit_first(
         job_script=job_script,
         sbatch_args=sbatch_args,
+        chunking=False,
         program_args=program_args,
         git_commit=dummy_commit,
     )

@@ -36,6 +36,9 @@ class PartialClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
+    ignore: bool = False
+    """Whether to ignore this cluster when running commands on all clusters."""
+
 
 @dataclass(frozen=True)
 class ClusterConfig:
@@ -54,6 +57,9 @@ class ClusterConfig:
 
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
+
+    ignore: bool = False
+    """Whether to ignore this cluster when running commands on all clusters."""
 
     def expandvars(self):
         return ClusterConfig(
@@ -94,7 +100,7 @@ class CluvConfig(BaseModel):
 
     @property
     def clusters_names(self) -> list[str]:
-        return list(self.clusters.keys())
+        return [name for name, config in self.clusters.items() if not config.ignore]
 
     def get_cluster_config(self, cluster: str) -> ClusterConfig:
         """Returns the cluster config for a specific cluster.

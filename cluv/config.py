@@ -143,11 +143,6 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     return CluvConfig.model_validate(cluv, extra="forbid")
 
 
-def get_cluster_choices() -> list[str]:
-    """Return configured clusters or the defaults when config is missing/invalid."""
-    return get_cluv_config().clusters_names
-
-
 def current_cluster_config() -> ClusterConfig | None:
     """Returns the `ClusterConfig` of the current cluster, or None if not currently on a cluster."""
     cluster = current_cluster()

@@ -65,15 +65,7 @@ def load_jobs() -> list[Job]:
 
 def read_cache() -> CacheContent:
     """Read the cache content from the (local) cache file."""
-    return _read_cache(_get_cache_file())
-
-
-def write_cache(cache: CacheContent):
-    """Write the cache content to the (local) cache file."""
-    _write_cache(cache, _get_cache_file())
-
-
-def _read_cache(cache_file: Path) -> CacheContent:
+    cache_file = _get_cache_file()
     if not cache_file.exists():
         logger.debug("Empty cache (file %s does not exist)", cache_file)
         return CacheContent()
@@ -82,7 +74,9 @@ def _read_cache(cache_file: Path) -> CacheContent:
     return pydantic.TypeAdapter(CacheContent).validate_python(raw_content)
 
 
-def _write_cache(cache: CacheContent, cache_file: Path):
+def write_cache(cache: CacheContent):
+    """Write the cache content to the (local) cache file."""
+    cache_file = _get_cache_file()
     logger.debug("Writing cache to %s: %s", cache_file, cache)
     cache_file.write_text(yaml.dump(asdict(cache), indent=2))
 

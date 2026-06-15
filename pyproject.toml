@@ -84,6 +84,10 @@ show_missing = true
 ###  --------------   CLUV CONFIG   --------------  ###
 
 [tool.cluv]
+
+# Job script to use by default when one isn't passed to the `submit` command, on all clusters.
+# Can be overridden per cluster below. or per job submission.
+job_script_path = "scripts/job.sh"
 # Where to store job results by default. Can be overridden per cluster.
 results_path = "$SCRATCH/logs/cluv"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.

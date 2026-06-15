@@ -50,9 +50,6 @@ class ClusterConfig:
     env: dict[str, str]
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    sbatch_args: dict[str, str | bool]
-    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
-
     results_path: Path
     """Path to the results directory for a specific cluster."""
 
@@ -66,6 +63,9 @@ class ClusterConfig:
 
     job_script_path: Path | None
     """Path to the job script to use by default on this cluster."""
+
+    sbatch_args: dict[str, str | bool] = field(default_factory=dict)
+    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
 
     def expandvars(self):
         return ClusterConfig(

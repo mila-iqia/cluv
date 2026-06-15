@@ -79,6 +79,21 @@ SBATCH_ACCOUNT = "def-bengioy"
         assert cfg.clusters["mila"].env == {}
         assert cfg.clusters["rorqual"].env == {"SBATCH_ACCOUNT": "def-bengioy"}
 
+    def test_clusters_names_should_not_returned_ignored_clusters(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+    [tool.cluv]
+    results_path = "logs"
+    [tool.cluv.clusters.mila]
+    [tool.cluv.clusters.rorqual]
+    [tool.cluv.clusters.narval]
+    ignore = true
+    """,
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.clusters_names == ["mila", "rorqual"]
+
 
 # ---------------------------------------------------------------------------
 # [tool.cluv.env] — global SBATCH_* defaults

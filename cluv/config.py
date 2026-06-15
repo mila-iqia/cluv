@@ -39,6 +39,9 @@ class PartialClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
+    job_script_path: str | None = None
+    """Path to the job script to use by default on this cluster."""
+
 
 @dataclass(frozen=True)
 class ClusterConfig:
@@ -61,13 +64,21 @@ class ClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
+    job_script_path: Path | None
+    """Path to the job script to use by default on this cluster."""
+
     def expandvars(self):
         return ClusterConfig(
             env=self.env,
             sbatch_args=self.sbatch_args,
-            results_path=Path(os.path.expandvars(self.results_path)),
+            results_path=Path(os.path.expandvars(str(self.results_path))),
             datasets_path=(
-                Path(os.path.expandvars(self.datasets_path)) if self.datasets_path else None
+                Path(os.path.expandvars(str(self.datasets_path))) if self.datasets_path else None
+            ),
+            job_script_path=(
+                Path(os.path.expandvars(str(self.job_script_path)))
+                if self.job_script_path
+                else None
             ),
         )
 
@@ -100,6 +111,13 @@ class CluvConfig(BaseModel):
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
+    job_script_path: str | None = None
+    """Default path to the job script to submit when one is not passed explicitly to `cluv submit`.
+
+    This can be overridden for specific clusters in the `clusters` section, and can also be
+    overridden on the fly by passing a different job script to `cluv submit`.
+    """
+
     clusters: dict[str, PartialClusterConfig] = {}
     """Configuration options for each cluster.
 
@@ -118,11 +136,13 @@ class CluvConfig(BaseModel):
         cluster_config = self.clusters[cluster]
         results_path = cluster_config.results_path or self.results_path
         datasets_path = cluster_config.datasets_path or self.datasets_path
+        job_script_path = cluster_config.job_script_path or self.job_script_path
         return ClusterConfig(
             env=self.env | cluster_config.env,
             sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
             results_path=Path(results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
+            job_script_path=Path(job_script_path) if job_script_path else None,
         )
 
 

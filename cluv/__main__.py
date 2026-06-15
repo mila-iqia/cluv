@@ -28,7 +28,7 @@ from .cli.submit import submit
 from .cli.sync import sync
 from .utils import console
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("cluv")
 if typing.TYPE_CHECKING:
     Subparsers = argparse._SubParsersAction[simple_parsing.ArgumentParser]
 
@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> None:
         formatter_class=rich_argparse.RichHelpFormatter,
         epilog="For more information, see the documentation. You rock.",
     )
-    _add_v_arg(parser)  # add -v/--verbose on the top-level parser.
+    _add_v_arg(parser, _root=True)  # add -v/--verbose on the top-level parser.
 
     subparsers = parser.add_subparsers(dest="<command>", required=True)
 
@@ -79,13 +79,27 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     args_dict = vars(args)
 
-    verbose: int = args_dict.pop("verbose")
-    setup_logging(verbose=verbose, force=True)
+    # These flags can be passed either to the root logger or the subcommand loggers.
+    verbose: int = max(args_dict.pop("verbose", 0), args_dict.pop("_verbose", 0))
+    quiet: bool = max(args_dict.pop("quiet", False), args_dict.pop("_quiet", False))
+    setup_logging(verbose=verbose, quiet=quiet)
     subcommand = args_dict.pop("<command>")
     function: Callable = args_dict.pop("func")
 
     if subcommand == "submit":
+        # job script is an optional positional argument. When not passed, an sbatch argument like
+        # --gpus will be parsed as the job script. We rectify that here.
+        job_script: Path | None = args_dict["job_script"]
+        if job_script and str(job_script).startswith("-") and not job_script.exists():
+            args_dict["sbatch_args"] = [str(job_script), *args_dict["sbatch_args"]]
+            job_script = None
+            args_dict["job_script"] = None
         args_dict["program_args"] = submit_program_args
+
+    if subcommand == "status" and quiet:
+        console.print("[yellow]Warning: --quiet has no effect with the 'status' command.[/yellow]")
+        quiet = False
+    console.quiet = quiet
 
     try:
         if inspect.iscoroutinefunction(function):
@@ -105,14 +119,12 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(err.returncode)
 
 
-def add_submit_args(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
+def add_submit_args(subparsers: Subparsers):
     submit_parser = subparsers.add_parser(
         "submit",
         help="Submit a SLURM job on a remote cluster.",
         formatter_class=rich_argparse.RichHelpFormatter,
-        usage="cluv submit <cluster> <job.sh> [sbatch-args...] [-- program-args...]",
+        usage="cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]",
     )
     submit_parser.add_argument(
         "cluster",
@@ -126,8 +138,10 @@ def add_submit_args(
     submit_parser.add_argument(
         "job_script",
         metavar="<job.sh>",
+        nargs="?",
+        default=None,
         type=Path,
-        help="Path to the sbatch job script (relative to project root).",
+        help="Path to the sbatch job script (relative to project root). Defaults to the job script specified in the config at 'job_script_path'.",
     )
     submit_parser.add_argument(
         "sbatch_args",
@@ -139,7 +153,7 @@ def add_submit_args(
     return submit_parser
 
 
-def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+def add_status_args(subparsers: Subparsers):
     status_parser = subparsers.add_parser(
         "status",
         help="Get the status of clusters and jobs.",
@@ -157,9 +171,7 @@ def add_status_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     return status_parser
 
 
-def add_sync_args(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
+def add_sync_args(subparsers: Subparsers):
     sync_parser = subparsers.add_parser(
         "sync",
         help="Synchronizes the current project across clusters.",
@@ -203,7 +215,7 @@ def add_sync_args(
     return sync_parser
 
 
-def add_login_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+def add_login_args(subparsers: Subparsers):
     login_parser = subparsers.add_parser(
         "login",
         help="Login to the specified clusters.",
@@ -218,7 +230,7 @@ def add_login_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     return login_parser
 
 
-def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
+def add_init_args(subparsers: Subparsers):
     init_parser = subparsers.add_parser(
         "init",
         help="Initialize the current project across clusters.",
@@ -236,9 +248,7 @@ def add_init_args(subparsers: Subparsers) -> argparse.ArgumentParser:
     return init_parser
 
 
-def add_run_args(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> argparse.ArgumentParser:
+def add_run_args(subparsers: Subparsers):
     run_parser = subparsers.add_parser(
         "run",
         help="Run a command on a cluster",
@@ -261,7 +271,7 @@ def add_run_args(
     return run_parser
 
 
-def setup_logging(verbose: int | None, force: bool = False) -> None:
+def setup_logging(verbose: int | None, quiet: bool = False) -> None:
     verbose = verbose or 0
     handler = rich.logging.RichHandler(
         console=console,
@@ -269,32 +279,32 @@ def setup_logging(verbose: int | None, force: bool = False) -> None:
         rich_tracebacks=True,
         markup=True,
     )
-    # logging.basicConfig(
-    #     level=logging.WARNING,
-    #     format="%(message)s",
-    #     handlers=[handler],
-    #     force=force,
-    # )
-    cluv_logger = logging.getLogger("cluv")
-    cluv_logger.addHandler(handler)
-    if verbose == 0:
+    logger.addHandler(handler)
+    if quiet:
+        logger.setLevel(logging.CRITICAL)
+    elif verbose == 0:
         logger.setLevel(logging.WARNING)
-        cluv_logger.setLevel(logging.WARNING)
     elif verbose == 1:
         logger.setLevel(logging.INFO)
-        cluv_logger.setLevel(logging.INFO)
     elif verbose >= 2:
         logger.setLevel(logging.DEBUG)
-        cluv_logger.setLevel(logging.DEBUG)
 
 
-def _add_v_arg(parser: argparse.ArgumentParser) -> None:
+def _add_v_arg(parser: argparse.ArgumentParser, _root: bool = False) -> None:
     parser.add_argument(
         "-v",
         "--verbose",
-        dest="verbose",
+        dest="_verbose" if _root else "verbose",
         action="count",
+        default=0,
         help="Increase logging verbosity",
+    )
+    parser.add_argument(
+        "-q",
+        "--quiet",
+        dest="_quiet" if _root else "quiet",
+        action="store_true",
+        help="Disable command output.",
     )
 
 

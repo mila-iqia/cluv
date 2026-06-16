@@ -58,7 +58,7 @@ class ClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
-    ignore: bool = False
+    ignore: bool
     """Whether to ignore this cluster when running commands on all clusters."""
 
     def expandvars(self):
@@ -68,6 +68,7 @@ class ClusterConfig:
             datasets_path=(
                 Path(os.path.expandvars(self.datasets_path)) if self.datasets_path else None
             ),
+            ignore=self.ignore,
         )
 
 
@@ -116,6 +117,7 @@ class CluvConfig(BaseModel):
             # TODO: Use the cluster-specific results_path if we add that option back in the future.
             results_path=Path(results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
+            ignore=cluster_config.ignore,
         )
 
 

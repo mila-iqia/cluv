@@ -151,6 +151,7 @@ class TestSubmitCliParsing:
                 "job_script": None,
                 "sbatch_args": [],
                 "program_args": ["python", "main.py"],
+                "make_commit": False,
             }
         )
 
@@ -169,6 +170,7 @@ class TestSubmitCliParsing:
                 "job_script": None,
                 "sbatch_args": ["--mem=8G"],
                 "program_args": ["python", "main.py"],
+                "make_commit": False,
             }
         )
 
@@ -190,6 +192,7 @@ class TestSubmitCliParsing:
                 "job_script": job_script,
                 "sbatch_args": [],
                 "program_args": [],
+                "make_commit": False,
             }
         )
 
@@ -376,7 +379,7 @@ async def test_can_submit_on_current_cluster(
         cluv.cli.submit,
         ensure_clean_git_state.__name__,
         mock_ensure_clean_git_state := unittest.mock.Mock(
-            wraps=ensure_clean_git_state, side_effect=lambda: dummy_commit
+            wraps=ensure_clean_git_state, side_effect=lambda *args, **kwargs: dummy_commit
         ),
     )
     here = mock_current_cluster

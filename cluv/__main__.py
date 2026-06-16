@@ -127,7 +127,7 @@ def add_submit_args(subparsers: Subparsers):
         usage="cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]",
     )
     submit_parser.add_argument(
-        "--make-commit",
+        "--autocommit",
         action="store_true",
         help="Create a local commit with tracked changes before submitting the job.",
     )

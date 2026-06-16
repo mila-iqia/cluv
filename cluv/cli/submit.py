@@ -17,7 +17,6 @@ import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, save_job
-from pathlib import Path
 from typing import Callable
 
 from cluv.cli.sync import sync
@@ -36,7 +35,7 @@ async def submit(
     job_script: Path | None,
     sbatch_args: list[str],
     program_args: list[str],
-    make_commit: bool = False,
+    autocommit: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
 
@@ -54,7 +53,7 @@ async def submit(
             When omitted, uses the configured default for the target cluster.
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
-        make_commit: If True, automatically create a local commit with tracked changes before submitting.
+        autocommit: If True, automatically create a local commit with tracked changes before submitting.
 
     Returns:
         The job ID of the submitted job or None if the sbatch command fails.
@@ -72,10 +71,10 @@ async def submit(
     """
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(
-        make_commit=make_commit,
+        autocommit=autocommit,
         launched_job_command_builder=(
             (lambda: build_submit_command(cluster, job_script, sbatch_args, program_args))
-            if make_commit
+            if autocommit
             else None
         ),
     )
@@ -455,7 +454,7 @@ def create_submit_commit(launched_job_command: str) -> None:
 
 
 def ensure_clean_git_state(
-    make_commit: bool = False, launched_job_command_builder: Callable[[], str] | None = None
+    autocommit: bool = False, launched_job_command_builder: Callable[[], str] | None = None
 ) -> str:
     """
     Check git is clean locally and return the current commit hash.
@@ -463,9 +462,9 @@ def ensure_clean_git_state(
     git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
     dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
     if dirty_lines:
-        if make_commit:
+        if autocommit:
             if launched_job_command_builder is None:
-                raise ValueError("launched_job_command_builder is required when make_commit=True")
+                raise ValueError("launched_job_command_builder is required when autocommit=True")
             launched_job_command = launched_job_command_builder()
             create_submit_commit(launched_job_command=launched_job_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):

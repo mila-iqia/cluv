@@ -151,7 +151,7 @@ class TestSubmitCliParsing:
                 "job_script": None,
                 "sbatch_args": [],
                 "program_args": ["python", "main.py"],
-                "make_commit": False,
+                "autocommit": False,
             }
         )
 
@@ -170,7 +170,7 @@ class TestSubmitCliParsing:
                 "job_script": None,
                 "sbatch_args": ["--mem=8G"],
                 "program_args": ["python", "main.py"],
-                "make_commit": False,
+                "autocommit": False,
             }
         )
 
@@ -192,7 +192,7 @@ class TestSubmitCliParsing:
                 "job_script": job_script,
                 "sbatch_args": [],
                 "program_args": [],
-                "make_commit": False,
+                "autocommit": False,
             }
         )
 
@@ -211,7 +211,7 @@ class TestBuildSubmitCommand:
 
 
 class TestEnsureCleanGitState:
-    def test_ensure_clean_git_state_exits_when_repo_dirty_without_make_commit(
+    def test_ensure_clean_git_state_exits_when_repo_dirty_without_autocommit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
@@ -226,7 +226,7 @@ class TestEnsureCleanGitState:
         with pytest.raises(SystemExit):
             ensure_clean_git_state()
 
-    def test_ensure_clean_git_state_creates_commit_when_make_commit_enabled(
+    def test_ensure_clean_git_state_creates_commit_when_autocommit_enabled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         launched_job_command = "cluv submit mila scripts/job.sh -- --flag"
@@ -267,7 +267,7 @@ class TestEnsureCleanGitState:
 
         assert (
             ensure_clean_git_state(
-                make_commit=True,
+                autocommit=True,
                 launched_job_command_builder=lambda: launched_job_command,
             )
             == "dddddddddddddddddddddddddddddddddddddddd"
@@ -285,7 +285,7 @@ class TestEnsureCleanGitState:
             ],
         ]
 
-    def test_ensure_clean_git_state_raises_when_make_commit_without_builder(
+    def test_ensure_clean_git_state_raises_when_autocommit_without_builder(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
@@ -298,7 +298,7 @@ class TestEnsureCleanGitState:
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
 
         with pytest.raises(ValueError, match="launched_job_command_builder is required"):
-            ensure_clean_git_state(make_commit=True)
+            ensure_clean_git_state(autocommit=True)
 
     def test_prefers_branch_tip_in_github_actions_detached_head(
         self, monkeypatch: pytest.MonkeyPatch

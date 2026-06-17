@@ -5,9 +5,11 @@ import textwrap
 import unittest
 import unittest.mock
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+import cluv.__main__ as cluv_main
 import cluv.cli.init
 import cluv.cli.submit
 import cluv.remote
@@ -127,6 +129,66 @@ class TestGetSbatchCommand:
             "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
             "sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
+        )
+
+
+class TestSubmitCliParsing:
+    def test_job_script_can_be_omitted_when_using_separator(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--", "python", "main.py"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+            }
+        )
+
+    def test_sbatch_args_are_not_mistaken_for_job_script(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--mem=8G", "--", "python", "main.py"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--mem=8G"],
+                "program_args": ["python", "main.py"],
+            }
+        )
+
+    def test_existing_hyphen_prefixed_path_is_kept_as_job_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+        job_script = tmp_path / "-job.sh"
+        job_script.write_text("#!/bin/bash\n")
+        monkeypatch.chdir(tmp_path)
+
+        cluv_main.main(["submit", "tamia", str(job_script)])
+
+        mock_submit.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": job_script,
+                "sbatch_args": [],
+                "program_args": [],
+            }
         )
 
 

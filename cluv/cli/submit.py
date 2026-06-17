@@ -30,7 +30,7 @@ __all__ = ["submit"]
 
 async def submit(
     cluster: str,
-    job_script: Path,
+    job_script: Path | None,
     sbatch_args: list[str],
     program_args: list[str],
 ) -> Job | None:
@@ -47,6 +47,7 @@ async def submit(
     Parameters:
         cluster: SSH hostname of the target cluster. Can be set to "first" to launch the job on all clusters and keep only the first one to starts.
         job_script: Path to the job script to submit, relative to the project root.
+            When omitted, uses the configured default for the target cluster.
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
 
@@ -75,6 +76,8 @@ async def submit(
             save_job(job)
         return job
 
+    resolved_job_script = get_job_script_path(cluster, job_script)
+
     if cluster != here:
         # Sync.
         remote = (await sync(clusters=[cluster]))[0]
@@ -82,7 +85,7 @@ async def submit(
     else:
         # Submitting to the current cluster.
         remote = None
-    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
+    result = await sbatch(remote, resolved_job_script, sbatch_args, program_args, git_commit)
     submit_time = datetime.datetime.now()
 
     if result.returncode != 0:
@@ -93,7 +96,7 @@ async def submit(
     job = Job(
         job_id=job_id,
         cluster=cluster,
-        job_script=str(job_script),
+        job_script=str(resolved_job_script),
         git_commit=git_commit,
         sbatch_args=sbatch_args,
         program_args=program_args,
@@ -111,7 +114,7 @@ async def submit(
 
 
 async def submit_first(
-    job_script: Path,
+    job_script: Path | None,
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
@@ -128,22 +131,27 @@ async def submit_first(
         cluster_to_remote[this_cluster] = None
         # `sync` does not return a Remote for the current cluster.
         assert not any(remote.hostname == this_cluster for remote in remotes)
+    job_scripts = {
+        cluster: get_job_script_path(cluster, job_script) for cluster in cluster_to_remote
+    }
 
     # Submit the job on all the clusters (and possibly locally).
     sbatch_commands = {
-        cluster: get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
+        cluster: get_sbatch_command(
+            cluster, job_scripts[cluster], sbatch_args, program_args, git_commit
+        )
         for cluster in cluster_to_remote
     }
     sbatch_results = await asyncio.gather(
         *[
             sbatch(
                 remote,
-                job_script=job_script,
+                job_script=job_scripts[cluster],
                 sbatch_args=sbatch_args,
                 program_args=program_args,
                 git_commit=git_commit,
             )
-            for remote in cluster_to_remote.values()
+            for cluster, remote in cluster_to_remote.items()
         ],
         return_exceptions=True,
     )
@@ -269,7 +277,7 @@ async def submit_first(
     return Job(
         job_id=first_running_job.job_id,
         cluster=first_running_job.cluster,
-        job_script=str(job_script),
+        job_script=str(job_scripts[first_running_job.cluster]),
         git_commit=git_commit,
         sbatch_args=sbatch_args,
         program_args=program_args,
@@ -428,6 +436,18 @@ def ensure_clean_git_state() -> str:
 
     # Capture current commit hash.
     return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+
+
+def get_job_script_path(cluster: str, job_script: Path | None) -> Path:
+    """Resolve the job script path for a cluster."""
+    if job_script is not None:
+        return job_script
+    configured_job_script = get_cluv_config().get_cluster_config(cluster).job_script_path
+    if configured_job_script is None:
+        raise ValueError(
+            f"No job script was provided and no [tool.cluv] job_script_path is configured for {cluster}."
+        )
+    return configured_job_script
 
 
 def get_sbatch_command(

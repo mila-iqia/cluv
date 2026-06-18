@@ -27,6 +27,8 @@ from cluv.utils import console
 logger = logging.getLogger(__name__)
 __all__ = ["status"]
 
+_fmt = "%Y-%m-%dT%H:%M:%S"
+
 
 @dataclass
 class ClusterJobStats:
@@ -37,11 +39,20 @@ class ClusterJobStats:
 
 
 @dataclass
+class ArrayTaskInfo:
+    task_idx: str
+    state: str
+    elapsed: str | None
+    wait_time: str | None
+
+
+@dataclass
 class LiveJobInfo:
     cluster: str
     state: str
-    elapsed: str | None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
-    wait_time: str | None  # formatted time from Submit to Start (or to now if still pending)
+    elapsed: str | None = None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
+    wait_time: str | None = None
+    array_tasks: list[ArrayTaskInfo] | None = None
 
 
 @dataclass
@@ -109,9 +120,10 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
     except Exception:
         return {}
 
-    result: dict[int, LiveJobInfo] = {}
+    jobs: dict[int, LiveJobInfo] = {}
+    array_tasks: dict[int, list[ArrayTaskInfo]] = {}
+
     now = datetime.now(timezone.utc)
-    _fmt = "%Y-%m-%dT%H:%M:%S"
 
     for line in raw.splitlines():
         # Should have 5 columns
@@ -136,17 +148,36 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
         except (ValueError, OverflowError):
             pass
 
-        job_id = int(job_id_str.strip())
-        result[job_id] = LiveJobInfo(
-            cluster=cluster, state=state.strip(), elapsed=elapsed_out, wait_time=wait_time
-        )
+        job_id_str = job_id_str.strip()
+        state = state.strip()
+
+        # If member of a job array
+        if "_" in job_id_str:
+            parent_id_str, task_idx = job_id_str.split("_", 1)
+            parent_id = int(parent_id_str)
+            task = ArrayTaskInfo(task_idx, state, elapsed=elapsed_out, wait_time=wait_time)
+
+            if parent_id in array_tasks:
+                array_tasks[parent_id].append(task)
+            else:
+                jobs[parent_id] = LiveJobInfo(cluster=cluster, state="ARRAY")
+                array_tasks[parent_id] = [task]
+        else:
+            job_id = int(job_id_str.strip())
+            jobs[job_id] = LiveJobInfo(
+                cluster=cluster, state=state.strip(), elapsed=elapsed_out, wait_time=wait_time
+            )
+
+    # Merge jobs and array_tasks
+    for job_id, array in array_tasks.items():
+        jobs[job_id].array_tasks = array
 
     logger.info(
-        f"Fetched {len(result)} [bold]{cluster}[/bold] jobs in "
+        f"Fetched {len(jobs)} [bold]{cluster}[/bold] jobs in "
         f"{(datetime.now() - start_time).total_seconds()} seconds"
     )
 
-    return result
+    return jobs
 
 
 async def get_cluster_status(cluster: str) -> ClusterStatus:
@@ -359,10 +390,15 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
         except (ValueError, TypeError):
             submitted_str = job.submitted_at
 
+        job_id = Text(str(job.job_id))
         if info is not None:
             state_cell = _state_text(info.state)
             wait_cell = info.wait_time or "-"
             elapsed_cell = info.elapsed or "-"
+            if info.array_tasks:
+                job_id += Text(f" [{len(info.array_tasks)}]", style="dim")
+                state_cell = _count_states(info.array_tasks)
+                wait_cell, elapsed_cell = "/", "/"
         else:
             state_cell = Text("-", style="dim")
             wait_cell = "-"
@@ -370,7 +406,7 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
 
         table.add_row(
             job.cluster,
-            str(job.job_id),
+            job_id,
             job.git_commit[:7],
             submitted_str,
             state_cell,
@@ -379,6 +415,22 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
         )
 
     return table
+
+
+def _count_states(tasks: list[ArrayTaskInfo]) -> Text:
+    counter: dict[str, int] = {}
+
+    for task in tasks:
+        if task.state not in counter:
+            counter[task.state] = 1
+        else:
+            counter[task.state] += 1
+
+    total = Text()
+    for state, n in counter.items():
+        total += _state_text(state) + Text(f" [{n}] ", style="dim")
+
+    return total
 
 
 def _build_legend() -> Panel:

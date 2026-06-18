@@ -476,6 +476,17 @@ async def get_job_infos(
         elif info.state in ("COMPLETED", "COMPLETING"):
             cluster_stats.completed += 1
 
+        if info.array_tasks:
+            for task in info.array_tasks:
+                if task.state == "RUNNING":
+                    cluster_stats.running += 1
+                elif task.state == "PENDING":
+                    cluster_stats.pending += 1
+                elif task.state in FAILED_JOB_STATES:
+                    cluster_stats.cancelled += 1
+                elif task.state in ("COMPLETED", "COMPLETING"):
+                    cluster_stats.completed += 1
+
     return live_info, clusters_job_stats
 
 

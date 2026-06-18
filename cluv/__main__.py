@@ -167,6 +167,12 @@ def add_status_args(subparsers: Subparsers):
         metavar="<table>",
         help="Which table to display: cluster overview, jobs overview, or both (default: all).",
     )
+    status_parser.add_argument(
+        "--collapse",
+        action="store_true",
+        default=False,
+        help="Collapse job arrays into a single row instead of expanding them as a tree.",
+    )
     status_parser.set_defaults(func=status)
     return status_parser
 

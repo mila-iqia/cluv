@@ -9,6 +9,7 @@ from rich import box
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.tree import Tree
 
 from cluv.cache import Job, load_jobs
 from cluv.cli.login import get_remote_without_2fa_prompt
@@ -37,11 +38,20 @@ class JobStats:
 
 
 @dataclass
+class ArrayTaskInfo:
+    task_idx: str
+    state: str
+    elapsed: str | None
+    wait_time: str | None
+
+
+@dataclass
 class LiveJobInfo:
     cluster: str
     state: str
     elapsed: str | None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
     wait_time: str | None  # formatted time from Submit to Start (or to now if still pending)
+    array_tasks: list[ArrayTaskInfo] | None = None
 
 
 @dataclass
@@ -106,10 +116,12 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
             logger.info(f"No connection to [bold]{cluster}[/bold]; skipping jobs")
             return {}
         raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
+        console.log(raw)
     except Exception:
         return {}
 
     result: dict[int, LiveJobInfo] = {}
+    array_tasks: dict[int, list[ArrayTaskInfo]] = {}
     now = datetime.now(timezone.utc)
     _fmt = "%Y-%m-%dT%H:%M:%S"
 
@@ -136,9 +148,41 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
         except (ValueError, OverflowError):
             pass
 
-        job_id = int(job_id_str.strip())
-        result[job_id] = LiveJobInfo(
-            cluster=cluster, state=state.strip(), elapsed=elapsed_out, wait_time=wait_time
+        job_id_str = job_id_str.strip()
+        state = state.strip()
+
+        if "_" in job_id_str:
+            parent_str, task_idx = job_id_str.split("_", 1)
+            try:
+                parent_id = int(parent_str)
+            except ValueError:
+                continue
+            array_tasks.setdefault(parent_id, []).append(
+                ArrayTaskInfo(
+                    task_idx=task_idx, state=state, elapsed=elapsed_out, wait_time=wait_time
+                )
+            )
+        else:
+            try:
+                job_id = int(job_id_str)
+            except ValueError:
+                continue
+            result[job_id] = LiveJobInfo(
+                cluster=cluster, state=state, elapsed=elapsed_out, wait_time=wait_time
+            )
+
+    for parent_id, tasks in array_tasks.items():
+        states = [t.state for t in tasks]
+        if "RUNNING" in states:
+            agg_state = "RUNNING"
+        elif "PENDING" in states:
+            agg_state = "PENDING"
+        elif all(s in ("COMPLETED", "COMPLETING") for s in states):
+            agg_state = "COMPLETED"
+        else:
+            agg_state = states[0] if states else "UNKNOWN"
+        result[parent_id] = LiveJobInfo(
+            cluster=cluster, state=agg_state, elapsed=None, wait_time=None, array_tasks=tasks
         )
 
     logger.info(
@@ -331,7 +375,9 @@ def _build_cluster_table(
     return table
 
 
-def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobInfo]) -> Table:
+def _build_cluv_jobs_table(
+    cached_jobs: list[Job], live_info: dict[int, LiveJobInfo], collapse: bool = False
+) -> Table:
     """Build the jobs overview table with one row per cached job, enriched with live status info."""
     table = Table(
         title="Jobs Overview",
@@ -359,24 +405,56 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
         except (ValueError, TypeError):
             submitted_str = job.submitted_at
 
-        if info is not None:
-            state_cell = _state_text(info.state)
-            wait_cell = info.wait_time or "-"
-            elapsed_cell = info.elapsed or "-"
+        if info is not None and info.array_tasks and not collapse:
+            id_tree = Tree(str(job.job_id), guide_style="dim")
+            state_tree = Tree(_state_text(info.state), guide_style="dim")
+            wait_tree = Tree("-", guide_style="dim")
+            elapsed_tree = Tree("-", guide_style="dim")
+            for task in info.array_tasks:
+                id_tree.add(Text(f"[{task.task_idx}]", style="dim"))
+                state_tree.add(_state_text(task.state))
+                wait_tree.add(task.wait_time or "-")
+                elapsed_tree.add(task.elapsed or "-")
+            table.add_row(
+                job.cluster,
+                id_tree,
+                job.git_commit[:7],
+                submitted_str,
+                state_tree,
+                wait_tree,
+                elapsed_tree,
+            )
+        elif info is not None and info.array_tasks:
+            n = len(info.array_tasks)
+            table.add_row(
+                job.cluster,
+                Text(f"{job.job_id} ", style="bold magenta") + Text(f"[{n}]", style="dim"),
+                job.git_commit[:7],
+                submitted_str,
+                _state_text(info.state),
+                "-",
+                "-",
+            )
+        elif info is not None:
+            table.add_row(
+                job.cluster,
+                str(job.job_id),
+                job.git_commit[:7],
+                submitted_str,
+                _state_text(info.state),
+                info.wait_time or "-",
+                info.elapsed or "-",
+            )
         else:
-            state_cell = Text("-", style="dim")
-            wait_cell = "-"
-            elapsed_cell = "-"
-
-        table.add_row(
-            job.cluster,
-            str(job.job_id),
-            job.git_commit[:7],
-            submitted_str,
-            state_cell,
-            wait_cell,
-            elapsed_cell,
-        )
+            table.add_row(
+                job.cluster,
+                str(job.job_id),
+                job.git_commit[:7],
+                submitted_str,
+                Text("-", style="dim"),
+                "-",
+                "-",
+            )
 
     return table
 
@@ -414,19 +492,21 @@ async def get_job_infos(
         cluster_stats = clusters_job_stats.setdefault(
             info.cluster, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0)
         )
-        if info.state == "RUNNING":
-            cluster_stats.my_running += 1
-        elif info.state == "PENDING":
-            cluster_stats.my_pending += 1
-        elif info.state in FAILED_JOB_STATES:
-            cluster_stats.my_cancelled += 1
-        elif info.state in ("COMPLETED", "COMPLETING"):
-            cluster_stats.my_completed += 1
+        tasks_to_count = [t.state for t in info.array_tasks] if info.array_tasks else [info.state]
+        for state in tasks_to_count:
+            if state == "RUNNING":
+                cluster_stats.my_running += 1
+            elif state == "PENDING":
+                cluster_stats.my_pending += 1
+            elif state in FAILED_JOB_STATES:
+                cluster_stats.my_cancelled += 1
+            elif state in ("COMPLETED", "COMPLETING"):
+                cluster_stats.my_completed += 1
 
     return live_info, clusters_job_stats
 
 
-async def status(table: str) -> None:
+async def status(table: str, collapse: bool = False) -> None:
     """Show status of clusters and jobs.
 
     Parameters:
@@ -474,5 +554,5 @@ async def status(table: str) -> None:
         console.print()
 
     if table in ("jobs", "all"):
-        console.print(_build_cluv_jobs_table(cached_jobs, jobs_status))
+        console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, collapse=collapse))
         console.print()

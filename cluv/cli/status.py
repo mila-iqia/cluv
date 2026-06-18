@@ -29,11 +29,11 @@ __all__ = ["status"]
 
 
 @dataclass
-class JobStats:
-    my_running: int
-    my_pending: int
-    my_cancelled: int
-    my_completed: int
+class ClusterJobStats:
+    running: int
+    pending: int
+    cancelled: int
+    completed: int
 
 
 @dataclass
@@ -281,7 +281,7 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 # Main display
 # ---------------------------------------------------------------------------
 def _build_cluster_table(
-    data: list[ClusterStatus], clusters_job_stats: dict[str, JobStats]
+    data: list[ClusterStatus], clusters_job_stats: dict[str, ClusterJobStats]
 ) -> Table:
     """Build the cluster overview table with live status info and job counts."""
     table = Table(
@@ -302,10 +302,10 @@ def _build_cluster_table(
     for c in data:
         status = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
         job_stats = clusters_job_stats.get(
-            c.name, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0)
+            c.name, ClusterJobStats(running=0, cancelled=0, completed=0, pending=0)
         )
         my_jobs = Text(
-            f"{job_stats.my_running} / {job_stats.my_pending} / {job_stats.my_cancelled} / {job_stats.my_completed}",
+            f"{job_stats.running} / {job_stats.pending} / {job_stats.cancelled} / {job_stats.completed}",
             style="cyan",
         )
 
@@ -394,7 +394,7 @@ def _build_legend() -> Panel:
 
 async def get_job_infos(
     cached_jobs: list[Job], clusters: list[str]
-) -> tuple[dict[int, LiveJobInfo], dict[str, JobStats]]:
+) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
     # Regroup jobs by cluster
     cluster_jobs: dict[str, list[int]] = {}
@@ -409,19 +409,20 @@ async def get_job_infos(
     live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
 
     # Count jobs status per cluster
-    clusters_job_stats: dict[str, JobStats] = {}
+    clusters_job_stats: dict[str, ClusterJobStats] = {}
     for info in live_info.values():
         cluster_stats = clusters_job_stats.setdefault(
-            info.cluster, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0)
+            info.cluster,
+            ClusterJobStats(running=0, cancelled=0, completed=0, pending=0),
         )
         if info.state == "RUNNING":
-            cluster_stats.my_running += 1
+            cluster_stats.running += 1
         elif info.state == "PENDING":
-            cluster_stats.my_pending += 1
+            cluster_stats.pending += 1
         elif info.state in FAILED_JOB_STATES:
-            cluster_stats.my_cancelled += 1
+            cluster_stats.cancelled += 1
         elif info.state in ("COMPLETED", "COMPLETING"):
-            cluster_stats.my_completed += 1
+            cluster_stats.completed += 1
 
     return live_info, clusters_job_stats
 

@@ -192,9 +192,7 @@ def parse_sinfo_nodes(output: str) -> tuple[int, int, list[str]]:
         if not matches:
             continue
 
-        entries: list[tuple[str, int]] = [
-            (model, int(count_str)) for model, count_str in matches
-        ]
+        entries: list[tuple[str, int]] = [(model, int(count_str)) for model, count_str in matches]
 
         for model, _ in entries:
             models.add(_normalize_gpu_model(model))
@@ -256,9 +254,9 @@ def parse_savail(output: str) -> tuple[int, int, list[str]]:
 # Columns: filesystem, used, soft-quota, hard-limit, ...
 # We want column 1 (used) and column 3 (hard limit = effective quota).
 _LFS_DATA_RE = re.compile(
-    r"^\s+\S*/home\S*\s+"          # filesystem path containing "home"
+    r"^\s+\S*/home\S*\s+"  # filesystem path containing "home"
     r"([\d.]+)\s*([KMGTP]i?[Bb]?)"  # used  + unit
-    r"\s+\S+"                        # soft quota (skip)
+    r"\s+\S+"  # soft quota (skip)
     r"\s+([\d.]+)\s*([KMGTP]i?[Bb]?)",  # hard limit + unit
 )
 
@@ -271,11 +269,21 @@ _BEEGFS_DATA_RE = re.compile(
 )
 
 _UNIT_TO_GIB: dict[str, float] = {
-    "K": 1 / 1024**2, "KB": 1 / 1024**2, "KiB": 1 / 1024**2,
-    "M": 1 / 1024,    "MB": 1 / 1024,    "MiB": 1 / 1024,
-    "G": 1.0,         "GB": 1.0,         "GiB": 1.0,
-    "T": 1024.0,      "TB": 1024.0,      "TiB": 1024.0,
-    "P": 1024**2,     "PB": 1024**2,     "PiB": 1024**2,
+    "K": 1 / 1024**2,
+    "KB": 1 / 1024**2,
+    "KiB": 1 / 1024**2,
+    "M": 1 / 1024,
+    "MB": 1 / 1024,
+    "MiB": 1 / 1024,
+    "G": 1.0,
+    "GB": 1.0,
+    "GiB": 1.0,
+    "T": 1024.0,
+    "TB": 1024.0,
+    "TiB": 1024.0,
+    "P": 1024**2,
+    "PB": 1024**2,
+    "PiB": 1024**2,
 }
 
 

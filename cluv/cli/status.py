@@ -391,26 +391,26 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
             submitted_str = job.submitted_at
 
         job_id = Text(str(job.job_id))
-        state_cell, wait_cell, elapsed_cell = None, None, None
+        state, wait_time, elapsed_time = "-", "-", "-"
 
-        if info is not None:
+        if info:
             if info.array_tasks:
                 job_id += Text(f" [{len(info.array_tasks)}]", style="dim")
-                state_cell = _count_states(info.array_tasks)
-                wait_cell, elapsed_cell = "/", "/"
+                state = _count_states(info.array_tasks)
+                wait_time, elapsed_time = "/", "/"
             else:
-                state_cell = _state_text(info.state or "-")
-                wait_cell = info.wait_time
-                elapsed_cell = info.elapsed
+                state = _state_text(info.state or "-")
+                wait_time = info.wait_time
+                elapsed_time = info.elapsed
 
         table.add_row(
             job.cluster,
             job_id,
             job.git_commit[:7],
             submitted_str,
-            state_cell or "-",
-            wait_cell or "-",
-            elapsed_cell or "-",
+            state,
+            wait_time,
+            elapsed_time,
         )
 
     return table

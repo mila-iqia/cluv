@@ -98,7 +98,7 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
     ids_str = ",".join(str(jid) for jid in job_ids)
     cmd = (
         f"sacct -j {ids_str} --format=JobID,State,Start,Submit,Elapsed"
-        f" --noheader --allocations --parsable2 2>/dev/null"
+        f" --noheader --allocations --array --parsable2 2>/dev/null"
     )
     try:
         remote = await get_remote_without_2fa_prompt(cluster)

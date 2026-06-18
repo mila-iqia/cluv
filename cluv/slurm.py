@@ -10,13 +10,22 @@ from dataclasses import dataclass
 
 FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
+
 @dataclass
 class StorageStats:
     """Disk usage as (used_gib, quota_gib) for $HOME and $SCRATCH."""
+
     home_used: float
     home_quota: float
     scratch_used: float
     scratch_quota: float
+
+
+def clean_job_state(state: str) -> str:
+    if "CANCELLED by" in state:
+        return "CANCELLED"
+    return state
+
 
 # ---------------------------------------------------------------------------
 # partition-stats (DRAC-only)

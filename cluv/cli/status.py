@@ -16,6 +16,7 @@ from cluv.config import get_cluv_config
 from cluv.slurm import (
     FAILED_JOB_STATES,
     StorageStats,
+    clean_job_state,
     parse_disk_quota,
     parse_diskusage_report,
     parse_partition_stats,
@@ -149,13 +150,13 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
             pass
 
         job_id_str = job_id_str.strip()
-        state = state.strip()
+        state = clean_job_state(state.strip())
 
-        # If member of a job array
+        # Handle array tasks separately so we can aggregate them under their parent job.
         if "_" in job_id_str:
             parent_id_str, task_idx = job_id_str.split("_", 1)
             parent_id = int(parent_id_str)
-            task = ArrayTaskInfo(task_idx, state, elapsed=elapsed_out, wait_time=wait_time)
+            task = ArrayTaskInfo(task_idx, state=state, elapsed=elapsed_out, wait_time=wait_time)
 
             if parent_id in array_tasks:
                 array_tasks[parent_id].append(task)
@@ -165,7 +166,7 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
         else:
             job_id = int(job_id_str.strip())
             jobs[job_id] = LiveJobInfo(
-                cluster=cluster, state=state.strip(), elapsed=elapsed_out, wait_time=wait_time
+                cluster=cluster, state=state, elapsed=elapsed_out, wait_time=wait_time
             )
 
     # Merge jobs and array_tasks

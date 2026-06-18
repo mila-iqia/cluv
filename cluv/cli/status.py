@@ -49,7 +49,7 @@ class ArrayTaskInfo:
 @dataclass
 class LiveJobInfo:
     cluster: str
-    state: str
+    state: str | None = None
     elapsed: str | None = None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
     wait_time: str | None = None
     array_tasks: list[ArrayTaskInfo] | None = None
@@ -160,7 +160,7 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
             if parent_id in array_tasks:
                 array_tasks[parent_id].append(task)
             else:
-                jobs[parent_id] = LiveJobInfo(cluster=cluster, state="ARRAY")
+                jobs[parent_id] = LiveJobInfo(cluster=cluster)
                 array_tasks[parent_id] = [task]
         else:
             job_id = int(job_id_str.strip())
@@ -275,7 +275,7 @@ def _state_text(state: str) -> Text:
         return Text(state, style="blue")
     elif state in FAILED_JOB_STATES:
         return Text(state, style="red")
-    return Text(state or "—", style="dim")
+    return Text(state)
 
 
 def _bar(used: float, total: float, width: int = 10) -> Text:
@@ -391,27 +391,26 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
             submitted_str = job.submitted_at
 
         job_id = Text(str(job.job_id))
+        state_cell, wait_cell, elapsed_cell = None, None, None
+
         if info is not None:
-            state_cell = _state_text(info.state)
-            wait_cell = info.wait_time or "-"
-            elapsed_cell = info.elapsed or "-"
             if info.array_tasks:
                 job_id += Text(f" [{len(info.array_tasks)}]", style="dim")
                 state_cell = _count_states(info.array_tasks)
                 wait_cell, elapsed_cell = "/", "/"
-        else:
-            state_cell = Text("-", style="dim")
-            wait_cell = "-"
-            elapsed_cell = "-"
+            else:
+                state_cell = _state_text(info.state or "-")
+                wait_cell = info.wait_time
+                elapsed_cell = info.elapsed
 
         table.add_row(
             job.cluster,
             job_id,
             job.git_commit[:7],
             submitted_str,
-            state_cell,
-            wait_cell,
-            elapsed_cell,
+            state_cell or "-",
+            wait_cell or "-",
+            elapsed_cell or "-",
         )
 
     return table

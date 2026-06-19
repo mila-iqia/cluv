@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from rich import box
 from rich.panel import Panel
@@ -22,13 +22,13 @@ from cluv.slurm import (
     parse_partition_stats,
     parse_savail,
     parse_sinfo_nodes,
+    parse_slurm_time,
+    parse_timestamp,
 )
 from cluv.utils import console
 
 logger = logging.getLogger(__name__)
 __all__ = ["status"]
-
-_fmt = "%Y-%m-%dT%H:%M:%S"
 
 
 @dataclass
@@ -43,16 +43,16 @@ class ClusterJobStats:
 class ArrayTaskInfo:
     task_idx: str
     state: str
-    elapsed: str | None
-    wait_time: str | None
+    elapsed: timedelta | None
+    wait_time: timedelta | None
 
 
 @dataclass
 class LiveJobInfo:
     cluster: str
-    state: str | None = None
-    elapsed: str | None = None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
-    wait_time: str | None = None
+    state: str | None = None  # YYYY-MM-DDTHH:MM:SS
+    elapsed: timedelta | None = None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
+    wait_time: timedelta | None = None
     array_tasks: list[ArrayTaskInfo] | None = None
 
 
@@ -118,6 +118,7 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
             logger.info(f"No connection to [bold]{cluster}[/bold]; skipping jobs")
             return {}
         raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
+        console.log(raw)
     except Exception:
         return {}
 
@@ -133,30 +134,27 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
             continue
         job_id_str, state, start_str, submit_str, elapsed = parts
 
-        elapsed_val = elapsed.strip()
-        elapsed_out = elapsed_val if elapsed_val and elapsed_val != "00:00:00" else None
-
         wait_time = None
         try:
-            submit_dt = datetime.strptime(submit_str.strip(), _fmt).replace(tzinfo=timezone.utc)
-            start = start_str.strip()
-            if start and start not in ("Unknown", "None"):
-                start_dt = datetime.strptime(start, _fmt).replace(tzinfo=timezone.utc)
-                delta_s = int((start_dt - submit_dt).total_seconds())
+            submit_dt = parse_timestamp(submit_str).replace(tzinfo=timezone.utc)
+            start = start_str.strip()  # If the job haven't started yet
+            if start in ("Unknown", "None"):
+                wait_time = now - submit_dt
             else:
-                delta_s = int((now - submit_dt).total_seconds())
-            wait_time = _format_duration(max(delta_s, 0))
+                start_dt = parse_timestamp(start).replace(tzinfo=timezone.utc)
+                wait_time = start_dt - submit_dt
         except (ValueError, OverflowError):
             pass
 
         job_id_str = job_id_str.strip()
         state = clean_job_state(state.strip())
+        elapsed_time = parse_slurm_time(elapsed)
 
         # Handle array tasks separately so we can aggregate them under their parent job.
         if "_" in job_id_str:
             parent_id_str, task_idx = job_id_str.split("_", 1)
             parent_id = int(parent_id_str)
-            task = ArrayTaskInfo(task_idx, state=state, elapsed=elapsed_out, wait_time=wait_time)
+            task = ArrayTaskInfo(task_idx, state=state, elapsed=elapsed_time, wait_time=wait_time)
 
             if parent_id in array_tasks:
                 array_tasks[parent_id].append(task)
@@ -166,7 +164,7 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
         else:
             job_id = int(job_id_str.strip())
             jobs[job_id] = LiveJobInfo(
-                cluster=cluster, state=state, elapsed=elapsed_out, wait_time=wait_time
+                cluster=cluster, state=state, elapsed=elapsed_time, wait_time=wait_time
             )
 
     # Merge jobs and array_tasks
@@ -256,10 +254,17 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
-def _format_duration(total_seconds: int) -> str:
-    h, rem = divmod(total_seconds, 3600)
+def _format_duration(duration: timedelta | None) -> str:
+    if not duration:
+        return ""
+
+    d, rem = divmod(int(duration.total_seconds()), 86400)
+    h, rem = divmod(rem, 3600)
     m, s = divmod(rem, 60)
-    if h:
+
+    if d:
+        return f"{d}d{h:02d}h"
+    elif h:
         return f"{h}h{m:02d}m"
     elif m:
         return f"{m}m{s:02d}s"
@@ -401,8 +406,8 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
                 wait_time, elapsed_time = "/", "/"
             else:
                 state = _state_text(info.state or "-")
-                wait_time = info.wait_time
-                elapsed_time = info.elapsed
+                wait_time = _format_duration(info.wait_time)
+                elapsed_time = _format_duration(info.elapsed)
 
         table.add_row(
             job.cluster,

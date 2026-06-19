@@ -44,7 +44,7 @@ class ArrayTaskInfo:
     task_idx: str
     state: str
     elapsed: timedelta | None
-    wait_time: timedelta | None
+    waited: timedelta | None
 
 
 @dataclass
@@ -52,7 +52,7 @@ class LiveJobInfo:
     cluster: str
     state: str | None = None
     elapsed: timedelta | None = None
-    wait_time: timedelta | None = None
+    waited: timedelta | None = None
     array_tasks: list[ArrayTaskInfo] | None = None
 
 
@@ -123,7 +123,6 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
 
     jobs: dict[int, LiveJobInfo] = {}
     array_tasks: dict[int, list[ArrayTaskInfo]] = {}
-
     now = datetime.now(timezone.utc)
 
     for line in raw.splitlines():
@@ -131,29 +130,29 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
         parts = line.strip().split("|")
         if len(parts) != 5:
             continue
-        job_id_str, state, start_str, submit_str, elapsed = parts
+        job_id_str, state, start_str, submit_str, elapsed_str = parts
 
-        wait_time = None
+        waited = None
         try:
             submit_dt = parse_timestamp(submit_str).replace(tzinfo=timezone.utc)
             start = start_str.strip()  # If the job haven't started yet
             if start in ("Unknown", "None"):
-                wait_time = now - submit_dt
+                waited = now - submit_dt
             else:
                 start_dt = parse_timestamp(start).replace(tzinfo=timezone.utc)
-                wait_time = start_dt - submit_dt
+                waited = start_dt - submit_dt
         except (ValueError, OverflowError):
             pass
 
         job_id_str = job_id_str.strip()
         state = clean_job_state(state.strip())
-        elapsed_time = parse_slurm_time(elapsed)
+        elapsed = parse_slurm_time(elapsed_str)
 
         # Handle array tasks separately so we can aggregate them under their parent job.
         if "_" in job_id_str:
             parent_id_str, task_idx = job_id_str.split("_", 1)
             parent_id = int(parent_id_str)
-            task = ArrayTaskInfo(task_idx, state=state, elapsed=elapsed_time, wait_time=wait_time)
+            task = ArrayTaskInfo(task_idx, state=state, elapsed=elapsed, waited=waited)
 
             if parent_id in array_tasks:
                 array_tasks[parent_id].append(task)
@@ -163,7 +162,7 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
         else:
             job_id = int(job_id_str.strip())
             jobs[job_id] = LiveJobInfo(
-                cluster=cluster, state=state, elapsed=elapsed_time, wait_time=wait_time
+                cluster=cluster, state=state, elapsed=elapsed, waited=waited
             )
 
     # Merge jobs and array_tasks
@@ -405,7 +404,7 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
                 wait_time, elapsed_time = "/", "/"
             else:
                 state = _state_text(info.state or "-")
-                wait_time = _format_duration(info.wait_time)
+                wait_time = _format_duration(info.waited)
                 elapsed_time = _format_duration(info.elapsed)
 
         table.add_row(

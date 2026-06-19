@@ -118,7 +118,6 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
             logger.info(f"No connection to [bold]{cluster}[/bold]; skipping jobs")
             return {}
         raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
-        console.log(raw)
     except Exception:
         return {}
 

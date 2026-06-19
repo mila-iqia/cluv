@@ -50,8 +50,8 @@ class ArrayTaskInfo:
 @dataclass
 class LiveJobInfo:
     cluster: str
-    state: str | None = None  # YYYY-MM-DDTHH:MM:SS
-    elapsed: timedelta | None = None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
+    state: str | None = None
+    elapsed: timedelta | None = None
     wait_time: timedelta | None = None
     array_tasks: list[ArrayTaskInfo] | None = None
 

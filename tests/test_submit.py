@@ -7,6 +7,7 @@ import unittest.mock
 from pathlib import Path
 from unittest import mock
 
+
 import pytest
 
 import cluv.__main__ as cluv_main
@@ -15,6 +16,7 @@ import cluv.cli.submit
 import cluv.remote
 import cluv.utils
 from cluv.cli.submit import (
+    build_submit_command,
     ensure_clean_git_state,
     get_sbatch_command,
     submit,
@@ -149,6 +151,7 @@ class TestSubmitCliParsing:
                 "job_script": None,
                 "sbatch_args": [],
                 "program_args": ["python", "main.py"],
+                "autocommit": False,
             }
         )
 
@@ -167,6 +170,7 @@ class TestSubmitCliParsing:
                 "job_script": None,
                 "sbatch_args": ["--mem=8G"],
                 "program_args": ["python", "main.py"],
+                "autocommit": False,
             }
         )
 
@@ -188,11 +192,118 @@ class TestSubmitCliParsing:
                 "job_script": job_script,
                 "sbatch_args": [],
                 "program_args": [],
+                "autocommit": False,
             }
         )
 
 
+class TestBuildSubmitCommand:
+    def test_build_submit_command_with_program_args(self) -> None:
+        assert (
+            build_submit_command(
+                cluster="mila",
+                job_script=Path("scripts/job.sh"),
+                sbatch_args=[],
+                program_args=["--flag"],
+            )
+            == "cluv submit mila scripts/job.sh -- --flag"
+        )
+
+
 class TestEnsureCleanGitState:
+    def test_ensure_clean_git_state_exits_when_repo_dirty_without_autocommit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            assert kwargs.get("capture_output") is True
+            assert kwargs.get("text") is True
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=" M cluv/cli/submit.py\n", stderr=""
+                )
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        with pytest.raises(SystemExit):
+            ensure_clean_git_state()
+
+    def test_ensure_clean_git_state_creates_commit_when_autocommit_enabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        launched_job_command = "cluv submit mila scripts/job.sh -- --flag"
+        expected_commit_body = f"Launched job command:\n\n{launched_job_command}"
+        command_calls: list[tuple[list[str], dict]] = []
+
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            command_calls.append((command, kwargs))
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=" M cluv/cli/submit.py\n?? notes.txt\n", stderr=""
+                )
+            if command == ["git", "add", "-u"]:
+                assert kwargs.get("check") is True
+                assert kwargs.get("capture_output") is True
+                assert kwargs.get("text") is True
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if command[:2] == ["git", "commit"]:
+                assert kwargs.get("check") is True
+                assert kwargs.get("capture_output") is True
+                assert kwargs.get("text") is True
+                assert command[2:4] == ["-m", "cluv submit: auto-commit tracked changes"]
+                assert command[4] == "-m"
+                assert command[5] == expected_commit_body
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        def mock_subprocess_check_output(command: list[str], **kwargs) -> str:
+            assert kwargs.get("text") is True
+            if command == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return "main\n"
+            if command == ["git", "rev-parse", "HEAD"]:
+                return "dddddddddddddddddddddddddddddddddddddddd\n"
+            raise AssertionError(f"Unexpected subprocess.check_output call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
+
+        assert (
+            ensure_clean_git_state(
+                autocommit=True,
+                submit_command=launched_job_command,
+            )
+            == "dddddddddddddddddddddddddddddddddddddddd"
+        )
+        assert [call[0] for call in command_calls[:3]] == [
+            ["git", "status", "--porcelain"],
+            ["git", "add", "-u"],
+            [
+                "git",
+                "commit",
+                "-m",
+                "cluv submit: auto-commit tracked changes",
+                "-m",
+                expected_commit_body,
+            ],
+        ]
+
+    def test_ensure_clean_git_state_raises_when_autocommit_without_builder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            assert kwargs.get("capture_output") is True
+            assert kwargs.get("text") is True
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=" M cluv/cli/submit.py\n", stderr=""
+                )
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        with pytest.raises(ValueError, match="submit_command is required"):
+            ensure_clean_git_state(autocommit=True)
+
     def test_prefers_branch_tip_in_github_actions_detached_head(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -272,7 +383,7 @@ async def test_can_submit_on_current_cluster(
         cluv.cli.submit,
         ensure_clean_git_state.__name__,
         mock_ensure_clean_git_state := unittest.mock.Mock(
-            wraps=ensure_clean_git_state, side_effect=lambda: dummy_commit
+            wraps=ensure_clean_git_state, side_effect=lambda *args, **kwargs: dummy_commit
         ),
     )
     here = mock_current_cluster

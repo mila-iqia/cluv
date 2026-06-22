@@ -185,6 +185,7 @@ class TestClusterConfigHelpers:
             env={},
             results_path=Path("$CLUV_TMP/results"),
             datasets_path=Path("$CLUV_TMP/data"),
+            ignore=False,
             job_script_path=Path("$CLUV_TMP/scripts/job.sh"),
         )
 

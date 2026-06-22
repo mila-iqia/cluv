@@ -34,14 +34,20 @@ async def login(clusters: list[str]) -> list[Remote]:
         )
     else:
         console.log("No active connections to any clusters found.")
+
     missing_connections = [cluster for cluster, remote in zip(clusters, connections) if not remote]
     if missing_connections:
         console.log(f"Will attempt to connect to the following clusters: {missing_connections}")
+
     # Need to do each thing sequentially to avoid triggering multiple 2FA prompts at the same time.
-    return [
-        remote if remote is not None else (await Remote.connect(cluster))
-        for cluster, remote in zip(clusters, connections)
-    ]
+    remotes: list[Remote] = []
+    for cluster, remote in zip(clusters, connections):
+        try:
+            remotes.append(remote if remote is not None else await Remote.connect(cluster))
+        except BaseException as e:
+            console.log(e, style="red")
+
+    return remotes
 
 
 async def get_remote_without_2fa_prompt(cluster_hostname: str) -> Remote | None:

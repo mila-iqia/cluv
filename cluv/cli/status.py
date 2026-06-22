@@ -55,6 +55,19 @@ class LiveJobInfo:
     waited: timedelta | None = None
     array_tasks: list[ArrayTaskInfo] | None = None
 
+    def array_elapse_time(self) -> timedelta | None:
+        """Total elapse time for all the tasks in the array"""
+        if not self.array_tasks:
+            return None
+
+        sum_tasks = timedelta()
+        for task in self.array_tasks:
+            if task.elapsed is None:
+                continue
+            sum_tasks += task.elapsed
+
+        return sum_tasks
+
 
 @dataclass
 class ClusterStatus:
@@ -401,7 +414,8 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
             if info.array_tasks:
                 job_id += Text(f" [{len(info.array_tasks)}]", style="dim")
                 state = _count_states(info.array_tasks)
-                wait_time, elapsed_time = "/", "/"
+                wait_time = "/"
+                elapsed_time = _format_duration(info.array_elapse_time())
             else:
                 state = _state_text(info.state or "-")
                 wait_time = _format_duration(info.waited)

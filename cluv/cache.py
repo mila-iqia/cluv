@@ -1,18 +1,17 @@
-from __future__ import annotations
-
-import functools
+import dataclasses
 import json
+import logging
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
+
+import platformdirs
+import pydantic
+import yaml
 
 from cluv.utils import find_pyproject
 
-
-@functools.cache
-def get_cache_path() -> Path:
-    """Should be like : ~/.cache/cluv/<PROJECT_NAME>/jobs.jsonl"""
-    project_name = find_pyproject().parent.name
-    return Path.home() / ".cache" / "cluv" / project_name / "jobs.jsonl"
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -26,16 +25,33 @@ class Job:
     program_args: list[str]
 
 
-def save_job(job: Job) -> None:
-    path = get_cache_path()
+@dataclass
+class ProjectStateOnCluster:
+    """The cached info we have about the state of the project on a cluster.
 
+    This is used to avoid redoing a sync unless necessary.
+    """
+
+    uv_version: str | None = None
+    last_uv_sync_git_commit: str | None = None
+    last_pushed_datasets: datetime | None = None
+    checked_out_git_commit: str | None = None
+
+
+@dataclass
+class CacheContent:
+    project_states: dict[str, ProjectStateOnCluster] = dataclasses.field(default_factory=dict)
+
+
+def save_job(job: Job) -> None:
+    path = _get_cached_jobs_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
         f.write(json.dumps(asdict(job)) + "\n")
 
 
 def load_jobs() -> list[Job]:
-    path = get_cache_path()
+    path = _get_cached_jobs_path()
     if not path.exists():
         return []
     jobs = []
@@ -45,3 +61,39 @@ def load_jobs() -> list[Job]:
         except Exception:
             pass
     return jobs
+
+
+def read_cache() -> CacheContent:
+    """Read the cache content from the (local) cache file."""
+    cache_file = _get_cache_file()
+    if not cache_file.exists():
+        logger.debug("Empty cache (file %s does not exist)", cache_file)
+        return CacheContent()
+    logger.debug("Reading cache from %s", cache_file)
+    raw_content = yaml.safe_load(cache_file.read_text())
+    return pydantic.TypeAdapter(CacheContent).validate_python(raw_content)
+
+
+def write_cache(cache: CacheContent):
+    """Write the cache content to the (local) cache file."""
+    cache_file = _get_cache_file()
+    logger.debug("Writing cache to %s: %s", cache_file, cache)
+    cache_file.write_text(yaml.dump(asdict(cache), indent=2))
+
+
+def _get_cached_jobs_path() -> Path:
+    """Should be like : ~/.cache/cluv/<PROJECT_NAME>/jobs.jsonl"""
+    return _get_cache_dir() / "jobs.jsonl"
+
+
+def _get_cache_file() -> Path:
+    """Get the path to a cache file on the remote cluster."""
+    return _get_cache_dir() / "cluv_cache.yaml"
+
+
+def _get_cache_dir() -> Path:
+    """Returns the cluv cache directory (and create it if needed) for the current project."""
+    project_name = find_pyproject().parent.name
+    cache_dir = Path(platformdirs.PlatformDirs("cluv").user_cache_dir) / project_name
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir

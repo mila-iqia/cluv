@@ -77,7 +77,7 @@ env = {UV_OFFLINE="0", WANDB_MODE="online", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 # env = {SBATCH_TIMELIMIT="00:15:00"}
 
 # [tool.cluv.clusters.trillium-gpu]
-# env = {SBATCH_GPUS_PER_NODE="1", SBATCH_ACCOUNT="rrg-bengioy-ad""}
+# env = {SBATCH_GPUS_PER_NODE="1", SBATCH_ACCOUNT="rrg-bengioy-ad"}
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.

@@ -5,13 +5,18 @@ from pathlib import Path
 import pytest
 from milatools.cli.init_command import DRAC_CLUSTERS
 
-from cluv.config import ClusterConfig, PartialClusterConfig, load_cluv_config
+from cluv.config import ClusterConfig, PartialClusterConfig, get_cluv_config, load_cluv_config
 
 
 def write_pyproject(tmp_path: Path, content: str) -> Path:
     p = tmp_path / "pyproject.toml"
     p.write_text(content)
     return p
+
+
+@pytest.fixture(autouse=True)
+def clear_get_cluv_config_cache() -> None:
+    get_cluv_config.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -79,6 +84,21 @@ SBATCH_ACCOUNT = "def-bengioy"
         assert cfg.clusters["mila"].env == {}
         assert cfg.clusters["rorqual"].env == {"SBATCH_ACCOUNT": "def-bengioy"}
 
+    def test_clusters_names_should_not_returned_ignored_clusters(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+    [tool.cluv]
+    results_path = "logs"
+    [tool.cluv.clusters.mila]
+    [tool.cluv.clusters.rorqual]
+    [tool.cluv.clusters.narval]
+    ignore = true
+    """,
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.clusters_names == ["mila", "rorqual"]
+
 
 # ---------------------------------------------------------------------------
 # [tool.cluv.env] — global SBATCH_* defaults
@@ -114,6 +134,66 @@ results_path = "logs"
         )
         cfg = load_cluv_config(p)
         assert cfg.env == {}
+
+    def test_job_script_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+[tool.cluv.clusters.mila]
+job_script_path = "scripts/job.sh"
+""",
+        )
+        monkeypatch.chdir(tmp_path)
+        cfg = load_cluv_config(p)
+        assert cfg.job_script_path is None
+        assert cfg.get_cluster_config("mila").job_script_path == Path("scripts/job.sh")
+
+    def test_cluster_job_script_path_overrides_global_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+job_script_path = "scripts/job.sh"
+
+[tool.cluv.clusters.mila]
+job_script_path = "scripts/mila_job.sh"
+
+[tool.cluv.clusters.rorqual]
+""",
+        )
+        monkeypatch.chdir(tmp_path)
+        cfg = load_cluv_config(p)
+        assert cfg.job_script_path == "scripts/job.sh"
+        assert cfg.get_cluster_config("mila").job_script_path == Path("scripts/mila_job.sh")
+        assert cfg.get_cluster_config("rorqual").job_script_path == Path("scripts/job.sh")
+
+
+# ---------------------------------------------------------------------------
+# ClusterConfig helpers
+# ---------------------------------------------------------------------------
+
+
+class TestClusterConfigHelpers:
+    def test_expandvars_expands_path_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLUV_TMP", "/tmp/cluv")
+        cfg = ClusterConfig(
+            env={},
+            results_path=Path("$CLUV_TMP/results"),
+            datasets_path=Path("$CLUV_TMP/data"),
+            ignore=False,
+            job_script_path=Path("$CLUV_TMP/scripts/job.sh"),
+        )
+
+        expanded = cfg.expandvars()
+
+        assert expanded.results_path == Path("/tmp/cluv/results")
+        assert expanded.datasets_path == Path("/tmp/cluv/data")
+        assert expanded.job_script_path == Path("/tmp/cluv/scripts/job.sh")
 
 
 # ---------------------------------------------------------------------------

@@ -36,6 +36,12 @@ class PartialClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
+    ignore: bool = False
+    """Whether to ignore this cluster when running commands on all clusters."""
+
+    job_script_path: str | None = None
+    """Path to the job script to use by default on this cluster."""
+
 
 @dataclass(frozen=True)
 class ClusterConfig:
@@ -55,13 +61,25 @@ class ClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
+    ignore: bool
+    """Whether to ignore this cluster when running commands on all clusters."""
+
+    job_script_path: Path | None
+    """Path to the job script to use by default on this cluster."""
+
     def expandvars(self):
         return ClusterConfig(
             env=self.env,
-            results_path=Path(os.path.expandvars(self.results_path)),
+            results_path=Path(os.path.expandvars(str(self.results_path))),
             datasets_path=(
-                Path(os.path.expandvars(self.datasets_path)) if self.datasets_path else None
+                Path(os.path.expandvars(str(self.datasets_path))) if self.datasets_path else None
             ),
+            job_script_path=(
+                Path(os.path.expandvars(str(self.job_script_path)))
+                if self.job_script_path
+                else None
+            ),
+            ignore=self.ignore,
         )
 
 
@@ -86,6 +104,13 @@ class CluvConfig(BaseModel):
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
+    job_script_path: str | None = None
+    """Default path to the job script to submit when one is not passed explicitly to `cluv submit`.
+
+    This can be overridden for specific clusters in the `clusters` section, and can also be
+    overridden on the fly by passing a different job script to `cluv submit`.
+    """
+
     clusters: dict[str, PartialClusterConfig] = {}
     """Configuration options for each cluster.
 
@@ -94,7 +119,7 @@ class CluvConfig(BaseModel):
 
     @property
     def clusters_names(self) -> list[str]:
-        return list(self.clusters.keys())
+        return [name for name, config in self.clusters.items() if not config.ignore]
 
     def get_cluster_config(self, cluster: str) -> ClusterConfig:
         """Returns the cluster config for a specific cluster.
@@ -103,13 +128,15 @@ class CluvConfig(BaseModel):
         """
         cluv_config = get_cluv_config()
         cluster_config = cluv_config.clusters[cluster]
-        datasets_path = cluster_config.datasets_path or cluv_config.datasets_path
         results_path = cluster_config.results_path or cluv_config.results_path
+        datasets_path = cluster_config.datasets_path or cluv_config.datasets_path
+        job_script_path = cluster_config.job_script_path or cluv_config.job_script_path
         return ClusterConfig(
             env=cluv_config.env | cluster_config.env,
-            # TODO: Use the cluster-specific results_path if we add that option back in the future.
             results_path=Path(results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
+            ignore=cluster_config.ignore,
+            job_script_path=Path(job_script_path) if job_script_path else None,
         )
 
 
@@ -135,11 +162,6 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
         raise RuntimeError(f"No cluv config in {pyproject_path} file.")
 
     return CluvConfig.model_validate(cluv, extra="forbid")
-
-
-def get_cluster_choices() -> list[str]:
-    """Return configured clusters or the defaults when config is missing/invalid."""
-    return get_cluv_config().clusters_names
 
 
 def current_cluster_config() -> ClusterConfig | None:

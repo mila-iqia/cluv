@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import functools
 import logging
 import os
@@ -12,7 +13,6 @@ import textwrap
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-# TODO: Figure out what the issues are with the console output
 import milatools.cli
 import milatools.utils.parallel_progress
 
@@ -23,12 +23,9 @@ from milatools.utils.parallel_progress import (
     run_async_tasks_with_progress_bar,
 )
 
+from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.config import (
-    CluvConfig,
-    find_pyproject,
-    get_cluv_config,
-)
+from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import get_datasets_path
 from cluv.remote import Remote, get_ssh_options_for_host, run
 from cluv.utils import console, console_lock, current_cluster
@@ -166,6 +163,7 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_cluv_config()
+    cluster = remote.hostname
 
     def _update_progress(progress: int, status: str, total: int):
         info = textwrap.shorten(status, 50, placeholder="...")
@@ -173,14 +171,24 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
 
     num_tasks = 5 if config.data_source else 4
 
+    cache = read_cache()
+    project_state = cache.project_states.setdefault(cluster, ProjectStateOnCluster())
+
+    def _save():
+        assert cache.project_states[cluster] is project_state
+        write_cache(cache)
+
     _update_progress(0, "Checking/Installing UV", num_tasks)
-    await install_uv(remote)
+    await install_uv(remote, project_state)
+    _save()
 
     _update_progress(1, "Setting up project", num_tasks)
-    await clone_project(remote)
+    await clone_project(remote, project_state)
+    _save()
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
-    await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
+    await run_uv_sync(remote, project_path, project_state)
+    _save()
 
     _update_progress(3, "Fetching results", num_tasks)
     new_runs = await fetch_results(remote, config)
@@ -193,13 +201,29 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
             raise RuntimeError("data_source is set, so dataset_path should also be set!")
         local_dataset_path = Path(os.path.expandvars(local_dataset_path))
 
-        await _push_datasets_to_remote(local_dataset_path, remote, config)
+        await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
+        _save()
 
     _update_progress(num_tasks, "Done", num_tasks)
     return new_runs
 
 
-async def install_uv(remote: Remote):
+async def run_uv_sync(
+    remote: Remote, project_path: PurePosixPath, project_state: ProjectStateOnCluster
+):
+    current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+
+    if project_state.last_uv_sync_git_commit == current_git_commit:
+        logger.info(
+            f"uv sync was already run for the current commit ({current_git_commit}) on "
+            f"{remote.hostname}. Skipping uv sync."
+        )
+        return
+    await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
+    project_state.last_uv_sync_git_commit = current_git_commit
+
+
+async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
     # todo: These parts are common. No need to do them for each cluster. Not a big deal though.
     if not shutil.which("uv"):
         logger.error(
@@ -213,9 +237,14 @@ async def install_uv(remote: Remote):
         # uv --version outputs e.g. 'uv 0.11.0 (aarch64-unknown-linux-gnu)'.
         subprocess.getoutput("uv --version").strip().split()[1]
     )
-    logger.info(
+    logger.debug(
         f"[green]Using uv version {uv_version_here} everywhere, since this is the version on this machine.[/green]"
     )
+    if project_state.uv_version == uv_version_here:
+        logger.info(
+            f"uv version {uv_version_here} is already installed on {remote.hostname}, skipping."
+        )
+        return
 
     uv_path = await remote.get_output("bash -l -c 'which uv'", warn=True, hide=True, display=False)
     uv_path = uv_path.strip()
@@ -232,8 +261,22 @@ async def install_uv(remote: Remote):
         logger.info(f"Updating uv to version {uv_version_here} on the {remote.hostname} cluster.")
         await remote.run(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
 
+    project_state.uv_version = uv_version_here
 
-async def clone_project(remote: Remote):
+
+def _github_pr_ref() -> str | None:
+    """The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
+
+    Unlike the PR head branch, this ref exists on the base repo even when the PR comes
+    from a fork, so the project clones on the clusters can fetch it from their remote.
+    """
+    github_ref = os.environ.get("GITHUB_REF", "").strip()
+    if re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref):
+        return github_ref
+    return None
+
+
+async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
     """Setup the project repo on all the remote clusters.
 
     New idea:
@@ -274,6 +317,13 @@ async def clone_project(remote: Remote):
         subprocess.getoutput("git rev-parse --show-toplevel").strip()
     ).relative_to(Path.home())
 
+    current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+    safe_current_git_commit = shlex.quote(current_git_commit)
+    if project_state.checked_out_git_commit == current_git_commit:
+        logger.info(
+            f"Git commit {current_git_commit} is already checked out on {remote.hostname}, skipping."
+        )
+        return
     # If the project isn't cloned yet, clone it.
     _is_cloned_on_cluster = (
         await remote.run(
@@ -283,10 +333,11 @@ async def clone_project(remote: Remote):
             display=False,
         )
     ).returncode == 0
+    gitenv = {"GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new"}
     if not _is_cloned_on_cluster:
-        logger.debug(f"Project isn't cloned yet on {remote.hostname}.")
-        await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True)
-    await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True)
+        logger.info(f"Project isn't cloned yet on {remote.hostname}.")
+        await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True, env=gitenv)
+    await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True, env=gitenv)
     if detached_head:
         github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
         if github_head_ref:
@@ -296,31 +347,49 @@ async def clone_project(remote: Remote):
             ):
                 raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
             safe_head_ref = shlex.quote(github_head_ref)
-            safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
             safe_remote_name = shlex.quote(git_remote_name)
+            github_pr_ref = _github_pr_ref()
+            if github_pr_ref:
+                # The head branch of a PR from a fork doesn't exist on the base repo, so
+                # fetch the PR ref instead and create the branch from FETCH_HEAD.
+                safe_pr_ref = shlex.quote(github_pr_ref)
+                await remote.run(
+                    f"git -C {git_root_path} fetch {safe_remote_name} {safe_pr_ref}",
+                    hide=False,
+                )
+                await remote.run(
+                    f"git -C {git_root_path} checkout -B {safe_head_ref} FETCH_HEAD",
+                    hide=False,
+                )
+                return
+            safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
             await remote.run(
                 f"git -C {git_root_path} checkout -B {safe_head_ref} {safe_tracking_ref}",
                 hide=False,
             )
             await remote.run(
-                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}", hide=False
+                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}",
+                hide=False,
+                env=gitenv,
             )
             return
-        current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
-        safe_current_git_commit = shlex.quote(current_git_commit)
+
         await remote.run(
             f"git -C {git_root_path} checkout --detach {safe_current_git_commit}", hide=False
         )
     else:
         await remote.run(f"git -C {git_root_path} checkout {safe_current_git_branch}", hide=False)
-        await remote.run(f"git -C {git_root_path} pull", hide=False)
+        await remote.run(f"git -C {git_root_path} pull", hide=False, env=gitenv)
+
+    project_state.checked_out_git_commit = current_git_commit
 
 
 async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):
     """Pull from source to the locally-resolved datasets_path."""
     # Resolve the env vars on the remote.
     source_host = source_remote.hostname
-    source_path = await source_remote.get_output(f"echo {source_path}")
+    if "$" in source_path:
+        source_path = await source_remote.get_output(f"echo {source_path}")
     if "$" in str(local_datasets_path):
         # Important to stop here if there is $SCRATCH in the datasets_path and it is not set on
         # this machine.
@@ -336,7 +405,8 @@ async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets
     console.log(
         f"[green]Pulling datasets:[/green] {source_host}:{source_path} -> {local_datasets_path}"
     )
-    source_path = await source_remote.get_output(f"echo {source_path}")
+    if "$" in source_path:
+        source_path = await source_remote.get_output(f"echo {source_path}")
     await run(
         (
             "rsync",
@@ -354,13 +424,28 @@ async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets
     )
 
 
-async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: CluvConfig):
+async def _push_datasets_to_remote(
+    local_source: Path, remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
+):
     """Push dataset from a local path to the remote cluster's datasets_path."""
+    last_datasets_dir_edit_time = datetime.datetime.fromtimestamp(local_source.stat().st_mtime)
+
+    # Skip if we pushed after the last edit to the local source path.
+    if (
+        last_push_datasets_time := project_state.last_pushed_datasets
+    ) and last_push_datasets_time > last_datasets_dir_edit_time:
+        logger.info(
+            f"Datasets at {local_source} were already pushed to {remote.hostname} and have not "
+            f"changed since. Skipping."
+        )
+        return
     datasets_path_template = str(config.get_cluster_config(remote.hostname).datasets_path)
     resolved_path = (
         await remote.get_output(
-            f"bash -l -c 'echo {datasets_path_template}'", hide=True, display=False
+            f"bash --login -c 'echo {datasets_path_template}'", hide=True, display=False
         )
+        if "$" in datasets_path_template
+        else datasets_path_template
     ).strip()
     await remote.run(f"mkdir -p {resolved_path}", hide=True)
     await run(
@@ -378,6 +463,8 @@ async def _push_datasets_to_remote(local_source: Path, remote: Remote, config: C
         ),
         _display=True,
     )
+    last_push_datetime = datetime.datetime.now()
+    project_state.last_pushed_datasets = last_push_datetime
 
 
 async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:

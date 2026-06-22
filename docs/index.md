@@ -46,6 +46,9 @@ cluv login
 cluv sync
 ```
 
+Need to set up dataset replication with `cluv sync`? See the
+[dataset sync guide](guides/syncing-datasets.md).
+
 
 ### Sync your project on a specific cluster
 ```console

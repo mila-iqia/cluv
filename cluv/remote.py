@@ -40,10 +40,10 @@ class Remote:
         """
         remote = cls(hostname)
         if not (await control_socket_is_running(hostname)):
-            result = await remote.run("echo OK", display=False, hide="out")
+            result = await remote.run("echo OK", display=False, warn=True, hide=True)
             if "OK" not in result.stdout:
                 raise RuntimeError(
-                    f"Some strange error occurred when connecting to hostname {hostname}: {result.stderr}"
+                    f"An error occurred when connecting to hostname {hostname}: {result.stderr}"
                 )
         return remote
 
@@ -55,6 +55,7 @@ class Remote:
         display: bool = True,
         warn: bool = False,
         hide: Hide = False,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         if sys.platform == "win32":
             raise NotImplementedError(
@@ -65,6 +66,9 @@ class Remote:
                 "See https://learn.microsoft.com/en-us/windows/wsl/install for a guide on "
                 "setting up WSL."
             )
+        if env:
+            env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
+            command = f"{env_prefix} {command}"
         ssh_command = (
             "ssh",
             *get_multiplexing_options_to_use(self.hostname),

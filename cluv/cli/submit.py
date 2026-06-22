@@ -71,11 +71,7 @@ async def submit(
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(
         autocommit=autocommit,
-        launched_job_command_builder=(
-            (lambda: build_submit_command(cluster, job_script, sbatch_args, program_args))
-            if autocommit
-            else None
-        ),
+        submit_command=build_submit_command(cluster, job_script, sbatch_args, program_args),
     )
 
     here = current_cluster()
@@ -426,7 +422,7 @@ def build_submit_command(
     return shlex.join(command_parts)
 
 
-def create_submit_commit(launched_job_command: str) -> None:
+def create_submit_commit(submit_command: str) -> None:
     """Create a commit with tracked changes and include the launched job command in the body."""
     try:
         subprocess.run(["git", "add", "-u"], check=True, capture_output=True, text=True)
@@ -437,7 +433,7 @@ def create_submit_commit(launched_job_command: str) -> None:
                 "-m",
                 "cluv submit: auto-commit tracked changes",
                 "-m",
-                f"Launched job command:\n\n{launched_job_command}",
+                f"Launched job command:\n\n{submit_command}",
             ],
             check=True,
             capture_output=True,
@@ -453,7 +449,7 @@ def create_submit_commit(launched_job_command: str) -> None:
 
 
 def ensure_clean_git_state(
-    autocommit: bool = False, launched_job_command_builder: Callable[[], str] | None = None
+    autocommit: bool = False, submit_command: str | None = None
 ) -> str:
     """
     Check git is clean locally and return the current commit hash.
@@ -462,10 +458,9 @@ def ensure_clean_git_state(
     dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
     if dirty_lines:
         if autocommit:
-            if launched_job_command_builder is None:
-                raise ValueError("launched_job_command_builder is required when autocommit=True")
-            launched_job_command = launched_job_command_builder()
-            create_submit_commit(launched_job_command=launched_job_command)
+            if submit_command is None:
+                raise ValueError("submit_command is required when autocommit=True")
+            create_submit_commit(submit_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
             console.print(
                 "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",

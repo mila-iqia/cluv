@@ -270,7 +270,7 @@ class TestEnsureCleanGitState:
         assert (
             ensure_clean_git_state(
                 autocommit=True,
-                launched_job_command_builder=lambda: launched_job_command,
+                submit_command=launched_job_command,
             )
             == "dddddddddddddddddddddddddddddddddddddddd"
         )
@@ -301,7 +301,7 @@ class TestEnsureCleanGitState:
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
 
-        with pytest.raises(ValueError, match="launched_job_command_builder is required"):
+        with pytest.raises(ValueError, match="submit_command is required"):
             ensure_clean_git_state(autocommit=True)
 
     def test_prefers_branch_tip_in_github_actions_detached_head(

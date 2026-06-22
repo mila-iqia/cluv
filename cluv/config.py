@@ -25,6 +25,9 @@ class PartialClusterConfig:
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
+    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
+    """Per-cluster sbatch flags, overriding the global `sbatch_args`."""
+
     results_path: str | None = None
     """Path to the results directory for a specific cluster."""
 
@@ -78,6 +81,9 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
 
     ignore: bool
     """Whether to ignore this cluster when running commands on all clusters."""
+    
+    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
+    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
 
 
 class CluvConfig(BaseModel):
@@ -85,6 +91,13 @@ class CluvConfig(BaseModel):
 
     env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""
+
+    sbatch_args: dict[str, str | int | float | bool] = {}
+    """Global sbatch flags applied on all clusters.
+
+    These are passed directly to `sbatch` and complement `env` (which sets `SBATCH_*` env vars).
+    See `[tool.cluv.clusters.<name>.sbatch_args]` for per-cluster overrides.
+    """
 
     results_path: str
     """Default path to the results directory for all clusters (may contain env vars like $SCRATCH)."""
@@ -142,6 +155,7 @@ class CluvConfig(BaseModel):
             project_dir=PurePosixPath(project_dir) if project_dir else None,
             job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
             ignore=cluster_config.ignore,
+            sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
         )
 
 

@@ -19,6 +19,7 @@ from cluv.cli.submit import (
     build_submit_command,
     ensure_clean_git_state,
     get_sbatch_command,
+    sbatch_args_from_dict,
     submit,
     submit_first,
 )
@@ -57,6 +58,30 @@ def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     cluv.cli.init()
     # mock.assert_called_once()
     return project_dir
+
+
+class TestSbatchArgsFromDict:
+    def test_long_key_string_value(self) -> None:
+        assert sbatch_args_from_dict({"time": "2:00:00"}) == ["--time=2:00:00"]
+
+    def test_short_key_string_value(self) -> None:
+        assert sbatch_args_from_dict({"N": "2"}) == ["-N", "2"]
+
+    def test_true_long_key_is_bare_flag(self) -> None:
+        assert sbatch_args_from_dict({"exclusive": True}) == ["--exclusive"]
+
+    def test_true_short_key_is_bare_flag(self) -> None:
+        assert sbatch_args_from_dict({"n": True}) == ["-n"]
+
+    def test_empty_string_omitted(self) -> None:
+        assert sbatch_args_from_dict({"gpus": ""}) == []
+
+    def test_false_omitted(self) -> None:
+        assert sbatch_args_from_dict({"requeue": False}) == []
+
+    def test_multiple_flags_in_order(self) -> None:
+        result = sbatch_args_from_dict({"time": "2:00:00", "gpus": "1", "exclusive": True})
+        assert result == ["--time=2:00:00", "--gpus=1", "--exclusive"]
 
 
 class TestGetSbatchCommand:
@@ -132,6 +157,75 @@ class TestGetSbatchCommand:
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
             "sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
         )
+
+    def test_config_sbatch_args_prepended_to_cli_args(
+        self, project_dir: Path, fake_home: Path
+    ) -> None:
+        """Config-derived sbatch flags are prepended; CLI flags come last and can override."""
+        p = project_dir / "pyproject.toml"
+        results_path = "results"
+        p.write_text(
+            textwrap.dedent(
+                f"""\
+            [tool.cluv]
+            results_path = "{results_path}"
+            [tool.cluv.sbatch_args]
+            time = "3:00:00"
+            requeue = true
+            [tool.cluv.clusters.mila]
+            [tool.cluv.clusters.mila.sbatch_args]
+            gpus = "a100:2"
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+        sbatch_command = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args=["--time=1:00:00"],  # CLI overrides the config time
+            program_args=[],
+            git_commit="abc123",
+        )
+        # Config flags come first (time, requeue, gpus), then CLI flag (--time=1:00:00).
+        # sbatch uses last occurrence, so the CLI time wins.
+        assert "--time=3:00:00" in sbatch_command
+        assert "--requeue" in sbatch_command
+        assert "--gpus=a100:2" in sbatch_command
+        assert "--time=1:00:00" in sbatch_command
+        # Config flags appear before CLI flags in the command string
+        assert sbatch_command.index("--time=3:00:00") < sbatch_command.index("--time=1:00:00")
+
+    def test_cluster_sbatch_args_override_global(self, project_dir: Path) -> None:
+        """Cluster-level sbatch_args override global ones; empty string removes a flag."""
+        p = project_dir / "pyproject.toml"
+        results_path = "results"
+        p.write_text(
+            textwrap.dedent(
+                f"""\
+            [tool.cluv]
+            results_path = "{results_path}"
+            [tool.cluv.sbatch_args]
+            gpus = "1"
+            time = "2:00:00"
+            [tool.cluv.clusters.cpu_cluster]
+            [tool.cluv.clusters.cpu_cluster.sbatch_args]
+            gpus = ""
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+        sbatch_command = get_sbatch_command(
+            cluster="cpu_cluster",
+            job_script=job_script,
+            sbatch_args=[],
+            program_args=[],
+            git_commit="abc123",
+        )
+        # gpus removed by cluster override, time still present
+        assert "--gpus" not in sbatch_command
+        assert "--time=2:00:00" in sbatch_command
 
 
 class TestSubmitCliParsing:

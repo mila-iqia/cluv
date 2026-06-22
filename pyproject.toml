@@ -7,7 +7,9 @@ requires-python = ">=3.13"
 dynamic = ["version"]
 dependencies = [
     "milatools>=0.1.9",
+    "platformdirs>=4.9.6",
     "pydantic>=2.0",
+    "pyyaml>=6.0.3",
     "rich>=13.0",
     "rich-argparse>=1.7.2",
     "simple-parsing>=0.1.8",
@@ -84,6 +86,10 @@ show_missing = true
 ###  --------------   CLUV CONFIG   --------------  ###
 
 [tool.cluv]
+
+# Job script to use by default when one isn't passed to the `submit` command, on all clusters.
+# Can be overridden per cluster below. or per job submission.
+job_script_path = "scripts/job.sh"
 # Where to store job results by default. Can be overridden per cluster.
 results_path = "$SCRATCH/logs/cluv"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.

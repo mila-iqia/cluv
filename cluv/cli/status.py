@@ -3,10 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from rich import box
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -17,31 +16,57 @@ from cluv.config import get_cluv_config
 from cluv.slurm import (
     FAILED_JOB_STATES,
     StorageStats,
+    clean_job_state,
     parse_disk_quota,
     parse_diskusage_report,
     parse_partition_stats,
     parse_savail,
     parse_sinfo_nodes,
+    parse_slurm_time,
+    parse_timestamp,
 )
+from cluv.utils import console
 
 logger = logging.getLogger(__name__)
 __all__ = ["status"]
 
 
 @dataclass
-class JobStats:
-    my_running: int
-    my_pending: int
-    my_cancelled: int
-    my_completed: int
+class ClusterJobStats:
+    running: int
+    pending: int
+    cancelled: int
+    completed: int
+
+
+@dataclass
+class ArrayTaskInfo:
+    task_idx: str
+    state: str
+    elapsed: timedelta | None
+    waited: timedelta | None
 
 
 @dataclass
 class LiveJobInfo:
     cluster: str
-    state: str
-    elapsed: str | None  # sacct Elapsed field (HH:MM:SS or D-HH:MM:SS)
-    wait_time: str | None  # formatted time from Submit to Start (or to now if still pending)
+    state: str | None = None
+    elapsed: timedelta | None = None
+    waited: timedelta | None = None
+    array_tasks: list[ArrayTaskInfo] | None = None
+
+    def array_elapse_time(self) -> timedelta | None:
+        """Total elapse time for all the tasks in the array"""
+        if not self.array_tasks:
+            return None
+
+        sum_tasks = timedelta()
+        for task in self.array_tasks:
+            if task.elapsed is None:
+                continue
+            sum_tasks += task.elapsed
+
+        return sum_tasks
 
 
 @dataclass
@@ -93,52 +118,76 @@ _MILA_CLUSTERS = {"mila"}
 
 async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, LiveJobInfo]:
     """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
+    start_time = datetime.now()
+
     ids_str = ",".join(str(jid) for jid in job_ids)
     cmd = (
         f"sacct -j {ids_str} --format=JobID,State,Start,Submit,Elapsed"
-        f" --noheader --allocations --parsable2 2>/dev/null"
+        f" --noheader --allocations --array --parsable2 2>/dev/null"
     )
     try:
         remote = await get_remote_without_2fa_prompt(cluster)
         if remote is None:
+            logger.info(f"No connection to [bold]{cluster}[/bold]; skipping jobs")
             return {}
         raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
     except Exception:
         return {}
 
-    result: dict[int, LiveJobInfo] = {}
+    jobs: dict[int, LiveJobInfo] = {}
+    array_tasks: dict[int, list[ArrayTaskInfo]] = {}
     now = datetime.now(timezone.utc)
-    _fmt = "%Y-%m-%dT%H:%M:%S"
 
     for line in raw.splitlines():
         # Should have 5 columns
         parts = line.strip().split("|")
         if len(parts) != 5:
             continue
-        job_id_str, state, start_str, submit_str, elapsed = parts
+        job_id_str, state, start_str, submit_str, elapsed_str = parts
 
-        elapsed_val = elapsed.strip()
-        elapsed_out = elapsed_val if elapsed_val and elapsed_val != "00:00:00" else None
-
-        wait_time = None
+        waited = None
         try:
-            submit_dt = datetime.strptime(submit_str.strip(), _fmt).replace(tzinfo=timezone.utc)
-            start = start_str.strip()
-            if start and start not in ("Unknown", "None"):
-                start_dt = datetime.strptime(start, _fmt).replace(tzinfo=timezone.utc)
-                delta_s = int((start_dt - submit_dt).total_seconds())
+            submit_dt = parse_timestamp(submit_str).replace(tzinfo=timezone.utc)
+            start = start_str.strip()  # If the job haven't started yet
+            if start in ("Unknown", "None"):
+                waited = now - submit_dt
             else:
-                delta_s = int((now - submit_dt).total_seconds())
-            wait_time = _format_duration(max(delta_s, 0))
+                start_dt = parse_timestamp(start).replace(tzinfo=timezone.utc)
+                waited = start_dt - submit_dt
         except (ValueError, OverflowError):
             pass
 
-        job_id = int(job_id_str.strip())
-        result[job_id] = LiveJobInfo(
-            cluster=cluster, state=state.strip(), elapsed=elapsed_out, wait_time=wait_time
-        )
+        job_id_str = job_id_str.strip()
+        state = clean_job_state(state.strip())
+        elapsed = parse_slurm_time(elapsed_str)
 
-    return result
+        # Handle array tasks separately so we can aggregate them under their parent job.
+        if "_" in job_id_str:
+            parent_id_str, task_idx = job_id_str.split("_", 1)
+            parent_id = int(parent_id_str)
+            task = ArrayTaskInfo(task_idx, state=state, elapsed=elapsed, waited=waited)
+
+            if parent_id in array_tasks:
+                array_tasks[parent_id].append(task)
+            else:
+                jobs[parent_id] = LiveJobInfo(cluster=cluster)
+                array_tasks[parent_id] = [task]
+        else:
+            job_id = int(job_id_str.strip())
+            jobs[job_id] = LiveJobInfo(
+                cluster=cluster, state=state, elapsed=elapsed, waited=waited
+            )
+
+    # Merge jobs and array_tasks
+    for job_id, array in array_tasks.items():
+        jobs[job_id].array_tasks = array
+
+    logger.info(
+        f"Fetched {len(jobs)} [bold]{cluster}[/bold] jobs in "
+        f"{(datetime.now() - start_time).total_seconds()} seconds"
+    )
+
+    return jobs
 
 
 async def get_cluster_status(cluster: str) -> ClusterStatus:
@@ -147,11 +196,14 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
     """
+    start_time = datetime.now()
+
     # Use get_remote_without_2fa_prompt directly so we never filter out the
     # "current" cluster the way login() does. A working socket for mila is
     # perfectly usable even when /home/mila is mounted locally.
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None:
+        logger.info(f"No connection to [bold]{cluster}[/bold]; returning empty status")
         return get_default_cluster_status(cluster)
 
     script = _REMOTE_SCRIPT_MILA if cluster in _MILA_CLUSTERS else _REMOTE_SCRIPT_DRAC
@@ -195,6 +247,11 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     if storage.home_quota == 0:
         storage = parse_disk_quota(disk_quota_out)
 
+    logger.info(
+        f"Fetched [bold]{cluster}[/bold] status in "
+        f"{(datetime.now() - start_time).total_seconds()} seconds"
+    )
+
     return ClusterStatus(
         name=cluster,
         online=True,
@@ -208,10 +265,17 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
 # ---------------------------------------------------------------------------
 # UI helpers
 # ---------------------------------------------------------------------------
-def _format_duration(total_seconds: int) -> str:
-    h, rem = divmod(total_seconds, 3600)
+def _format_duration(duration: timedelta | None) -> str:
+    if duration is None:
+        return ""
+
+    d, rem = divmod(int(duration.total_seconds()), 86400)
+    h, rem = divmod(rem, 3600)
     m, s = divmod(rem, 60)
-    if h:
+
+    if d:
+        return f"{d}d{h:02d}h"
+    elif h:
         return f"{h}h{m:02d}m"
     elif m:
         return f"{m}m{s:02d}s"
@@ -228,7 +292,7 @@ def _state_text(state: str) -> Text:
         return Text(state, style="blue")
     elif state in FAILED_JOB_STATES:
         return Text(state, style="red")
-    return Text(state or "—", style="dim")
+    return Text(state)
 
 
 def _bar(used: float, total: float, width: int = 10) -> Text:
@@ -265,7 +329,7 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 # Main display
 # ---------------------------------------------------------------------------
 def _build_cluster_table(
-    data: list[ClusterStatus], clusters_job_stats: dict[str, JobStats]
+    data: list[ClusterStatus], clusters_job_stats: dict[str, ClusterJobStats]
 ) -> Table:
     """Build the cluster overview table with live status info and job counts."""
     table = Table(
@@ -286,10 +350,10 @@ def _build_cluster_table(
     for c in data:
         status = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
         job_stats = clusters_job_stats.get(
-            c.name, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0)
+            c.name, ClusterJobStats(running=0, cancelled=0, completed=0, pending=0)
         )
         my_jobs = Text(
-            f"{job_stats.my_running} / {job_stats.my_pending} / {job_stats.my_cancelled} / {job_stats.my_completed}",
+            f"{job_stats.running} / {job_stats.pending} / {job_stats.cancelled} / {job_stats.completed}",
             style="cyan",
         )
 
@@ -343,26 +407,47 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
         except (ValueError, TypeError):
             submitted_str = job.submitted_at
 
-        if info is not None:
-            state_cell = _state_text(info.state)
-            wait_cell = info.wait_time or "-"
-            elapsed_cell = info.elapsed or "-"
-        else:
-            state_cell = Text("-", style="dim")
-            wait_cell = "-"
-            elapsed_cell = "-"
+        job_id = Text(str(job.job_id))
+        state, wait_time, elapsed_time = "-", "-", "-"
+
+        if info:
+            if info.array_tasks:
+                job_id += Text(f" [{len(info.array_tasks)}]", style="dim")
+                state = _count_states(info.array_tasks)
+                wait_time = "/"
+                elapsed_time = _format_duration(info.array_elapse_time())
+            else:
+                state = _state_text(info.state or "-")
+                wait_time = _format_duration(info.waited)
+                elapsed_time = _format_duration(info.elapsed)
 
         table.add_row(
             job.cluster,
-            str(job.job_id),
+            job_id,
             job.git_commit[:7],
             submitted_str,
-            state_cell,
-            wait_cell,
-            elapsed_cell,
+            state,
+            wait_time,
+            elapsed_time,
         )
 
     return table
+
+
+def _count_states(tasks: list[ArrayTaskInfo]) -> Text:
+    counter: dict[str, int] = {}
+
+    for task in tasks:
+        if task.state not in counter:
+            counter[task.state] = 1
+        else:
+            counter[task.state] += 1
+
+    total = Text()
+    for state, n in counter.items():
+        total += _state_text(state) + Text(f" [{n}] ", style="dim")
+
+    return total
 
 
 def _build_legend() -> Panel:
@@ -378,7 +463,7 @@ def _build_legend() -> Panel:
 
 async def get_job_infos(
     cached_jobs: list[Job], clusters: list[str]
-) -> tuple[dict[int, LiveJobInfo], dict[str, JobStats]]:
+) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
     # Regroup jobs by cluster
     cluster_jobs: dict[str, list[int]] = {}
@@ -393,19 +478,31 @@ async def get_job_infos(
     live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
 
     # Count jobs status per cluster
-    clusters_job_stats: dict[str, JobStats] = {}
+    clusters_job_stats: dict[str, ClusterJobStats] = {}
     for info in live_info.values():
         cluster_stats = clusters_job_stats.setdefault(
-            info.cluster, JobStats(my_running=0, my_cancelled=0, my_completed=0, my_pending=0)
+            info.cluster,
+            ClusterJobStats(running=0, cancelled=0, completed=0, pending=0),
         )
         if info.state == "RUNNING":
-            cluster_stats.my_running += 1
+            cluster_stats.running += 1
         elif info.state == "PENDING":
-            cluster_stats.my_pending += 1
+            cluster_stats.pending += 1
         elif info.state in FAILED_JOB_STATES:
-            cluster_stats.my_cancelled += 1
+            cluster_stats.cancelled += 1
         elif info.state in ("COMPLETED", "COMPLETING"):
-            cluster_stats.my_completed += 1
+            cluster_stats.completed += 1
+
+        if info.array_tasks:
+            for task in info.array_tasks:
+                if task.state == "RUNNING":
+                    cluster_stats.running += 1
+                elif task.state == "PENDING":
+                    cluster_stats.pending += 1
+                elif task.state in FAILED_JOB_STATES:
+                    cluster_stats.cancelled += 1
+                elif task.state in ("COMPLETED", "COMPLETING"):
+                    cluster_stats.completed += 1
 
     return live_info, clusters_job_stats
 
@@ -425,7 +522,6 @@ async def status(table: str) -> None:
     The "jobs" table shows one row per job from the cache, with live status info (state,
     elapsed time, wait time).
     """
-    console = Console()
     clusters = get_cluv_config().clusters_names
 
     console.print()

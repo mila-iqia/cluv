@@ -266,7 +266,7 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
 # UI helpers
 # ---------------------------------------------------------------------------
 def _format_duration(duration: timedelta | None) -> str:
-    if not duration:
+    if duration is None:
         return ""
 
     d, rem = divmod(int(duration.total_seconds()), 86400)

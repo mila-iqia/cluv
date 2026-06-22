@@ -40,10 +40,10 @@ class Remote:
         """
         remote = cls(hostname)
         if not (await control_socket_is_running(hostname)):
-            result = await remote.run("echo OK", display=False, hide="out")
+            result = await remote.run("echo OK", display=False, warn=True, hide=True)
             if "OK" not in result.stdout:
                 raise RuntimeError(
-                    f"Some strange error occurred when connecting to hostname {hostname}: {result.stderr}"
+                    f"An error occurred when connecting to hostname {hostname}: {result.stderr}"
                 )
         return remote
 

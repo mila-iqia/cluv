@@ -167,12 +167,8 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     project_path = cluster_config.project_dir or PurePosixPath(
         find_pyproject().parent.relative_to(Path.home())
     )
-    project_path = PurePosixPath(
-        (
-            await remote.get_output(
-                f"bash --login -c 'echo {project_path}'", hide=True, warn=True, display=False
-            )
-        ).strip()
+    project_path = (
+        (await expandvars(remote, project_path)) if "$" in str(project_path) else project_path
     )
 
     def _update_progress(progress: int, status: str, total: int):
@@ -216,6 +212,19 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
 
     _update_progress(num_tasks, "Done", num_tasks)
     return new_runs
+
+
+async def expandvars(remote: Remote, path: str | PurePosixPath) -> PurePosixPath:
+    """Same idea as `os.path.expandvars`, but for a path on a remote machine. Just uses `echo`."""
+    if "$" not in str(path):
+        return PurePosixPath(path)
+    return PurePosixPath(
+        (
+            await remote.get_output(
+                f"bash --login -c 'echo {path}'", hide=True, warn=True, display=False
+            )
+        ).strip()
+    )
 
 
 async def run_uv_sync(
@@ -512,12 +521,13 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
     # Resolve any environment variables in the results_path on the remote before rsync, otherwise
     # it would try to fetch results from a literal $SCRATCH/... folder, which doesn't exist.
     results_path_on_cluster = str(config.get_cluster_config(remote.hostname).results_path)
-    results_path_on_cluster = await remote.get_output(
-        f"echo {results_path_on_cluster}", hide=False, display=True
+    results_path_on_cluster = await expandvars(remote, results_path_on_cluster)
+
+    project_path_on_cluster = config.get_cluster_config(remote.hostname).project_dir
+    project_path_on_cluster = project_path_on_cluster or PurePosixPath(
+        find_pyproject().parent.relative_to(Path.home())
     )
-    project_path_on_cluster = config.get_cluster_config(
-        remote.hostname
-    ).project_dir or PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
+    project_path_on_cluster = await expandvars(remote, project_path_on_cluster)
     # Optional, but useful if it isn't already set up: Create a symlink at project_root/<symlink_name>
     # that points to the results_path (usually in $SCRATCH). This works with the example job script
     # templates, which have `--output=logs/%j/slurm-%j.out` (relative to the project root).
@@ -549,37 +559,23 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
 
 
 async def create_results_dir_with_symlink_to_scratch(
-    remote: Remote, project_dir: str | PurePosixPath, results_symlink: str, results_path: str
+    remote: Remote, project_dir: PurePosixPath, results_symlink: str, results_path: PurePosixPath
 ):
     """On the remote, create results_path and symlink project/<results_symlink> -> results_path.
 
     results_path may contain env vars (e.g. $SCRATCH); they are resolved via the remote login shell.
     """
-    project_dir = (
-        await remote.get_output(
-            f"bash --login -c 'echo {project_dir}'", hide=True, warn=True, display=False
-        )
-    ).strip()
-    symlink_path = PurePosixPath(project_dir) / results_symlink
-
-    # Resolve env vars (e.g. $SCRATCH) in results_path using the remote login shell.
-    resolved_path = (
-        await remote.get_output(
-            f"bash --login -c 'echo {results_path}'", hide=True, warn=True, display=False
-        )
-    ).strip()
-    if not resolved_path:
-        logger.warning(
-            f"Could not resolve results_path '{results_path}' on {remote.hostname}. Skipping symlink."
-        )
-        return
+    # Env vars should have been resolved by now.
+    assert "$" not in str(results_path)
+    assert "$" not in str(project_dir)
+    symlink_path = project_dir / results_symlink
 
     # Create the target directory if it doesn't already exist.
-    if not await remote_test("-d", resolved_path, remote):
-        result = await remote.run(f"mkdir -p {resolved_path}", warn=True, hide=True)
+    if not await remote_test("-d", results_path, remote):
+        result = await remote.run(f"mkdir -p {results_path}", warn=True, hide=True)
         if result.returncode != 0:
             logger.warning(
-                f"Failed to create {resolved_path} on {remote.hostname}. "
+                f"Failed to create {results_path} on {remote.hostname}. "
                 f"Results will be stored in {symlink_path}, which may fill up $HOME."
             )
             await remote.run(f"mkdir -p {symlink_path}", warn=True, hide=True)
@@ -593,19 +589,19 @@ async def create_results_dir_with_symlink_to_scratch(
     if await remote_test("-e", symlink_path, remote):
         logger.warning(
             f"{symlink_path} on {remote.hostname} is a real directory, not a symlink. "
-            f"You may end up filling up $HOME. Consider replacing it with a symlink to {resolved_path}."
+            f"You may end up filling up $HOME. Consider replacing it with a symlink to {results_path}."
         )
         return
 
     # Nothing at the path yet, create the symlink.
     result = await remote.run(
-        f"ln -s -T {resolved_path} {symlink_path}",
+        f"ln -s -T {results_path} {symlink_path}",
         warn=True,
         hide=True,
     )
     if result.returncode != 0:
         logger.warning(
-            f"Failed to create symlink {symlink_path} -> {resolved_path} on {remote.hostname}."
+            f"Failed to create symlink {symlink_path} -> {results_path} on {remote.hostname}: {result.stderr}\n"
         )
 
 

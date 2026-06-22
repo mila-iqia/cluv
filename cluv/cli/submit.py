@@ -554,7 +554,7 @@ def get_sbatch_command(
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     config_sbatch_args = sbatch_args_from_dict(cluster_config.sbatch_args)
     all_sbatch_args = config_sbatch_args + sbatch_args
-    sbatch_args_str = " ".join(shlex.quote(f) for f in all_sbatch_args)
+    sbatch_args_str = shlex.join(all_sbatch_args)
     program_args_str = shlex.join(program_args)
 
     return (

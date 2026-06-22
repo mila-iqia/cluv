@@ -25,7 +25,7 @@ class PartialClusterConfig:
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    sbatch_args: dict[str, str | bool] = field(default_factory=dict)
+    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
     """Per-cluster sbatch flags, overriding the global `sbatch_args`."""
 
     results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
@@ -64,7 +64,7 @@ class ClusterConfig:
     job_script_path: Path | None
     """Path to the job script to use by default on this cluster."""
 
-    sbatch_args: dict[str, str | bool] = field(default_factory=dict)
+    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
     """Merged sbatch flags (global defaults overridden by per-cluster values)."""
 
     def expandvars(self):
@@ -89,7 +89,7 @@ class CluvConfig(BaseModel):
     env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""
 
-    sbatch_args: dict[str, str | bool] = {}
+    sbatch_args: dict[str, str | int | float | bool] = {}
     """Global sbatch flags applied on all clusters.
 
     These are passed directly to `sbatch` and complement `env` (which sets `SBATCH_*` env vars).

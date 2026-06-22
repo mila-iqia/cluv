@@ -55,6 +55,7 @@ class Remote:
         display: bool = True,
         warn: bool = False,
         hide: Hide = False,
+        env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         if sys.platform == "win32":
             raise NotImplementedError(
@@ -65,6 +66,9 @@ class Remote:
                 "See https://learn.microsoft.com/en-us/windows/wsl/install for a guide on "
                 "setting up WSL."
             )
+        if env:
+            env_prefix = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
+            command = f"{env_prefix} {command}"
         ssh_command = (
             "ssh",
             *get_multiplexing_options_to_use(self.hostname),

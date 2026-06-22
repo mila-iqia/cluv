@@ -39,14 +39,14 @@ class PartialClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
-    ignore: bool = False
-    """Whether to ignore this cluster when running commands on all clusters."""
-
     job_script_path: str | None = None
     """Path to the job script to use by default on this cluster."""
 
     project_dir: str | None = None
     """Path where the project should be cloned on this cluster."""
+
+    ignore: bool = False
+    """Whether to ignore this cluster when running commands on all clusters."""
 
 
 @dataclass(frozen=True)
@@ -80,9 +80,6 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
 
     project_dir: PathType | None
     """Path where the project should be cloned on this cluster."""
-
-    job_script_path: PathType | None
-    """Path to the job script to use by default on this cluster."""
 
     ignore: bool
     """Whether to ignore this cluster when running commands on all clusters."""

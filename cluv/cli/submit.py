@@ -10,7 +10,6 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-import rich.panel
 import rich.syntax
 import rich.table
 import rich.text
@@ -20,7 +19,7 @@ from cluv.cache import Job, save_job
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
-from cluv.slurm import FAILED_JOB_STATES
+from cluv.slurm import FAILED_JOB_STATES, clean_job_state
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
@@ -344,8 +343,7 @@ async def wait_for_jobs_to_cancel(
     )
     for (cluster, job_id), job_state in zip(to_cancel, job_states):
         logger.info(f"Job {job_id} on cluster {cluster} state: {job_state}")
-        if job_state.startswith("CANCELLED by"):
-            job_state = "CANCELLED"  # just to avoid confusing users.
+        job_state = clean_job_state(job_state)
         cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
 
     to_cancel = [

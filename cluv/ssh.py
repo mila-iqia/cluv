@@ -3,6 +3,7 @@ import paramiko
 
 SSH_CONFIG_PATH = Path.home() / ".ssh" / "config"
 
+
 def get_ssh_hostnames() -> set[str]:
     if not SSH_CONFIG_PATH.exists():
         return set()

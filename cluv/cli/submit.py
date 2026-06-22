@@ -271,6 +271,7 @@ async def submit_first(
                 for cluster, job_id in to_cancel
             ]
         )
+        return None
 
     # TODO: Return the cluster and job id.
     assert first_running_job

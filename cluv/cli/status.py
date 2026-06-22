@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from rich import box
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -23,6 +22,7 @@ from cluv.slurm import (
     parse_savail,
     parse_sinfo_nodes,
 )
+from cluv.utils import console
 
 logger = logging.getLogger(__name__)
 __all__ = ["status"]
@@ -93,6 +93,8 @@ _MILA_CLUSTERS = {"mila"}
 
 async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, LiveJobInfo]:
     """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
+    start_time = datetime.now()
+
     ids_str = ",".join(str(jid) for jid in job_ids)
     cmd = (
         f"sacct -j {ids_str} --format=JobID,State,Start,Submit,Elapsed"
@@ -101,6 +103,7 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
     try:
         remote = await get_remote_without_2fa_prompt(cluster)
         if remote is None:
+            logger.info(f"No connection to [bold]{cluster}[/bold]; skipping jobs")
             return {}
         raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
     except Exception:
@@ -138,6 +141,11 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
             cluster=cluster, state=state.strip(), elapsed=elapsed_out, wait_time=wait_time
         )
 
+    logger.info(
+        f"Fetched {len(result)} [bold]{cluster}[/bold] jobs in "
+        f"{(datetime.now() - start_time).total_seconds()} seconds"
+    )
+
     return result
 
 
@@ -147,11 +155,14 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
     """
+    start_time = datetime.now()
+
     # Use get_remote_without_2fa_prompt directly so we never filter out the
     # "current" cluster the way login() does. A working socket for mila is
     # perfectly usable even when /home/mila is mounted locally.
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None:
+        logger.info(f"No connection to [bold]{cluster}[/bold]; returning empty status")
         return get_default_cluster_status(cluster)
 
     script = _REMOTE_SCRIPT_MILA if cluster in _MILA_CLUSTERS else _REMOTE_SCRIPT_DRAC
@@ -194,6 +205,11 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     storage = parse_diskusage_report(diskusage_out)
     if storage.home_quota == 0:
         storage = parse_disk_quota(disk_quota_out)
+
+    logger.info(
+        f"Fetched [bold]{cluster}[/bold] status in "
+        f"{(datetime.now() - start_time).total_seconds()} seconds"
+    )
 
     return ClusterStatus(
         name=cluster,
@@ -425,7 +441,6 @@ async def status(table: str) -> None:
     The "jobs" table shows one row per job from the cache, with live status info (state,
     elapsed time, wait time).
     """
-    console = Console()
     clusters = get_cluv_config().clusters_names
 
     console.print()

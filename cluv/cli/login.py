@@ -44,7 +44,7 @@ async def login(clusters: list[str]) -> list[Remote]:
     for cluster, remote in zip(clusters, connections):
         try:
             remotes.append(remote if remote is not None else await Remote.connect(cluster))
-        except BaseException as e:
+        except Exception as e:
             console.log(e, style="red")
 
     return remotes

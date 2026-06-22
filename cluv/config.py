@@ -38,7 +38,7 @@ class PartialClusterConfig:
 
     ignore: bool = False
     """Whether to ignore this cluster when running commands on all clusters."""
-    
+
     job_script_path: str | None = None
     """Path to the job script to use by default on this cluster."""
 
@@ -63,7 +63,7 @@ class ClusterConfig:
 
     ignore: bool
     """Whether to ignore this cluster when running commands on all clusters."""
-    
+
     job_script_path: Path | None
     """Path to the job script to use by default on this cluster."""
 

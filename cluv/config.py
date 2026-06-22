@@ -59,6 +59,9 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
     env: dict[str, str]
     """Environment variables to set when running Slurm commands on this cluster."""
 
+    sbatch_args: dict[str, str | int | float | bool]
+    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
+
     results_path: PathType
     """Path to the results directory for a specific cluster."""
 
@@ -81,9 +84,6 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
 
     ignore: bool
     """Whether to ignore this cluster when running commands on all clusters."""
-    
-    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
-    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
 
 
 class CluvConfig(BaseModel):
@@ -150,12 +150,12 @@ class CluvConfig(BaseModel):
         project_dir = cluster_config.project_dir or self.project_dir
         return ClusterConfig(
             env=self.env | cluster_config.env,
+            sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
             results_path=PurePosixPath(results_path),
             datasets_path=PurePosixPath(datasets_path) if datasets_path else None,
             project_dir=PurePosixPath(project_dir) if project_dir else None,
             job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
             ignore=cluster_config.ignore,
-            sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
         )
 
 
@@ -198,6 +198,7 @@ def current_cluster_config() -> ClusterConfig[Path] | None:
             config = dataclasses.replace(config, datasets_path=data_path)
     return ClusterConfig(
         env=config.env,
+        sbatch_args=config.sbatch_args,
         results_path=Path(os.path.expandvars(config.results_path)),
         datasets_path=(
             Path(os.path.expandvars(config.datasets_path)) if config.datasets_path else None

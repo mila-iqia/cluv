@@ -168,7 +168,7 @@ job_script_path = "scripts/mila_job.sh"
         )
         monkeypatch.chdir(tmp_path)
         cfg = load_cluv_config(p)
-        assert cfg.job_script_path == "scripts/job.sh"
+        assert cfg.job_script_path == Path("scripts/job.sh")
         assert cfg.get_cluster_config("mila").job_script_path == Path("scripts/mila_job.sh")
         assert cfg.get_cluster_config("rorqual").job_script_path == Path("scripts/job.sh")
 

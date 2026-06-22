@@ -352,7 +352,7 @@ def test_init(
     init()
 
     generated_config = load_cluv_config(project_dir / "pyproject.toml")
-    assert generated_config.results_path == DEFAULT_RESULTS_PATH
+    assert generated_config.results_path == Path(DEFAULT_RESULTS_PATH)
     assert (project_dir / "scripts").is_dir()
     assert (project_dir / "scripts" / "job.sh").is_file()
 

@@ -81,7 +81,7 @@ class TestCheckCluvConfig:
         config = load_cluv_config(p)
 
         assert config.clusters_names == ["mila"]
-        assert config.results_path == "results"
+        assert config.results_path == Path("results")
 
 
 class TestSymlinkCheck:

@@ -161,7 +161,11 @@ class CluvConfig(_CommonFields):
         project_dir = (
             cluster_config.project_dir
             or self.project_dir
-            or PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
+            or PurePosixPath(
+                find_pyproject().parent.relative_to(Path.home())
+                if find_pyproject().is_relative_to(Path.home())
+                else find_pyproject().parent
+            )
         )
         return ClusterConfig(
             env=self.env | cluster_config.env,

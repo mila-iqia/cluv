@@ -301,13 +301,13 @@ async def submit_first(
 
 def build_submit_command(
     cluster: str,
-    job_script: Path,
+    job_script: Path | None,
     sbatch_args: list[str],
     program_args: list[str],
 ) -> str:
     """Build the local `cluv submit` command line used to launch the job."""
     command_parts = ["cluv", "submit"]
-    command_parts.extend([cluster, str(job_script), *sbatch_args])
+    command_parts.extend([cluster, str(job_script or ""), *sbatch_args])
     if program_args:
         command_parts.extend(["--", *program_args])
     return shlex.join(command_parts)

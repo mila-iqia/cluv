@@ -282,11 +282,7 @@ async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
 
 
 def _is_github_pr_ref(github_ref: str) -> bool:
-    """The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
-
-    Unlike the PR head branch, this ref exists on the base repo even when the PR comes
-    from a fork, so the project clones on the clusters can fetch it from their remote.
-    """
+    """Checks if this value (from GITHUB_REF environment variable) is a GitHub PR ref."""
     return re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref) is not None
 
 
@@ -300,6 +296,7 @@ async def clone_project(
     - Worry about authentication later, just raise an error if need be for now.
     """
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+
     if project_state.checked_out_git_commit == current_git_commit:
         logger.info(
             f"Project is already at commit {current_git_commit} on {remote.hostname}. Skipping."
@@ -317,6 +314,7 @@ async def clone_project(
             ["git", "config", "--get", f"branch.{current_git_branch}.remote"],
             text=True,
         ).strip()
+        git_remote_name = shlex.quote(git_remote_name)
 
     github_repo_url = subprocess.getoutput(
         f"git config --get remote.{git_remote_name}.url"
@@ -354,6 +352,11 @@ async def clone_project(
     # Detached head (not on a branch), for example in a CI run on GitHub (pull request/push/release)
 
     github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
+    # Quote in case there are spaces or other weird characters perhaps embedded in the branch name,
+    # to avoid command injection vulnerabilities. We also check for some weird characters in the
+    # branch name later on, but this is just in case.
+    github_head_ref = shlex.quote(github_head_ref)
+
     # From the GitHub docs:
     # https://docs.github.com/en/actions/reference/workflows-and-actions/variables
     #     GITHUB_HEAD_REF: "The head ref or source branch of the pull request in a workflow run.
@@ -362,11 +365,8 @@ async def clone_project(
 
     if not github_head_ref:
         # Push on master, for example after merging a PR.
-        # TODO: What is 'safe' about this exactly? And do we really need to be 'safe' when checking
-        # out a git commit?
-        safe_current_git_commit = shlex.quote(current_git_commit)
         await remote.run(
-            f"git -C {project_path} checkout --detach {safe_current_git_commit}",
+            f"git -C {project_path} checkout --detach {current_git_commit}",
             hide=False,
             env=gitenv,
         )
@@ -380,11 +380,8 @@ async def clone_project(
     ):
         raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
 
-    # Quote in case there are spaces or other weird characters perhaps?
-    github_head_ref = shlex.quote(github_head_ref)
-    git_remote_name = shlex.quote(git_remote_name)
-
     github_ref = os.environ.get("GITHUB_REF", "").strip()
+    github_ref = shlex.quote(github_ref)
     """The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
 
     Unlike the PR head branch, this ref exists on the base repo even when the PR comes
@@ -392,10 +389,10 @@ async def clone_project(
 
     GitHub docs: "The fully-formed ref of the branch or tag that triggered the workflow run."
     """
+
     if _is_github_pr_ref(github_ref):
         # The head branch of a PR from a fork doesn't exist on the base repo, so
         # fetch the PR ref instead and create the branch from FETCH_HEAD.
-        github_ref = shlex.quote(github_ref)
         await remote.run(
             f"git -C {project_path} fetch {git_remote_name} {github_ref}",
             hide=False,
@@ -409,7 +406,7 @@ async def clone_project(
         project_state.checked_out_git_commit = current_git_commit
         return
 
-    # TODO: When does this case actually happen?! Quite confused at this point!
+    # TODO: When does this case actually happen? Quite confused at this point!
     # TODO: Check code coverage to find out if/when this actually happens.
 
     safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")

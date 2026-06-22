@@ -16,7 +16,6 @@ import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, save_job
-from typing import Callable
 
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
@@ -448,9 +447,7 @@ def create_submit_commit(submit_command: str) -> None:
         raise
 
 
-def ensure_clean_git_state(
-    autocommit: bool = False, submit_command: str | None = None
-) -> str:
+def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None = None) -> str:
     """
     Check git is clean locally and return the current commit hash.
     """

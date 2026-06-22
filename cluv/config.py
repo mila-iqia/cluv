@@ -49,12 +49,14 @@ class PartialClusterConfig:
     """Path where the project should be cloned on this cluster."""
 
 
-# PathType = typing.TypeVar("PathType", bound=Path | PurePosixPath, default=PurePosixPath)
-
-
 @dataclass(frozen=True)
 class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
-    """Per-cluster configuration options."""
+    """Per-cluster configuration options.
+
+    The path fields in this class are by default 'pure' posix paths, to make it explicit that they
+    can't be used on the local filesystem, and to avoid errors like trying to call .open/.mkdir/etc.
+    On the current cluster, when calling `current_cluster_config`, they are actual `Path`s.
+    """
 
     env: dict[str, str]
     """Environment variables to set when running Slurm commands on this cluster."""

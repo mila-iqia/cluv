@@ -4,6 +4,8 @@ All tests are pure (no I/O, no SSH). Fixture strings are taken from real
 cluster output captured during development.
 """
 
+from datetime import timedelta
+
 import pytest
 
 from cluv.slurm import (
@@ -12,6 +14,7 @@ from cluv.slurm import (
     parse_partition_stats,
     parse_savail,
     parse_sinfo_nodes,
+    parse_slurm_time,
 )
 
 pytestmark = pytest.mark.timeout(10)
@@ -409,3 +412,13 @@ class TestParseDiskusageReport:
         assert storage.home_quota == 0.0
         assert storage.scratch_used == 0.0
         assert storage.scratch_quota == 0.0
+
+
+class TestParseTime:
+    def test_parse_slurm_time(self) -> None:
+        td = parse_slurm_time("12:28:45")
+        assert td == timedelta(hours=12, minutes=28, seconds=45)
+
+    def test_parse_slurm_time_with_day(self) -> None:
+        td = parse_slurm_time("07-12:28:45")
+        assert td == timedelta(days=7, hours=12, minutes=28, seconds=45)

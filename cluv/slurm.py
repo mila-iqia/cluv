@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
@@ -19,6 +20,31 @@ class StorageStats:
     home_quota: float
     scratch_used: float
     scratch_quota: float
+
+
+def clean_job_state(state: str) -> str:
+    if "CANCELLED by" in state:
+        return "CANCELLED"
+    return state
+
+
+def parse_timestamp(timestamp: str) -> datetime:
+    return datetime.strptime(timestamp.strip(), "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+
+
+def parse_slurm_time(time: str) -> timedelta:
+    """Parse a time value from the sbatch format to a timedelta object."""
+    # The SLURM time format is days-hours:minutes:seconds, with the days part optional.
+    match = re.match(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", time.strip())
+    if not match:
+        raise ValueError(f"Could not parse time value: {time}")
+
+    return timedelta(
+        days=int(match.group(1) or 0),
+        hours=int(match.group(2)),
+        minutes=int(match.group(3)),
+        seconds=int(match.group(4)),
+    )
 
 
 # ---------------------------------------------------------------------------

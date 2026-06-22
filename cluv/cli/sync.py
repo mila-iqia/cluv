@@ -264,6 +264,18 @@ async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
     project_state.uv_version = uv_version_here
 
 
+def _github_pr_ref() -> str | None:
+    """The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
+
+    Unlike the PR head branch, this ref exists on the base repo even when the PR comes
+    from a fork, so the project clones on the clusters can fetch it from their remote.
+    """
+    github_ref = os.environ.get("GITHUB_REF", "").strip()
+    if re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref):
+        return github_ref
+    return None
+
+
 async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
     """Setup the project repo on all the remote clusters.
 
@@ -321,10 +333,11 @@ async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
             display=False,
         )
     ).returncode == 0
+    gitenv = {"GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new"}
     if not _is_cloned_on_cluster:
         logger.info(f"Project isn't cloned yet on {remote.hostname}.")
-        await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True)
-    await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True)
+        await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True, env=gitenv)
+    await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True, env=gitenv)
     if detached_head:
         github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
         if github_head_ref:
@@ -334,14 +347,30 @@ async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
             ):
                 raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
             safe_head_ref = shlex.quote(github_head_ref)
-            safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
             safe_remote_name = shlex.quote(git_remote_name)
+            github_pr_ref = _github_pr_ref()
+            if github_pr_ref:
+                # The head branch of a PR from a fork doesn't exist on the base repo, so
+                # fetch the PR ref instead and create the branch from FETCH_HEAD.
+                safe_pr_ref = shlex.quote(github_pr_ref)
+                await remote.run(
+                    f"git -C {git_root_path} fetch {safe_remote_name} {safe_pr_ref}",
+                    hide=False,
+                )
+                await remote.run(
+                    f"git -C {git_root_path} checkout -B {safe_head_ref} FETCH_HEAD",
+                    hide=False,
+                )
+                return
+            safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
             await remote.run(
                 f"git -C {git_root_path} checkout -B {safe_head_ref} {safe_tracking_ref}",
                 hide=False,
             )
             await remote.run(
-                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}", hide=False
+                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}",
+                hide=False,
+                env=gitenv,
             )
             return
 
@@ -350,7 +379,7 @@ async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
         )
     else:
         await remote.run(f"git -C {git_root_path} checkout {safe_current_git_branch}", hide=False)
-        await remote.run(f"git -C {git_root_path} pull", hide=False)
+        await remote.run(f"git -C {git_root_path} pull", hide=False, env=gitenv)
 
     project_state.checked_out_git_commit = current_git_commit
 

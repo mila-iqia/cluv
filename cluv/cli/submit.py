@@ -10,17 +10,17 @@ import subprocess
 import sys
 from pathlib import Path, PurePosixPath
 
-import rich.panel
 import rich.syntax
 import rich.table
 import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, save_job
+
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
-from cluv.slurm import FAILED_JOB_STATES
+from cluv.slurm import FAILED_JOB_STATES, clean_job_state
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,7 @@ async def submit(
     job_script: Path | None,
     sbatch_args: list[str],
     program_args: list[str],
+    autocommit: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
 
@@ -86,6 +87,7 @@ async def submit(
             When omitted, uses the configured default for the target cluster.
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
+        autocommit: If True, automatically create a local commit with tracked changes before submitting.
 
     Returns:
         The job ID of the submitted job or None if the sbatch command fails.
@@ -102,7 +104,10 @@ async def submit(
     ```
     """
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
-    git_commit = ensure_clean_git_state()
+    git_commit = ensure_clean_git_state(
+        autocommit=autocommit,
+        submit_command=build_submit_command(cluster, job_script, sbatch_args, program_args),
+    )
 
     here = current_cluster()
 
@@ -380,8 +385,7 @@ async def wait_for_jobs_to_cancel(
     )
     for (cluster, job_id), job_state in zip(to_cancel, job_states):
         logger.info(f"Job {job_id} on cluster {cluster} state: {job_state}")
-        if job_state.startswith("CANCELLED by"):
-            job_state = "CANCELLED"  # just to avoid confusing users.
+        job_state = clean_job_state(job_state)
         cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
 
     to_cancel = [
@@ -439,17 +443,62 @@ async def wait_for_jobs_to_cancel(
     )
 
 
-def ensure_clean_git_state() -> str:
+def build_submit_command(
+    cluster: str,
+    job_script: Path,
+    sbatch_args: list[str],
+    program_args: list[str],
+) -> str:
+    """Build the local `cluv submit` command line used to launch the job."""
+    command_parts = ["cluv", "submit"]
+    command_parts.extend([cluster, str(job_script), *sbatch_args])
+    if program_args:
+        command_parts.extend(["--", *program_args])
+    return shlex.join(command_parts)
+
+
+def create_submit_commit(submit_command: str) -> None:
+    """Create a commit with tracked changes and include the launched job command in the body."""
+    try:
+        subprocess.run(["git", "add", "-u"], check=True, capture_output=True, text=True)
+        subprocess.run(
+            [
+                "git",
+                "commit",
+                "-m",
+                "cluv submit: auto-commit tracked changes",
+                "-m",
+                f"Launched job command:\n\n{submit_command}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as err:
+        error_text = (err.stderr or err.stdout or str(err)).strip()
+        console.print(
+            "[red]Failed to create automatic submit commit before job submission:[/red] "
+            f"{error_text}"
+        )
+        raise
+
+
+def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None = None) -> str:
     """
     Check git is clean locally and return the current commit hash.
     """
     git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
     dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
-    if dirty_lines and not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
-        console.print(
-            "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
-        )
-        sys.exit(1)
+    if dirty_lines:
+        if autocommit:
+            if submit_command is None:
+                raise ValueError("submit_command is required when autocommit=True")
+            create_submit_commit(submit_command)
+        elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
+            console.print(
+                "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
+            )
+            sys.exit(1)
 
     # In GitHub Actions PR jobs we can be on a detached merge commit that doesn't exist on
     # the synced remote checkout. Prefer the branch tip commit in that case.

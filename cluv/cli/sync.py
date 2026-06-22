@@ -281,16 +281,13 @@ async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
     project_state.uv_version = uv_version_here
 
 
-def _github_pr_ref() -> str | None:
+def _is_github_pr_ref(github_ref: str) -> bool:
     """The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
 
     Unlike the PR head branch, this ref exists on the base repo even when the PR comes
     from a fork, so the project clones on the clusters can fetch it from their remote.
     """
-    github_ref = os.environ.get("GITHUB_REF", "").strip()
-    if re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref):
-        return github_ref
-    return None
+    return re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref) is not None
 
 
 async def clone_project(
@@ -395,7 +392,7 @@ async def clone_project(
 
     GitHub docs: "The fully-formed ref of the branch or tag that triggered the workflow run."
     """
-    if re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref):
+    if _is_github_pr_ref(github_ref):
         # The head branch of a PR from a fork doesn't exist on the base repo, so
         # fetch the PR ref instead and create the branch from FETCH_HEAD.
         github_ref = shlex.quote(github_ref)

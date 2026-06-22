@@ -192,5 +192,5 @@ def current_cluster_config() -> ClusterConfig[Path] | None:
         job_script_path=(
             Path(os.path.expandvars(config.job_script_path)) if config.job_script_path else None
         ),
-        ignore=config.ignore
+        ignore=config.ignore,
     )

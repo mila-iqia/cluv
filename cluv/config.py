@@ -25,6 +25,9 @@ class PartialClusterConfig:
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
+    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
+    """Per-cluster sbatch flags, overriding the global `sbatch_args`."""
+
     results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
     """Path to the results directory for a specific cluster."""
 
@@ -67,9 +70,13 @@ class ClusterConfig:
     job_script_path: Path | None
     """Path to the job script to use by default on this cluster."""
 
+    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
+    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
+
     def expandvars(self):
         return ClusterConfig(
             env=self.env,
+            sbatch_args=self.sbatch_args,
             results_path=Path(os.path.expandvars(str(self.results_path))),
             datasets_path=(
                 Path(os.path.expandvars(str(self.datasets_path))) if self.datasets_path else None
@@ -88,6 +95,13 @@ class CluvConfig(BaseModel):
 
     env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""
+
+    sbatch_args: dict[str, str | int | float | bool] = {}
+    """Global sbatch flags applied on all clusters.
+
+    These are passed directly to `sbatch` and complement `env` (which sets `SBATCH_*` env vars).
+    See `[tool.cluv.clusters.<name>.sbatch_args]` for per-cluster overrides.
+    """
 
     results_path: str
     """Default path to the results directory for all clusters (may contain env vars like $SCRATCH)."""
@@ -126,13 +140,13 @@ class CluvConfig(BaseModel):
 
         The environment variables as part of paths will *not* be resolved.
         """
-        cluv_config = get_cluv_config()
-        cluster_config = cluv_config.clusters[cluster]
-        results_path = cluster_config.results_path or cluv_config.results_path
-        datasets_path = cluster_config.datasets_path or cluv_config.datasets_path
-        job_script_path = cluster_config.job_script_path or cluv_config.job_script_path
+        cluster_config = self.clusters[cluster]
+        results_path = cluster_config.results_path or self.results_path
+        datasets_path = cluster_config.datasets_path or self.datasets_path
+        job_script_path = cluster_config.job_script_path or self.job_script_path
         return ClusterConfig(
-            env=cluv_config.env | cluster_config.env,
+            env=self.env | cluster_config.env,
+            sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
             results_path=Path(results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
             ignore=cluster_config.ignore,

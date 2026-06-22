@@ -368,7 +368,9 @@ async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
                 hide=False,
             )
             await remote.run(
-                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}", hide=False, env=gitenv
+                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}",
+                hide=False,
+                env=gitenv,
             )
             return
 

@@ -282,7 +282,7 @@ async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
 
 
 def _is_github_pr_ref(github_ref: str) -> bool:
-    """Checks if this value (from GITHUB_REF environment variable) is a GitHub PR ref."""
+    """Checks if this value (from the GITHUB_REF environment variable) is a GitHub PR ref."""
     return re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref) is not None
 
 
@@ -406,8 +406,9 @@ async def clone_project(
         project_state.checked_out_git_commit = current_git_commit
         return
 
-    # TODO: When does this case actually happen? Quite confused at this point!
-    # TODO: Check code coverage to find out if/when this actually happens.
+    # GITHUB_REF was not a PR ref, so it could be a release or a tag? Or a branch that exists on the
+    # base repo?
+    # TODO: Use code coverage to check if/when we hit this case.
 
     safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
     await remote.run(

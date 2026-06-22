@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from milatools.cli.init_command import DRAC_CLUSTERS
 
-from cluv.config import ClusterConfig, PartialClusterConfig, get_cluv_config, load_cluv_config
+from cluv.config import ClusterConfig, ClusterConfigSchema, get_cluv_config, load_cluv_config
 
 
 def write_pyproject(tmp_path: Path, content: str) -> Path:
@@ -50,7 +50,7 @@ results_path = "logs"
         )
         cfg = load_cluv_config(p)
         assert "mila" in cfg.clusters
-        assert isinstance(cfg.clusters["mila"], PartialClusterConfig)
+        assert isinstance(cfg.clusters["mila"], ClusterConfigSchema)
         assert cfg.clusters["mila"].env == {}
         assert isinstance(cfg.get_cluster_config("mila"), ClusterConfig)
 

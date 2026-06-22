@@ -36,6 +36,9 @@ class PartialClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
+    ignore: bool = False
+    """Whether to ignore this cluster when running commands on all clusters."""
+
     job_script_path: str | None = None
     """Path to the job script to use by default on this cluster."""
 
@@ -69,6 +72,12 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
 
     project_dir: PathType | None
     """Path where the project should be cloned on this cluster."""
+
+    job_script_path: PathType | None
+    """Path to the job script to use by default on this cluster."""
+
+    ignore: bool
+    """Whether to ignore this cluster when running commands on all clusters."""
 
 
 class CluvConfig(BaseModel):
@@ -110,7 +119,7 @@ class CluvConfig(BaseModel):
 
     @property
     def clusters_names(self) -> list[str]:
-        return list(self.clusters.keys())
+        return [name for name, config in self.clusters.items() if not config.ignore]
 
     def get_cluster_config(self, cluster: str) -> ClusterConfig:
         """Returns the cluster config for a specific cluster.
@@ -132,6 +141,7 @@ class CluvConfig(BaseModel):
             datasets_path=PurePosixPath(datasets_path) if datasets_path else None,
             project_dir=PurePosixPath(project_dir) if project_dir else None,
             job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
+            ignore=cluster_config.ignore,
         )
 
 
@@ -159,11 +169,6 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     return CluvConfig.model_validate(cluv, extra="forbid")
 
 
-def get_cluster_choices() -> list[str]:
-    """Return configured clusters or the defaults when config is missing/invalid."""
-    return get_cluv_config().clusters_names
-
-
 def current_cluster_config() -> ClusterConfig[Path] | None:
     """Returns the `ClusterConfig` of the current cluster, or None if not currently on a cluster."""
     cluster = current_cluster()
@@ -187,4 +192,5 @@ def current_cluster_config() -> ClusterConfig[Path] | None:
         job_script_path=(
             Path(os.path.expandvars(config.job_script_path)) if config.job_script_path else None
         ),
+        ignore=config.ignore
     )

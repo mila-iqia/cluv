@@ -566,7 +566,7 @@ async def test_submit_first_considers_current_cluster(
     real_sleep = asyncio.sleep
     # Speed up the test by patching sleep
     # (we're not doing real sacct / scancel / sbatch.)
-    monkeypatch.setattr(asyncio, "sleep", lambda x: real_sleep(0.1 * x))
+    monkeypatch.setattr(asyncio, "sleep", lambda _: real_sleep(0))
 
     async def fake_run(
         program_and_args: tuple[str, ...],

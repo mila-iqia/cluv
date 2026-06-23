@@ -128,8 +128,17 @@ async def test_login(remote: Remote):
 
 
 @pytest_asyncio.fixture(scope="session")
-async def cluster_status(cluster: str) -> ClusterStatus:
-    return await get_cluster_status(cluster)
+async def _all_cluster_statuses() -> dict[str, ClusterStatus]:
+    """Fetch all supported cluster statuses in parallel (one SSH round-trip each)."""
+    results = await asyncio.gather(*(get_cluster_status(c) for c in STATUS_SUPPORTED_CLUSTERS))
+    return dict(zip(STATUS_SUPPORTED_CLUSTERS, results))
+
+
+@pytest_asyncio.fixture(scope="session")
+async def cluster_status(cluster: str, _all_cluster_statuses: dict) -> ClusterStatus:
+    if cluster not in STATUS_SUPPORTED_CLUSTERS:
+        pytest.skip(f"Status not supported for cluster {cluster}.")
+    return _all_cluster_statuses[cluster]
 
 
 @pytest.mark.slow
@@ -187,7 +196,7 @@ async def test_status_storage(cluster_status: ClusterStatus):
     assert cluster_status.storage.scratch_used >= 0
 
 
-TEST_SUBMIT_TIMEOUT_SECONDS = 180
+TEST_SUBMIT_TIMEOUT_SECONDS = 30
 
 
 @pytest.mark.parametrize(
@@ -251,7 +260,7 @@ async def test_submit(remote: Remote, fake_scratch: Path):
                     f"Job {job_id} is in state {job_state}, waiting for it to reach a terminal state..."
                 )
                 await asyncio.sleep(wait_time)
-                wait_time = min(wait_time * 2, 60)  # Don't wait more than 30s between polls
+                wait_time = min(wait_time * 2, 30)  # Don't wait more than 30s between polls
 
         # Wait until the job exits, then verify output content after syncing logs back locally.
         if job_state == "COMPLETED":

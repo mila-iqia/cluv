@@ -97,7 +97,7 @@ SINFO_LIST_GPUS = 'sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | gre
 
 # Script for DRAC clusters (partition-stats + diskusage_report, no savail/disk-quota)
 _REMOTE_SCRIPT_DRAC = f"""
-partition-stats 2>/dev/null; echo {_SEP}
+timeout 5 partition-stats 2>/dev/null; echo {_SEP}
 {SINFO_LIST_GPUS}; echo {_SEP}
 timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
 echo {_SEP}

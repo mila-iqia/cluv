@@ -1,4 +1,4 @@
-# Configuring job submission with `cluv submit`
+# Configuring job submission
 
 `cluv submit` reads your `pyproject.toml` to build the final `sbatch` command. This guide explains
 which config fields are used, how global and per-cluster values are merged, and what is injected

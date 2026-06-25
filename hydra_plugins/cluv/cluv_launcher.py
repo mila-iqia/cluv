@@ -80,12 +80,14 @@ class CluvLauncher(Launcher):
         signal_delay_s: int = 90,
         srun_args: list[str] | None = None,
         stderr_to_stdout: bool = True,  # changed!
-        time: str | int = 5,
+        time: str | int = 5,  # sbatch native way of passing it.
+        timeout_min: str | int = 5,  # submitit..
         use_srun: bool = True,
         wckey: str = "submitit",
         additional_parameters: dict | None = None,
         tasks_per_node: int | None = None,
         mem_gb: int | None = None,
+        # **kwargs,
     ) -> None:
         super().__init__()
         self.cluster = cluster
@@ -137,6 +139,7 @@ class CluvLauncher(Launcher):
             use_srun=use_srun,
             wckey=wckey,
             additional_parameters=additional_parameters,
+            timeout_min=timeout_min,
         )
         self.params = {}
         for k, v in params.items():

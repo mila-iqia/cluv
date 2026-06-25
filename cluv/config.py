@@ -157,8 +157,8 @@ class CluvConfig(BaseModel):
             sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
             results_path=Path(results_path),
             datasets_path=Path(datasets_path) if datasets_path else None,
-            ignore=cluster_config.ignore,
             job_script_path=Path(job_script_path) if job_script_path else None,
+            ignore=cluster_config.ignore,
         )
 
 

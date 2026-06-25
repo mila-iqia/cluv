@@ -295,6 +295,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "pytest-regressions" },
     { name = "pytest-skip-slow" },
     { name = "pytest-timeout" },
     { name = "ruff" },
@@ -326,6 +327,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
+    { name = "pytest-regressions", specifier = ">=2.11.0" },
     { name = "pytest-skip-slow", specifier = ">=0.0.5" },
     { name = "pytest-timeout", specifier = ">=2.3.1" },
     { name = "ruff" },
@@ -647,13 +649,9 @@ name = "hydra-example"
 version = "0.1.0"
 source = { virtual = "examples/hydra_example" }
 dependencies = [
-    { name = "cluv" },
+    { name = "cluv", extra = ["hydra"] },
     { name = "hydra-colorlog" },
-    { name = "hydra-core" },
-    { name = "hydra-submitit-launcher" },
-    { name = "hydra-zen" },
     { name = "numpy" },
-    { name = "remote-slurm-executor" },
     { name = "torch" },
     { name = "torchvision" },
     { name = "wandb" },
@@ -661,13 +659,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cluv", editable = "." },
+    { name = "cluv", extras = ["dev", "hydra"], editable = "." },
     { name = "hydra-colorlog", specifier = ">=1.2.0" },
-    { name = "hydra-core", specifier = ">=1.3.2" },
-    { name = "hydra-submitit-launcher", specifier = ">=1.2.0" },
-    { name = "hydra-zen", specifier = ">=0.16.0" },
     { name = "numpy", specifier = ">=2.4.4" },
-    { name = "remote-slurm-executor", git = "https://www.github.com/lebrice/remote-slurm-executor" },
     { name = "torch", specifier = ">=2.7.0,<2.11.0" },
     { name = "torchvision", specifier = ">=0.25.0" },
     { name = "wandb", specifier = ">=0.27.0" },
@@ -1506,6 +1500,32 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b1/51/a849f96e117386044471c8ec2bd6cfebacda285da9525c9106aeb28da671/pytest_cov-7.1.0.tar.gz", hash = "sha256:30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2", size = 55592, upload-time = "2026-03-21T20:11:16.284Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/7a/d968e294073affff457b041c2be9868a40c1c71f4a35fcc1e45e5493067b/pytest_cov-7.1.0-py3-none-any.whl", hash = "sha256:a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678", size = 22876, upload-time = "2026-03-21T20:11:14.438Z" },
+]
+
+[[package]]
+name = "pytest-datadir"
+version = "1.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b4/46/db060b291999ca048edd06d6fa9ee95945d088edc38b1172c59eeb46ec45/pytest_datadir-1.8.0.tar.gz", hash = "sha256:7a15faed76cebe87cc91941dd1920a9a38eba56a09c11e9ddf1434d28a0f78eb", size = 11848, upload-time = "2025-07-30T13:52:12.518Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8f/7a/33895863aec26ac3bb5068a73583f935680d6ab6af2a9567d409430c3ee1/pytest_datadir-1.8.0-py3-none-any.whl", hash = "sha256:5c677bc097d907ac71ca418109adc3abe34cf0bddfe6cf78aecfbabd96a15cf0", size = 6512, upload-time = "2025-07-30T13:52:11.525Z" },
+]
+
+[[package]]
+name = "pytest-regressions"
+version = "2.11.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "pytest-datadir" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ba/0f/1d6b8cc851596be52c401af53fd0d844e72921b0b11866b88995673cd320/pytest_regressions-2.11.0.tar.gz", hash = "sha256:d4a86092f979eb25d2403c51b2b61039781c4c7c7a364a56b9fa838872a650f7", size = 117474, upload-time = "2026-05-25T12:09:01.796Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/97/61/fe772eda66bb8e2ee72da2937382aa4f803ca1e41092ca8d59953e96262c/pytest_regressions-2.11.0-py3-none-any.whl", hash = "sha256:fcb2bbcfb2fda256624d434c88cb1e4003667b7e078ee4084887cf839bbdf831", size = 25556, upload-time = "2026-05-25T12:09:00.292Z" },
 ]
 
 [[package]]

@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Job:
+    """A Job on a Slurm cluster. This object is returned by `cluv submit`."""
+
     job_id: int
     cluster: str
     job_script: str

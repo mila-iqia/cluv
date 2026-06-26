@@ -9,6 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, ClassVar
 
 import hydra_zen
+import omegaconf
 import rich
 import rich.box
 import rich.table
@@ -22,10 +23,30 @@ from submitit.helpers import _default_custom_logging
 from cluv.cli.submit import submit
 from cluv.cli.sync import fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
-from cluv.job import JobInfo, RunInfo, get_results_path, get_run_id
+from cluv.job import JobInfo, RunInfo, current_run_info, get_results_path, get_run_id
 from cluv.remote import Remote
 
 logger = logging.getLogger(__name__)
+
+current_job: RunInfo | None = None
+
+
+def cluv_resolver(attr: str, default: str | None = None) -> str | None:
+    """OmegaConf resolver to access Cluv job info in Hydra configs.
+
+    Usage in Hydra config: ${cluv:attr, default} where `attr` is an attribute of the current job (e.g. "results_path")
+    and `default` is an optional default value to return if the attribute is not set in the current job.
+    """
+    global current_job
+    if current_job is None:
+        current_job = current_run_info()
+
+    if default is not None:
+        return getattr(current_job, attr, default)
+    return getattr(current_job, attr)
+
+
+omegaconf.OmegaConf.register_new_resolver("cluv", cluv_resolver)
 
 
 # Made this a dataclass to avoid having an ugly default repr, but it causes issues with

@@ -3,12 +3,13 @@
 This is a simplified job script, used to test the syncing of the 'dataset' across clusters.
 """
 
+import dataclasses
 import functools
 import os
 import re
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 
 import cluv
 import cluv.config
@@ -61,6 +62,23 @@ class RunInfo:
         if not cluster_info:
             return None
         return cluster_info.datasets_path
+
+    @property
+    def cluster_config(self) -> cluv.config.ClusterConfig:
+        # cluster_name = cluv.utils.current_cluster()
+        cluv_config = cluv.config.get_cluv_config()
+        cluster_config = cluv_config.get_cluster_config(self.cluster)
+
+        if current_cluster() == self.cluster:
+            return dataclasses.replace(
+                cluster_config,
+                **{
+                    f.name: Path(os.path.expandvars(v))
+                    for f in dataclasses.fields(cluster_config)
+                    if isinstance(v := getattr(cluster_config, f.name), PurePath)
+                },
+            )
+        return cluv.config.get_cluv_config().get_cluster_config(self.cluster)
 
 
 @dataclass(frozen=True)
@@ -118,14 +136,14 @@ def current_run_info() -> RunInfo | None:
     # IDEA: maybe load the cluv config and set the checkpoint_dir
     # from cluv.config import load_cluv_config
     assert cluster, "Example must be run on a cluster."
-    config = cluv.config.current_cluster_config()
-    assert config, "Example must be run on a cluster."
-    assert config.results_path
-    assert config.datasets_path
+    cluster_config = cluv.config.current_cluster_config()
+    assert cluster_config, "Example must be run on a cluster."
+    assert cluster_config.results_path
+    assert cluster_config.datasets_path
     return RunInfo(
         run_id=run_id,
         cluster=cluster,
-        results_path=config.results_path / run_id,
+        results_path=cluster_config.results_path / run_id,
         command=[],
     )
 

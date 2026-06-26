@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import hydra
-import omegaconf
+import hydra.core.hydra_config
 import rich
 import torch
 import tqdm
@@ -19,27 +19,12 @@ import wandb
 from omegaconf import DictConfig
 from torchvision.datasets import CIFAR10
 
-from cluv.job import RunInfo, current_run_info, get_datasets_path
+import cluv
+import cluv.config
+import cluv.job
+import cluv.utils
 
-current_job: RunInfo | None = None
-
-
-def cluv_resolver(attr: str, default: str | None = None) -> str | None:
-    """OmegaConf resolver to access Cluv job info in Hydra configs.
-
-    Usage in Hydra config: ${cluv:attr, default} where `attr` is an attribute of the current job (e.g. "results_path")
-    and `default` is an optional default value to return if the attribute is not set in the current job.
-    """
-    global current_job
-    if current_job is None:
-        current_job = current_run_info()
-
-    if default is not None:
-        return getattr(current_job, attr, default)
-    return getattr(current_job, attr)
-
-
-omegaconf.OmegaConf.register_new_resolver("cluv", cluv_resolver)
+# from cluv.job import current_run_info, get_datasets_path
 
 # OmegaConf.register_new_resolver("eval", eval)
 logger = logging.getLogger(__name__)
@@ -64,16 +49,30 @@ def main(config_dict: DictConfig):
     config = Config(**hydra.utils.instantiate(config_dict))
     rich.print(config)
 
-    job_info = current_run_info()
+    # Use the 'usual' way to get the Hydra output dir:
+    output_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
+    print(f"Output directory: {output_dir}")
 
-    datasets_path = get_datasets_path()
-    assert datasets_path, "A datasets_path must be set in the config for this example to work."
+    # job_info = cluv.job.current_run_info()
+    run_info = cluv.job.current_run_info()
+
+    if run_info:
+        # Running on a Slurm cluster. Use the setting from the cluster config.
+        print(f"Running on cluster {run_info.cluster}!")
+        datasets_path = run_info.cluster_config.datasets_path
+    else:
+        # Not running on a Slurm cluster. Use the setting from the cluv config.
+        datasets_path = cluv.config.get_cluv_config().datasets_path
+    if not datasets_path:
+        raise ValueError(
+            "A datasets_path must be set either in the config for this example to work."
+        )
+
     datasets_path = Path(os.path.expandvars(datasets_path))
 
     run_id = None
     run_dir = None
-    if job_info:  # if we are in a Slurm job:
-        print(f"Running on cluster {job_info.cluster} with job_id={job_info.run_id}")
+    if job_info := cluv.job.current_run_info():  # if we are in a Slurm job:
         run_id = job_info.run_id
         run_dir = Path(os.path.expandvars(job_info.results_path))
 
@@ -99,7 +98,6 @@ def main(config_dict: DictConfig):
     torch.manual_seed(config.seed)
 
     # Test that we can load a dataset from the dataset_path (that was synced by Cluv)
-    assert datasets_path, "This example requires a datasets_path to be set."
     dataset = CIFAR10(datasets_path, download=False)
     print(dataset)
 

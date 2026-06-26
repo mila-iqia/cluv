@@ -2,7 +2,15 @@
 defaults:
   - override /hydra/launcher: cluv_launcher
   # - override /hydra/sweeper: cluv_sweeper
+
 hydra:
+  run:
+    # output directory, generated dynamically on each run
+    dir: ${cluv:results_path,logs/${hydra.job.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}}
+  sweep:
+    dir: ${cluv:results_path,logs/${hydra.job.name}/${now:%Y-%m-%d}/${now:%H-%M-%S}}
+    subdir: ${hydra.job.num}
+
   launcher:
     # NEW ARGUMENTS for cluv:
     cluster: mila

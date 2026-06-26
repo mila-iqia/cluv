@@ -1,7 +1,6 @@
 # @package _global_
 defaults:
   - override /hydra/launcher: cluv_launcher
-  # - override /hydra/sweeper: cluv_sweeper
 
 hydra:
   mode: MULTIRUN

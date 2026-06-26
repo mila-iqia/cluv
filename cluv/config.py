@@ -153,15 +153,15 @@ class CluvConfig(BaseModel):
         datasets_path = cluster_config.datasets_path or self.datasets_path
         job_script_path = cluster_config.job_script_path or self.job_script_path
 
-        # Idea: Use the second portion of data_source when on the source cluster, effectively
-        # ignoring the datasets_path setting on that cluster.
-        # This might make sense to avoid duplicating data, but we should document it somewhere.
-        if self.data_source:
-            source_cluster, _, data_path = self.data_source.partition(":")
-            if cluster == source_cluster:
-                # use the dataset path from the data_source setting as the datasets_path.
-                # TODO: maybe log a warning in this case?
-                datasets_path = Path(data_path)
+        # # Idea: Use the second portion of data_source when on the source cluster, effectively
+        # # ignoring the datasets_path setting on that cluster.
+        # # This might make sense to avoid duplicating data, but we should document it somewhere.
+        # if self.data_source:
+        #     source_cluster, _, data_path = self.data_source.partition(":")
+        #     if cluster == source_cluster:
+        #         # use the dataset path from the data_source setting as the datasets_path.
+        #         # TODO: maybe log a warning in this case?
+        #         datasets_path = Path(data_path)
 
         return ClusterConfig(
             env=self.env | cluster_config.env,

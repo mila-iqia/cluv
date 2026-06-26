@@ -46,7 +46,7 @@ def cluv_resolver(attr: str, default: str | None = None) -> str | None:
     return getattr(current_job, attr)
 
 
-omegaconf.OmegaConf.register_new_resolver("cluv", cluv_resolver)
+omegaconf.OmegaConf.register_new_resolver("cluv", cluv_resolver, replace=True)
 
 
 # Made this a dataclass to avoid having an ugly default repr, but it causes issues with

@@ -19,6 +19,7 @@ from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
 from remote_slurm_executor.slurm_remote import RemoteSlurmJob
 from submitit.helpers import _default_custom_logging
+from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
 from cluv.cli.submit import submit
 from cluv.cli.sync import fetch_results, get_active_remotes, sync
@@ -85,7 +86,7 @@ class CluvLauncher(Launcher):
         gpus_per_task: int | str | None = None,
         gres: str | None = None,
         # job_name: str = "submitit",
-        job_name: str = "submitit-${hydra.job.name}",
+        job_name: str = "cluv-${hydra.job.name}",
         mail_type: str | None = None,
         mail_user: str | None = None,
         mem: str | None = None,
@@ -101,10 +102,11 @@ class CluvLauncher(Launcher):
         signal_delay_s: int = 90,
         srun_args: list[str] | None = None,
         stderr_to_stdout: bool = True,  # changed!
-        time: str | int = 5,  # sbatch native way of passing it.
-        timeout_min: str | int = 5,  # submitit..
+        time: str | int | None = None,  # sbatch native way of passing it.
+        # TODO: Used by submitit, needs to be translated somehow.
+        timeout_min: str | int | None = None,
         use_srun: bool = True,
-        wckey: str = "submitit",
+        wckey: str = "cluv",
         additional_parameters: dict | None = None,
         tasks_per_node: int | None = None,
         mem_gb: int | None = None,
@@ -128,6 +130,10 @@ class CluvLauncher(Launcher):
             ntasks_per_node = tasks_per_node
         if ntasks_per_node is not None:
             additional_parameters["ntasks-per-node"] = ntasks_per_node
+
+        if timeout_min is not None:
+            assert time is None, "can't use both time and timeout_min"
+
         params = dict(
             account=account,
             array_parallelism=array_parallelism,
@@ -160,7 +166,6 @@ class CluvLauncher(Launcher):
             use_srun=use_srun,
             wckey=wckey,
             additional_parameters=additional_parameters,
-            timeout_min=timeout_min,
         )
         self.params = {}
         for k, v in params.items():
@@ -201,7 +206,8 @@ class CluvLauncher(Launcher):
         await sync([self.cluster] if self.cluster != "first" else None)
 
     def __del__(self):
-        self._loop.close()
+        if hasattr(self, "_loop"):
+            self._loop.close()
 
     def launch(
         self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
@@ -464,11 +470,12 @@ class CluvLauncherConfig:
 def convert_submitit_style_params_to_sbatch_flags(
     submitit_launcher_params: dict[str, Any],
 ) -> list[str]:
-    from submitit.slurm.slurm import _make_sbatch_string
 
-    generated_sbatch_script = _make_sbatch_string(
-        "{command}", folder="{folder}", **submitit_launcher_params
-    )
+    # note: translate the parameters the same way they would have been through the SlurmExecutor.
+    eq_dict = SlurmExecutor._equivalence_dict()
+    params = submitit_launcher_params.copy()
+    params = {eq_dict.get(k, k): v for k, v in params.items()}
+    generated_sbatch_script = _make_sbatch_string("{command}", folder="{folder}", **params)
     return [
         line.removeprefix("#SBATCH").strip()
         for line in generated_sbatch_script.splitlines()

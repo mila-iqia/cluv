@@ -27,7 +27,7 @@ from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import get_datasets_path
-from cluv.remote import Remote, get_ssh_options_for_host, run
+from cluv.remote import Remote, run
 from cluv.utils import console, console_lock, current_cluster
 
 milatools.cli.console = console
@@ -578,12 +578,3 @@ async def remote_test(flag: Literal["-d", "-e", "-L"], path: str | Path, remote:
     """Returns True if `test {flag} {path}` succeeds on the remote."""
     result = await remote.run(f"test {flag} {path}", warn=True, hide=True)
     return result.returncode == 0
-
-
-def get_loglevel():
-    return logging.getLogger("cluv").getEffectiveLevel()
-
-
-async def host_uses_controlmaster(hostname: str) -> bool:
-    applied_options_for_host = get_ssh_options_for_host(hostname)
-    return applied_options_for_host.get("controlmaster", "no").lower() != "no"

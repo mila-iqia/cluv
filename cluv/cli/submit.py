@@ -15,6 +15,7 @@ import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, save_job
+from cluv.cli.submit_utils.chunking import chunking_update_sbatch_args
 from cluv.cli.submit_utils.first import (
     JobHandle,
     cancel_job,
@@ -73,6 +74,7 @@ async def submit(
     sbatch_args: list[str],
     program_args: list[str],
     autocommit: bool = False,
+    chunking: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
 
@@ -91,6 +93,7 @@ async def submit(
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
+        chunking: Whether to chunk the job into multiple smaller jobs.
 
     Returns:
         The job ID of the submitted job or None if the sbatch command fails.
@@ -115,7 +118,7 @@ async def submit(
     here = current_cluster()
 
     if cluster == "first":
-        job = await submit_first(job_script, sbatch_args, program_args, git_commit)
+        job = await submit_first(job_script, sbatch_args, program_args, git_commit, chunking)
         if job:
             save_job(job)
         return job
@@ -129,7 +132,9 @@ async def submit(
     else:
         # Submitting to the current cluster.
         remote = None
-    result = await sbatch(remote, resolved_job_script, sbatch_args, program_args, git_commit)
+    result = await sbatch(
+        remote, resolved_job_script, sbatch_args, program_args, git_commit, chunking
+    )
     submit_time = datetime.datetime.now()
 
     if result.returncode != 0:
@@ -161,6 +166,7 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    chunking: bool,
 ) -> Job | None:
     """Submit the job on all clusters, and wait until one of them starts.
     Once one starts, cancel the others.
@@ -181,7 +187,7 @@ async def submit_first(
     # Submit the job on all the clusters (and possibly locally).
     sbatch_commands = {
         cluster: get_sbatch_command(
-            cluster, job_scripts[cluster], sbatch_args, program_args, git_commit
+            cluster, job_scripts[cluster], sbatch_args, program_args, git_commit, chunking
         )
         for cluster in cluster_to_remote
     }
@@ -193,6 +199,7 @@ async def submit_first(
                 sbatch_args=sbatch_args,
                 program_args=program_args,
                 git_commit=git_commit,
+                chunking=chunking,
             )
             for cluster, remote in cluster_to_remote.items()
         ],
@@ -427,6 +434,7 @@ def get_sbatch_command(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    chunking: bool,
 ) -> str:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
@@ -449,17 +457,17 @@ def get_sbatch_command(
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
-    in_job_chunking = False
     in_job_packing = False
-    # SBATCH --output=logs/%j/slurm-%j.out
-    assert not in_job_chunking and not in_job_packing, "todo"
+
+    assert not in_job_packing, "todo"
     # might contain unresolved env vars.
     cluster_results_path = PurePosixPath(cluster_config.results_path)
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
 
-    if in_job_chunking:
+    if chunking:
         assert not in_job_packing, "can't do both right now."
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
+        sbatch_args = chunking_update_sbatch_args(sbatch_args, env_vars, job_script)
     elif in_job_packing:
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j_%t/slurm-%j_%t.out"
     else:
@@ -503,13 +511,16 @@ async def sbatch(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    chunking: bool,
 ) -> subprocess.CompletedProcess[str]:
     """Submit the job via sbatch on the remote cluster, and return the job id."""
     cluster = remote.hostname if remote else current_cluster()
     # Should be set, since `remote` is None if current_cluster() is the same as the cluster argument
     # to `submit`.
     assert cluster
-    sbatch_command = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
+    sbatch_command = get_sbatch_command(
+        cluster, job_script, sbatch_args, program_args, git_commit, chunking
+    )
     if remote:
         return await remote.run(sbatch_command, display=False, warn=True, hide=True)
     # Run the sbatch command locally.

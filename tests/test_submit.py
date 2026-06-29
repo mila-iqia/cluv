@@ -113,6 +113,7 @@ class TestGetSbatchCommand:
             sbatch_args=["--account=my_account", "--mem=8G"],
             program_args=["program_arg_1", "program_arg_2"],
             git_commit="abecdef",
+            chunking=False,
         )
         job_script_relative_path = sbatch_script.relative_to(fake_home)
 
@@ -150,6 +151,7 @@ class TestGetSbatchCommand:
             sbatch_args=[],
             program_args=[],
             git_commit="abecdef",
+            chunking=False,
         )
 
         assert sbatch_command == (
@@ -186,6 +188,7 @@ class TestGetSbatchCommand:
             sbatch_args=["--time=1:00:00"],  # CLI overrides the config time
             program_args=[],
             git_commit="abc123",
+            chunking=False,
         )
         # Config flags come first (time, requeue, gpus), then CLI flag (--time=1:00:00).
         # sbatch uses last occurrence, so the CLI time wins.
@@ -222,10 +225,45 @@ class TestGetSbatchCommand:
             sbatch_args=[],
             program_args=[],
             git_commit="abc123",
+            chunking=False,
         )
         # gpus removed by cluster override, time still present
         assert "--gpus" not in sbatch_command
         assert "--time=2:00:00" in sbatch_command
+
+    def test_use_correct_time_value_when_chunking(self, project_dir: Path) -> None:
+        p = project_dir / "pyproject.toml"
+        results_path = "results"
+        p.write_text(
+            textwrap.dedent(
+                f"""\
+                [tool.cluv]
+                results_path = "{results_path}"
+                [tool.cluv.env]
+                SBATCH_TIMELIMIT="5:00:00"
+                [tool.cluv.clusters.mila]
+                """
+            )
+        )
+        job_script = project_dir / "scripts" / "my_script.sh"
+        job_script.parent.mkdir()
+        job_script.write_text("#SBATCH --time=20:00:00")
+
+        sbatch_command = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args=["--time=10:00:00"],
+            program_args=[],
+            git_commit="abecdef",
+            chunking=True,
+        )
+
+        assert sbatch_command == (
+            "bash --login -c 'SBATCH_TIMELIMIT=5:00:00 SBATCH_JOB_NAME=cluv-my_script "
+            f"GIT_COMMIT=abecdef SBATCH_OUTPUT={results_path}/mila_%A/slurm-%A_%a.out "
+            "sbatch --parsable --chdir=my_project --time=3:00:00 --array=0-3%1 "
+            "~/my_project/scripts/my_script.sh '"
+        )
 
 
 class TestSubmitCliParsing:
@@ -246,6 +284,7 @@ class TestSubmitCliParsing:
                 "sbatch_args": [],
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
+                "chunking": False,
             }
         )
 
@@ -265,6 +304,7 @@ class TestSubmitCliParsing:
                 "sbatch_args": ["--mem=8G"],
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
+                "chunking": False,
             }
         )
 
@@ -287,6 +327,7 @@ class TestSubmitCliParsing:
                 "sbatch_args": [],
                 "program_args": [],
                 "autocommit": False,
+                "chunking": False,
             }
         )
 
@@ -523,6 +564,7 @@ async def test_can_submit_on_current_cluster(
         job_script=job_script,
         sbatch_args=sbatch_args,
         program_args=program_args,
+        chunking=False,
     )
 
     assert returned_job
@@ -660,6 +702,7 @@ async def test_submit_first_considers_current_cluster(
         sbatch_args=sbatch_args,
         program_args=program_args,
         git_commit=dummy_commit,
+        chunking=False,
     )
     assert returned_job
     mock_sync.assert_awaited_once()

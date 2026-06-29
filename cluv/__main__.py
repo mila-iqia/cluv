@@ -132,6 +132,11 @@ def add_submit_args(subparsers: Subparsers):
         help="Create a local commit with tracked changes before submitting the job.",
     )
     submit_parser.add_argument(
+        "--chunking",
+        action="store_true",
+        help="Convert the job to a job array.",
+    )
+    submit_parser.add_argument(
         "cluster",
         metavar="<cluster>",
         help=(

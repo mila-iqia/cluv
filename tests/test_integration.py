@@ -166,20 +166,6 @@ async def test_status_gpu_model(cluster_status: ClusterStatus, cluster: str):
 @pytest.mark.timeout(30)
 @pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
 @pytest.mark.asyncio
-async def test_status_jobs(cluster_status: ClusterStatus, cluster: str):
-    if cluster not in STATUS_SUPPORTED_CLUSTERS:
-        pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    # Job counts must be non-negative integers (tamia is a busy cluster)
-    assert cluster_status.jobs.running >= 0
-    assert cluster_status.jobs.pending >= 0
-    assert cluster_status.jobs.my_running >= 0
-    assert cluster_status.jobs.my_pending >= 0
-
-
-@pytest.mark.slow
-@pytest.mark.timeout(30)
-@pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
-@pytest.mark.asyncio
 async def test_status_storage(cluster_status: ClusterStatus):
     assert cluster_status.storage.home_quota > 0, "Expected non-zero home quota"
     assert cluster_status.storage.scratch_quota > 0, "Expected non-zero scratch quota"

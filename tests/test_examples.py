@@ -36,7 +36,7 @@ async def test_hydra_example(
     monkeypatch.chdir(repo_root / "examples/hydra_example")
 
     subprocess_result = subprocess.run(
-        f"uv run python main.py --multirun launcher=cluv cluster={remote.hostname} lr=0.1,0.2",
+        f"uv run python main.py --multirun launcher=cluv hydra.launcher.cluster={remote.hostname} lr=0.1,0.2",
         shell=True,
         text=True,
         # capture_output=True,

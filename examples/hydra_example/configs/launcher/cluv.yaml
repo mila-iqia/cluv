@@ -9,9 +9,11 @@ hydra:
     # here we instead use the directory created by cluv based on the config in pyproject.toml
     # and the cluster name and job id. This is typically "{cluster.results_path}/{cluster_name}_{job_id}",
     # See `cluv.job.current_run_info` for more details.
-    dir: ${cluv:results_path,logs/${now:%Y-%m-%d}/${now:%H-%M-%S}}
+    # TODO: Weird that we have to supply a default value.
+    # Hydra seems to want to create a directory locally when launching a sweep.
+    dir: ${cluv:results_path,/tmp/cluv_logs/${now:%Y-%m-%d}/${now:%H-%M-%S}}
   sweep:
-    dir: ${cluv:results_path,logs/${now:%Y-%m-%d}/${now:%H-%M-%S}}
+    dir: ${cluv:results_path,/tmp/cluv_logs/${now:%Y-%m-%d}/${now:%H-%M-%S}}
     subdir: ${hydra.job.num}
 
   launcher:

@@ -58,7 +58,6 @@ results_path = "$SCRATCH/logs/cluv"
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
 datasets_path = "$HOME/datasets/cifar10"
 results_path = "$HOME/logs/cluv"
-ignore = true
 
 [tool.cluv.clusters.vulcan]
 

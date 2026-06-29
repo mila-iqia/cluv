@@ -422,7 +422,6 @@ async def clone_project(
         env=gitenv,
     )
     project_state.checked_out_git_commit = current_git_commit
-    return
 
 
 async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):

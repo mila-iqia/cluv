@@ -133,9 +133,8 @@ async def submit(
         console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
         return None
 
-    job_id = int(result.stdout.strip())
     job = Job(
-        job_id=job_id,
+        job_id=int(result.stdout.strip()),
         cluster=cluster,
         job_script=str(resolved_job_script),
         git_commit=git_commit,
@@ -146,8 +145,8 @@ async def submit(
     save_job(job)
 
     console.log(
-        f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
-        f"Use `ssh {cluster} sacct -j {job_id}` to view its status, and `cluv sync {cluster}` to "
+        f"Successfully submitted job {job.job_id} on the {cluster} cluster.\n"
+        f"Use `ssh {cluster} sacct -j {job.job_id}` to view its status, and `cluv sync {cluster}` to "
         f"fetch results once it is complete."
     )
 

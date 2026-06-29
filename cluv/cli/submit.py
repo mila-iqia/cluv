@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["submit"]
 
 
-def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:
+def sbatch_args_from_dict(d: dict[str, str | bool | int | float]) -> list[str]:
     """Convert a dict of sbatch options to a list of command-line flags.
 
     Key-to-flag conversion:
@@ -444,13 +444,13 @@ async def wait_for_jobs_to_cancel(
 
 def build_submit_command(
     cluster: str,
-    job_script: Path,
+    job_script: Path | None,
     sbatch_args: list[str],
     program_args: list[str],
 ) -> str:
     """Build the local `cluv submit` command line used to launch the job."""
     command_parts = ["cluv", "submit"]
-    command_parts.extend([cluster, str(job_script), *sbatch_args])
+    command_parts.extend([cluster, str(job_script or ""), *sbatch_args])
     if program_args:
         command_parts.extend(["--", *program_args])
     return shlex.join(command_parts)

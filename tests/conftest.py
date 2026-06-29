@@ -1,6 +1,11 @@
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
+
+from cluv.cli.login import get_remote_without_2fa_prompt
+from cluv.remote import control_socket_is_running
+from tests.test_integration import ALL_CLUSTERS, IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
 
 
 @pytest.fixture
@@ -18,3 +23,50 @@ def reset_cluv_config():
     from cluv.config import get_cluv_config
 
     get_cluv_config.cache_clear()
+
+
+@pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)
+async def cluster(request: pytest.FixtureRequest) -> str:
+    """Fixture that gives the hostname of the Slurm cluster to run tests with.
+
+    - If the SLURM_CLUSTER environment variable is not set, all tests that depend on this fixture
+      will be skipped.
+    - If it is set and there is not an active SSH connection to that cluster, this fixture will
+      fail, causing all tests that use it to fail, since they require a live connection to a
+      cluster.
+
+    NOTE: This fixture can also be (indirectly) parametrized by tests that want to run with a remote
+    connected to only some clusters in particular. For example:
+
+    ```python
+    @pytest.mark.parametrize("cluster", ["mila", "tamia", "rorqual"], indirect=True)
+    def test_something(remote: Remote):
+        assert remote.hostname in ["mila", "tamia", "rorqual"]
+    ```
+    """
+    cluster = getattr(request, "param", None)
+    if cluster is None:
+        pytest.skip(
+            "No cluster specified. Set the SLURM_CLUSTER environment variable to a "
+            "cluster with an active SSH connection to run these tests."
+        )
+    existing_ssh_connection = await control_socket_is_running(cluster)
+    if existing_ssh_connection:
+        assert isinstance(cluster, str)
+        return cluster
+    if cluster not in REQUIRED_CLUSTERS:
+        pytest.skip(
+            f"No active SSH connection to {cluster}, but it is not necessary to test against it."
+        )
+    if IN_SELF_HOSTED_GITHUB_CI:
+        pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
+    # On a dev machine. Just skip and display some instructions.
+    pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
+
+
+@pytest_asyncio.fixture(scope="session")
+async def remote(cluster: str):
+    remote = await get_remote_without_2fa_prompt(cluster)
+    if remote is None:
+        pytest.xfail(f"Test needs an active SSH connection to the {cluster} cluster.")
+    return remote

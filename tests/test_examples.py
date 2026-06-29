@@ -6,11 +6,9 @@ from pytest_regressions.file_regression import FileRegressionFixture
 
 from cluv.remote import Remote
 
-from .test_integration import cluster, remote  # noqa: F401
-
 
 @pytest.mark.parametrize(
-    cluster.__name__,
+    "cluster",
     [
         "mila",
         pytest.param(
@@ -24,6 +22,7 @@ from .test_integration import cluster, remote  # noqa: F401
 )
 @pytest.mark.slow
 async def test_hydra_example(
+    cluster: str,
     remote: Remote,  # noqa
     monkeypatch: pytest.MonkeyPatch,
     file_regression: FileRegressionFixture,

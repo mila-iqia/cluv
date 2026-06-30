@@ -123,7 +123,7 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
     start_time = datetime.now()
 
     remote = await get_remote_without_2fa_prompt(cluster)
-    if remote is None and cluster is not current_cluster():
+    if remote is None and cluster != current_cluster():
         logger.info(f"No connection to [bold]{cluster}[/bold]; skipping jobs")
         return {}
 
@@ -209,7 +209,7 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     # "current" cluster the way login() does. A working socket for mila is
     # perfectly usable even when /home/mila is mounted locally.
     remote = await get_remote_without_2fa_prompt(cluster)
-    if remote is None and cluster is not current_cluster():
+    if remote is None and cluster != current_cluster():
         logger.info(f"No connection to [bold]{cluster}[/bold]; returning empty status")
         return get_default_cluster_status(cluster)
 

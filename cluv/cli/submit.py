@@ -16,12 +16,15 @@ import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, save_job
-
-from cluv.cli.sync import sync
+from cluv.cli.sync import get_active_remotes, sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.slurm import FAILED_JOB_STATES, clean_job_state
 from cluv.utils import console, current_cluster
+
+logger = logging.getLogger(__name__)
+
+RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,7 @@ async def submit(
     sbatch_args: list[str],
     program_args: list[str],
     autocommit: bool = False,
+    _skip_sync: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
 
@@ -88,6 +92,7 @@ async def submit(
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
+        _skip_sync: If True, skip the synchronization step before submitting.
 
     Returns:
         The job ID of the submitted job or None if the sbatch command fails.
@@ -103,6 +108,12 @@ async def submit(
     )
     ```
     """
+    if job_script is None:
+        job_script = get_cluv_config().get_cluster_config(cluster).job_script_path
+        if job_script is None:
+            raise ValueError(
+                f"No job script was provided and no job_script_path is configured for {cluster=}!"
+            )
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(
         autocommit=autocommit,
@@ -112,7 +123,9 @@ async def submit(
     here = current_cluster()
 
     if cluster == "first":
-        job = await submit_first(job_script, sbatch_args, program_args, git_commit)
+        job = await submit_first(
+            job_script, sbatch_args, program_args, git_commit, _skip_sync=_skip_sync
+        )
         if job:
             save_job(job)
         return job
@@ -120,11 +133,13 @@ async def submit(
     resolved_job_script = get_job_script_path(cluster, job_script)
 
     if cluster != here:
-        # Sync.
-        remote = (await sync(clusters=[cluster]))[0]
-        # Run the sbatch command over SSH.
+        # The sbatch command will be run over SSH.
+        if _skip_sync:
+            remote = await Remote.connect(hostname=cluster)
+        else:
+            remote = (await sync(clusters=[cluster]))[0]
     else:
-        # Submitting to the current cluster.
+        # Submitting to the current cluster. The sbatch command will run locally.
         remote = None
     result = await sbatch(remote, resolved_job_script, sbatch_args, program_args, git_commit)
     submit_time = datetime.datetime.now()
@@ -159,12 +174,16 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    _skip_sync: bool = False,
 ) -> Job | None:
     """Submit the job on all clusters, and wait until one of them starts.
     Once one starts, cancel the others.
     """
     # Sync with all clusters with an existing connections.
-    remotes = await sync()
+    if not _skip_sync:
+        remotes = await sync()
+    else:
+        remotes = await get_active_remotes()
     cluster_to_remote: dict[str, Remote | None] = {remote.hostname: remote for remote in remotes}
     this_cluster = current_cluster()
     if this_cluster is not None:
@@ -542,6 +561,7 @@ def get_sbatch_command(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    extra_env_vars: dict[str, str] | None = None,
 ) -> str:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
@@ -563,15 +583,16 @@ def get_sbatch_command(
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
+    if extra_env_vars:
+        logger.debug(f"Adding extra environment variables for sbatch command: {extra_env_vars}")
+        env_vars.update(extra_env_vars)
 
     in_job_chunking = False
     in_job_packing = False
-    # SBATCH --output=logs/%j/slurm-%j.out
     assert not in_job_chunking and not in_job_packing, "todo"
     # might contain unresolved env vars.
     cluster_results_path = PurePosixPath(cluster_config.results_path)
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
-
     if in_job_chunking:
         assert not in_job_packing, "can't do both right now."
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"

@@ -200,7 +200,6 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
         if not local_dataset_path:
             raise RuntimeError("data_source is set, so dataset_path should also be set!")
         local_dataset_path = Path(os.path.expandvars(local_dataset_path))
-
         await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
         _save()
 

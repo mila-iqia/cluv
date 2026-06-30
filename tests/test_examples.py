@@ -20,11 +20,7 @@ from cluv.remote import Remote
     indirect=True,
 )
 @pytest.mark.slow
-async def test_hydra_example(
-    cluster: str,
-    remote: Remote,  # noqa
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_hydra_example(remote: Remote, monkeypatch: pytest.MonkeyPatch) -> None:
     """End-to-end: actually run the hydra example.
 
     Requires an active SSH connection to the cluster and a clean git tree.

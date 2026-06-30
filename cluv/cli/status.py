@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -13,6 +14,7 @@ from rich.text import Text
 from cluv.cache import Job, load_jobs
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_cluv_config
+from cluv.remote import run
 from cluv.slurm import (
     FAILED_JOB_STATES,
     StorageStats,
@@ -25,7 +27,7 @@ from cluv.slurm import (
     parse_slurm_time,
     parse_timestamp,
 )
-from cluv.utils import console
+from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
 __all__ = ["status"]
@@ -120,17 +122,22 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
     """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
     start_time = datetime.now()
 
+    remote = await get_remote_without_2fa_prompt(cluster)
+    if remote is None and cluster is not current_cluster():
+        logger.info(f"No connection to [bold]{cluster}[/bold]; skipping jobs")
+        return {}
+
     ids_str = ",".join(str(jid) for jid in job_ids)
     cmd = (
         f"sacct -j {ids_str} --format=JobID,State,Start,Submit,Elapsed"
         f" --noheader --allocations --array --parsable2 2>/dev/null"
     )
+
     try:
-        remote = await get_remote_without_2fa_prompt(cluster)
-        if remote is None:
-            logger.info(f"No connection to [bold]{cluster}[/bold]; skipping jobs")
-            return {}
-        raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
+        if remote:
+            raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
+        else:
+            raw = (await run(tuple(shlex.split(cmd)), hide=True)).stdout.strip()
     except Exception:
         return {}
 
@@ -202,19 +209,18 @@ async def get_cluster_status(cluster: str) -> ClusterStatus:
     # "current" cluster the way login() does. A working socket for mila is
     # perfectly usable even when /home/mila is mounted locally.
     remote = await get_remote_without_2fa_prompt(cluster)
-    if remote is None:
+    if remote is None and cluster is not current_cluster():
         logger.info(f"No connection to [bold]{cluster}[/bold]; returning empty status")
         return get_default_cluster_status(cluster)
 
     script = _REMOTE_SCRIPT_MILA if cluster in _MILA_CLUSTERS else _REMOTE_SCRIPT_DRAC
+    command = f"bash -l -c '{script}'"
 
     try:
-        raw = await remote.get_output(
-            f"bash -l -c '{script}'",
-            hide=True,
-            warn=True,
-            display=False,
-        )
+        if remote:
+            raw = await remote.get_output(command, hide=True, warn=True, display=False)
+        else:
+            raw = (await run(tuple(shlex.split(command)), hide=True)).stdout.strip()
     except Exception as exc:
         logger.warning(f"[red]Could not reach {cluster}: {exc}[/red]")
         return get_default_cluster_status(cluster)

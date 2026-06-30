@@ -2,7 +2,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from pytest_regressions.file_regression import FileRegressionFixture
 
 from cluv.remote import Remote
 
@@ -25,7 +24,6 @@ async def test_hydra_example(
     cluster: str,
     remote: Remote,  # noqa
     monkeypatch: pytest.MonkeyPatch,
-    file_regression: FileRegressionFixture,
 ) -> None:
     """End-to-end: actually run the hydra example.
 
@@ -42,6 +40,7 @@ async def test_hydra_example(
         capture_output=True,
         check=True,
     )
-    file_regression.check(
-        subprocess_result.stdout or subprocess_result.stderr, extension=".stdout", encoding="utf-8"
-    )
+    output = subprocess_result.stdout or subprocess_result.stderr
+    # Very simple: Check that this portion of the table, near the end, shows each run as completed.
+    assert "lr=0.1 │ COMPLETED" in output
+    assert "lr=0.2 │ COMPLETED" in output

@@ -39,7 +39,7 @@ async def test_hydra_example(
         f"uv run python main.py --multirun launcher=cluv hydra.launcher.cluster={remote.hostname} lr=0.1,0.2",
         shell=True,
         text=True,
-        # capture_output=True,
+        capture_output=True,
         check=True,
     )
     file_regression.check(

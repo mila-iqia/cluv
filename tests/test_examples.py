@@ -6,6 +6,7 @@ import pytest
 from cluv.remote import Remote
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "cluster",
     [
@@ -27,7 +28,6 @@ from cluv.remote import Remote
     ],
     indirect=True,
 )
-@pytest.mark.slow
 async def test_hydra_example(remote: Remote, monkeypatch: pytest.MonkeyPatch) -> None:
     """End-to-end: actually run the hydra example.
 

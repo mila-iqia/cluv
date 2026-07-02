@@ -1,8 +1,10 @@
 import asyncio
+import contextlib
 import contextvars
 import os
 import socket
 import sys
+from contextvars import ContextVar
 from pathlib import Path
 
 import rich.console
@@ -33,3 +35,13 @@ def find_pyproject(start: Path | None = None) -> Path:
         f"Could not find pyproject.toml starting from {current}!\n"
         f"Cluv can only be used within a project managed with uv."
     )
+
+
+@contextlib.contextmanager
+def set_context[T](var: ContextVar[T], value: T):
+    """Equivalent of contextlib.ContextVar.set() context manager for Python < 3.14."""
+    token = var.set(value)
+    try:
+        yield
+    finally:
+        var.reset(token)

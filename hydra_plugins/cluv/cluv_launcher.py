@@ -2,11 +2,9 @@
 
 import asyncio
 import collections
-import contextlib
 import logging
 import time
 from collections.abc import Sequence
-from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, ClassVar
 
@@ -23,11 +21,12 @@ from remote_slurm_executor.slurm_remote import RemoteSlurmJob
 from submitit.helpers import _default_custom_logging
 from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
-from cluv.cli.submit import submit
+from cluv.cli.submit import display_commands, raise_on_command_error, submit
 from cluv.cli.sync import fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import JobInfo, RunInfo, current_run_info, get_results_path, get_run_id
 from cluv.remote import Remote
+from cluv.utils import set_context
 
 logger = logging.getLogger(__name__)
 
@@ -267,9 +266,8 @@ class CluvLauncher(Launcher):
             # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
             # TODO: Save the command used for submission in the output folder as well, since we
             # don't generate a job script.
-            from cluv.cli.submit import display_commands
 
-            with set_context(display_commands, True):
+            with set_context(display_commands, True), set_context(raise_on_command_error, True):
                 job = await submit(
                     cluster=cluster,
                     job_script=Path(self.job_script),
@@ -280,7 +278,10 @@ class CluvLauncher(Launcher):
                     program_args=["python", "main.py", *override],
                     _skip_sync=True,
                 )
-            assert job is not None
+            if job is None:
+                raise RuntimeError(
+                    "Unable to submit jobs! See the error traces above for details."
+                )
             job_id = job.job_id
 
             assert not self.chunking and not self.packing  # jobid is the "run id" for now.
@@ -373,16 +374,6 @@ class CluvLauncher(Launcher):
                 )
         rich.print(table)
         return job_results
-
-
-@contextlib.contextmanager
-def set_context[T](var: ContextVar[T], value: T):
-    """Equivalent of contextlib.ContextVar.set() context manager for Python < 3.14."""
-    token = var.set(value)
-    try:
-        yield
-    finally:
-        var.reset(token)
 
 
 async def monitor_jobs_async(

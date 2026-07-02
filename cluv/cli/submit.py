@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["submit"]
 display_commands = ContextVar("display_commands", default=True)
+raise_on_command_error = ContextVar("raise_on_command_error", default=False)
 
 
 def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:
@@ -648,13 +649,15 @@ async def sbatch(
     # to `submit`.
     assert cluster
     sbatch_command = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
+
     display = display_commands.get()
+    hide = not display
+    warn = not raise_on_command_error.get()
+
     if remote:
-        return await remote.run(sbatch_command, display=display, warn=True, hide=not display)
+        return await remote.run(sbatch_command, display=display, warn=warn, hide=hide)
     # Run the sbatch command locally.
-    return await run(
-        tuple(shlex.split(sbatch_command)), _display=display, warn=True, hide=not display
-    )
+    return await run(tuple(shlex.split(sbatch_command)), _display=display, warn=warn, hide=hide)
 
 
 async def get_job_state(remote: Remote | None, job_id: int) -> str:

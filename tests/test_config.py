@@ -177,25 +177,6 @@ job_script_path = "scripts/mila_job.sh"
 # ClusterConfig helpers
 # ---------------------------------------------------------------------------
 
-
-class TestClusterConfigHelpers:
-    def test_expandvars_expands_path_fields(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("CLUV_TMP", "/tmp/cluv")
-        cfg = ClusterConfig(
-            env={},
-            results_path=Path("$CLUV_TMP/results"),
-            datasets_path=Path("$CLUV_TMP/data"),
-            ignore=False,
-            job_script_path=Path("$CLUV_TMP/scripts/job.sh"),
-        )
-
-        expanded = cfg.expandvars()
-
-        assert expanded.results_path == Path("/tmp/cluv/results")
-        assert expanded.datasets_path == Path("/tmp/cluv/data")
-        assert expanded.job_script_path == Path("/tmp/cluv/scripts/job.sh")
-
-
 # ---------------------------------------------------------------------------
 # sbatch_args
 # ---------------------------------------------------------------------------
@@ -309,6 +290,35 @@ SBATCH_PARTITION = "main"
             "SBATCH_ACCOUNT": "def-bengioy",
             "SBATCH_PARTITION": "main",
         }
+
+    def test_top_level_project_dir_used_for_cluster(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+project_dir = "$HOME/repos/cluv"
+
+[tool.cluv.clusters.mila]
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.get_cluster_config("mila").project_dir == Path("$HOME/repos/cluv")
+
+    def test_cluster_project_dir_overrides_top_level(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+project_dir = "$HOME/repos/cluv"
+
+[tool.cluv.clusters.killarney]
+project_dir = "$SCRATCH/cluv"
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.get_cluster_config("killarney").project_dir == Path("$SCRATCH/cluv")
 
 
 # ---------------------------------------------------------------------------

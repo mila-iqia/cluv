@@ -112,11 +112,20 @@ async def submit(
     ```
     """
     if job_script is None:
-        job_script = get_cluv_config().get_cluster_config(cluster).job_script_path
+        _job_script = get_cluv_config().get_cluster_config(cluster).job_script_path
+        job_script = Path(_job_script) if _job_script is not None else None
         if job_script is None:
             raise ValueError(
                 f"No job script was provided and no job_script_path is configured for {cluster=}!"
             )
+        if Path(job_script).exists():
+            raise ValueError(
+                f"The configured job_script value ({job_script}) does not exist on this machine.\n"
+                f"The job script, even though it can be customized per cluster, needs to exist on "
+                f"the local machine, because we need to read its header to infer the values of "
+                f"sbatch arguments."
+            )
+
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(
         autocommit=autocommit,
@@ -555,7 +564,7 @@ def get_job_script_path(cluster: str, job_script: Path | None) -> Path:
         raise ValueError(
             f"No job script was provided and no [tool.cluv] job_script_path is configured for {cluster}."
         )
-    return configured_job_script
+    return Path(configured_job_script)
 
 
 def get_sbatch_command(

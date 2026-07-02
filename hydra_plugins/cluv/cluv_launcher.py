@@ -22,7 +22,7 @@ from submitit.helpers import _default_custom_logging
 from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
 from cluv.cli.submit import display_commands, raise_on_command_error, submit
-from cluv.cli.sync import fetch_results, get_active_remotes, sync
+from cluv.cli.sync import expandvars, fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import JobInfo, RunInfo, current_run_info, get_results_path, get_run_id
 from cluv.remote import Remote
@@ -71,10 +71,11 @@ class CluvLauncher(Launcher):
         cluster: str = "first",  # which cluster to submit to.
         # The job script to run on the cluster.
         # It should use "$@" to capture and pass down the arguments to the python script.
-        job_script: str | Path = "scripts/job.sh",
+        # When unset, will use the value from the Cluv config.
+        job_script: str | Path | None = None,
         vram_gb: int | None = None,  # Enables job packing!
-        checkpointing: bool = True,  # Enables job chunking (via job arrays!)
-        # executor: Callable[[], RemoteSlurmExecutor],
+        checkpointing: bool = False,  # Enables job chunking (via job arrays!)
+        ## Submitit arguments:
         account: str | None = None,
         array_parallelism: int = 256,
         comment: str | None = None,
@@ -116,8 +117,7 @@ class CluvLauncher(Launcher):
     ) -> None:
         super().__init__()
         self.cluster = cluster
-        self.job_script = job_script
-        # todo:
+        self.job_script = PurePosixPath(job_script) if job_script else None
         self.vram_gb = vram_gb
         self.checkpointing = checkpointing
 
@@ -179,8 +179,8 @@ class CluvLauncher(Launcher):
         self.cluster_remotes: dict[str, Remote] = {}
         self.cluv_config: CluvConfig | None = None
 
-        self.chunking = False
-        self.packing = False
+        self.chunking = self.checkpointing
+        self.packing = self.vram_gb is not None
 
         self._loop = asyncio.new_event_loop()
 
@@ -241,12 +241,26 @@ class CluvLauncher(Launcher):
         # pack the jobs based on their VRAM requirements and the packing factor
         # job_specs = job_packing(job_overrides, packing_factor)
 
+        job_script = self.job_script
+
+        if job_script is None and cluster != "first":
+            # Find the job_script to use for the chose cluster from the cluv config.
+            # This avoids doing it for every job.
+            job_script = self.cluv_config.get_cluster_config(cluster).job_script_path
+            if job_script is None:
+                raise ValueError(
+                    f"No job script specified for cluster {cluster}. Please specify one using the "
+                    f"`job_script` either in the Hydra launcher config, or in your pyproject.toml "
+                    f"config for Cluv (for all clusters), or in the overrides block for the "
+                    f"{cluster} cluster."
+                )
+
         job_infos = await run_sweep(
             job_overrides,
             cluster,
             cluv_config=self.cluv_config,
             cluster_remotes=self.cluster_remotes,
-            job_script=self.job_script,
+            job_script=job_script,
             params=self.params,
             chunking=self.checkpointing,
             packing=self.vram_gb is not None,
@@ -262,17 +276,16 @@ async def run_sweep(
     cluster: str,
     cluv_config: CluvConfig,
     cluster_remotes: dict[str, Remote],
-    job_script: PurePosixPath,
+    job_script: PurePosixPath | None,
     params: dict[str, Any],
     chunking: bool,
     packing: bool,
 ) -> list[JobInfo]:
-    cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
-
     cluster_remote = cluster_remotes[cluster]
-    cluster_results_dir = PurePosixPath(
-        await cluster_remote.get_output(f"echo {cluster_results_dir}")
-    )
+
+    cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
+    cluster_results_dir = await expandvars(cluster_remote, cluster_results_dir)
+
     local_results_dir = get_results_path()
 
     sbatch_args = convert_submitit_style_params_to_sbatch_flags(params)
@@ -280,9 +293,9 @@ async def run_sweep(
         cluster=cluster,
         job_id="%j",
         task_index="%t",
-        array_job_id=None,
-        doing_job_packing=False,
-        doing_job_chunking=False,
+        array_job_id="%A" if chunking else None,
+        doing_job_packing=packing,
+        doing_job_chunking=chunking,
     )
 
     job_infos: list[JobInfo] = []
@@ -294,11 +307,11 @@ async def run_sweep(
         with set_context(display_commands, True), set_context(raise_on_command_error, True):
             job = await submit(
                 cluster=cluster,
-                job_script=Path(job_script),
+                job_script=Path(job_script) if job_script is not None else None,
                 # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
                 # to do this, but I can't see it right now.
                 sbatch_args=sbatch_args
-                + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t_log.out"],
+                + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t.out"],
                 program_args=["python", "main.py", *override],
                 _skip_sync=True,
             )
@@ -311,16 +324,18 @@ async def run_sweep(
             cluster=cluster,
             job_id=job_id,
             task_index=0,
-            array_job_id="%A" if chunking else None,
+            # TODO: unsure about this one:
+            array_job_id=job_id if chunking else None,
             doing_job_packing=packing,
             doing_job_chunking=chunking,
         )
 
-        _cluster_job_results_path = cluster_results_dir / run_id
         # The path where the remote results will be synced locally.
         local_job_results_path = local_results_dir / run_id
+        # where they came from on the remote.
+        # _cluster_job_results_path = cluster_results_dir / run_id
 
-        # TODO: Unclear if we should just use Job or if we actually need something like JobInfo.
+        # TODO: Unclear if we should just reuse Job or if we actually need something like JobInfo.
         job = JobInfo(
             cluster=cluster,
             job_id=job_id,

@@ -241,138 +241,185 @@ class CluvLauncher(Launcher):
         # pack the jobs based on their VRAM requirements and the packing factor
         # job_specs = job_packing(job_overrides, packing_factor)
 
-        cluster_results_dir = self.cluv_config.get_cluster_config(cluster).results_path
-
-        cluster_remote = self.cluster_remotes[self.cluster]
-        cluster_results_dir = PurePosixPath(
-            await cluster_remote.get_output(f"echo {cluster_results_dir}")
+        job_infos = await run_sweep(
+            job_overrides,
+            cluster,
+            cluv_config=self.cluv_config,
+            cluster_remotes=self.cluster_remotes,
+            job_script=self.job_script,
+            params=self.params,
+            chunking=self.checkpointing,
+            packing=self.vram_gb is not None,
         )
-        local_results_dir = get_results_path()
 
-        sbatch_args = convert_submitit_style_params_to_sbatch_flags(self.params)
-        _runid_template = get_run_id(
+        job_returns = _jobs_to_hydra_jobreturn_format(job_infos, get_results_path())
+        rich.print(get_jobs_table(job_infos, get_results_path()))
+        return job_returns
+
+
+async def run_sweep(
+    job_overrides: list[list[str]],
+    cluster: str,
+    cluv_config: CluvConfig,
+    cluster_remotes: dict[str, Remote],
+    job_script: PurePosixPath,
+    params: dict[str, Any],
+    chunking: bool,
+    packing: bool,
+) -> list[JobInfo]:
+    cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
+
+    cluster_remote = cluster_remotes[cluster]
+    cluster_results_dir = PurePosixPath(
+        await cluster_remote.get_output(f"echo {cluster_results_dir}")
+    )
+    local_results_dir = get_results_path()
+
+    sbatch_args = convert_submitit_style_params_to_sbatch_flags(params)
+    _runid_template = get_run_id(
+        cluster=cluster,
+        job_id="%j",
+        task_index="%t",
+        array_job_id=None,
+        doing_job_packing=False,
+        doing_job_chunking=False,
+    )
+
+    job_infos: list[JobInfo] = []
+    for override in job_overrides:
+        # Use this so the output is where it would be if we used submitit.
+        # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
+        # TODO: Save the command used for submission in the output folder as well, since we
+        # don't generate a job script.
+        with set_context(display_commands, True), set_context(raise_on_command_error, True):
+            job = await submit(
+                cluster=cluster,
+                job_script=Path(job_script),
+                # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
+                # to do this, but I can't see it right now.
+                sbatch_args=sbatch_args
+                + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t_log.out"],
+                program_args=["python", "main.py", *override],
+                _skip_sync=True,
+            )
+        if job is None:
+            raise RuntimeError("Unable to submit jobs! See the error traces above for details.")
+        job_id = job.job_id
+
+        assert not chunking and not packing  # jobid is the "run id" for now.
+        run_id = get_run_id(
             cluster=cluster,
-            job_id="%j",
-            task_index="%t",
+            job_id=job_id,
+            task_index=0,
+            array_job_id="%A" if chunking else None,
+            doing_job_packing=packing,
+            doing_job_chunking=chunking,
+        )
+
+        _cluster_job_results_path = cluster_results_dir / run_id
+        # The path where the remote results will be synced locally.
+        local_job_results_path = local_results_dir / run_id
+
+        # TODO: Unclear if we should just use Job or if we actually need something like JobInfo.
+        job = JobInfo(
+            cluster=cluster,
+            job_id=job_id,
             array_job_id=None,
-            doing_job_packing=False,
-            doing_job_chunking=False,
-        )
-
-        job_infos: list[JobInfo] = []
-        for override in job_overrides:
-            # Use this so the output is where it would be if we used submitit.
-            # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
-            # TODO: Save the command used for submission in the output folder as well, since we
-            # don't generate a job script.
-
-            with set_context(display_commands, True), set_context(raise_on_command_error, True):
-                job = await submit(
+            tasks=[
+                RunInfo(
                     cluster=cluster,
-                    job_script=Path(self.job_script),
-                    # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
-                    # to do this, but I can't see it right now.
-                    sbatch_args=sbatch_args
-                    + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t_log.out"],
-                    program_args=["python", "main.py", *override],
-                    _skip_sync=True,
+                    run_id=run_id,
+                    results_path=local_job_results_path,
+                    command=override,
                 )
-            if job is None:
-                raise RuntimeError(
-                    "Unable to submit jobs! See the error traces above for details."
-                )
-            job_id = job.job_id
-
-            assert not self.chunking and not self.packing  # jobid is the "run id" for now.
-            run_id = get_run_id(
-                cluster=cluster,
-                job_id=job_id,
-                task_index=0,
-                array_job_id=None,
-                doing_job_packing=False,
-                doing_job_chunking=False,
-            )
-
-            _cluster_job_results_path = cluster_results_dir / run_id
-            # The path where the remote results will be synced locally.
-            local_job_results_path = local_results_dir / run_id
-
-            # TODO: Unclear if we should just use Job or if we actually need something like JobInfo.
-            job = JobInfo(
-                cluster=cluster,
-                job_id=job_id,
-                array_job_id=None,
-                tasks=[
-                    RunInfo(
-                        cluster=cluster,
-                        run_id=run_id,
-                        results_path=local_job_results_path,
-                        command=override,
-                    )
-                ],
-            )
-            job_infos.append(job)
-
-        await monitor_jobs_async(job_infos, poll_interval_seconds=30)
-        # await asyncio.gather(*(job.awaitable().wait(poll_interval=30) for job in submitit_jobs))
-
-        await asyncio.gather(
-            *(
-                fetch_results(cluster_remote, self.cluv_config)
-                for cluster_remote in self.cluster_remotes.values()
-            )
+            ],
         )
+        job_infos.append(job)
 
-        # TODO: What is the 'results' in our case? We don't want to pickle/unpickle stuff.
-        job_results: list[JobReturn] = []
-        table = rich.table.Table(
-            title="Jobs",
-            box=rich.box.ROUNDED,
-            show_lines=True,
-            header_style="bold white on #1a1a2e",
-            title_style="bold cyan",
-            expand=True,
+    # TODO: Create a 'live' rich table instead and update it as the status of the jobs change.
+    await monitor_jobs_async(job_infos, poll_interval_seconds=30)
+    # await asyncio.gather(*(job.awaitable().wait(poll_interval=30) for job in submitit_jobs))
+
+    await asyncio.gather(
+        *(
+            fetch_results(cluster_remote, cluv_config)
+            for cluster_remote in cluster_remotes.values()
         )
+    )
 
-        table.add_column("Run id", style="bold")
-        table.add_column("Command", justify="right")
-        table.add_column("State", justify="right")
-        table.add_column("Output File", justify="right")
-        cluv_config = get_cluv_config()
-        for job in job_infos:
-            for task_id, run in enumerate(job.tasks):
-                out = next(
-                    (
-                        find_pyproject().parent
-                        / Path(cluv_config.results_symlink)
-                        / run.results_path.relative_to(local_results_dir)
-                    ).glob("*.out"),
-                    run.results_path,
-                )
-                try:
-                    out = out.relative_to(Path.cwd())
-                except ValueError:
-                    pass
+    return job_infos
 
-                logger.info(f"Run {run.run_id} finished ({job.state}): Output: {out}")
-                job_status = JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED
-                job_results.append(
-                    JobReturn(
-                        overrides=run.command,
-                        working_dir=str(run.results_path),
-                        status=job_status,
-                    )
+
+def _jobs_to_hydra_jobreturn_format(
+    job_infos: list[JobInfo], local_results_dir: Path
+) -> list[JobReturn]:
+    job_returns: list[JobReturn] = []
+    for job in job_infos:
+        for _task_id, run in enumerate(job.tasks):
+            out = next(
+                (
+                    find_pyproject().parent
+                    / Path(get_cluv_config().results_symlink)
+                    / run.results_path.relative_to(local_results_dir)
+                ).glob("*.out"),
+                run.results_path,
+            )
+            try:
+                out = out.relative_to(Path.cwd())
+            except ValueError:
+                pass
+
+            logger.info(f"Run {run.run_id} finished ({job.state}): Output: {out}")
+            job_status = JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED
+            job_returns.append(
+                JobReturn(
+                    overrides=run.command,
+                    working_dir=str(run.results_path),
+                    status=job_status,
                 )
-                table.add_row(
-                    run.run_id,
-                    " ".join(run.command),
-                    job.state,
-                    str(out),
-                    # style=row_style
-                    end_section=(task_id == len(job.tasks) - 1),
-                )
-        rich.print(table)
-        return job_results
+            )
+    return job_returns
+
+
+def get_jobs_table(job_infos: list[JobInfo], local_results_dir: Path) -> rich.table.Table:
+    table = rich.table.Table(
+        title="Jobs",
+        box=rich.box.ROUNDED,
+        show_lines=True,
+        header_style="bold white on #1a1a2e",
+        title_style="bold cyan",
+        expand=True,
+    )
+
+    table.add_column("Run id", style="bold")
+    table.add_column("Command", justify="right")
+    table.add_column("State", justify="right")
+    table.add_column("Output File", justify="right")
+    cluv_config = get_cluv_config()
+    for job in job_infos:
+        for task_id, run in enumerate(job.tasks):
+            out = next(
+                (
+                    find_pyproject().parent
+                    / Path(cluv_config.results_symlink)
+                    / run.results_path.relative_to(local_results_dir)
+                ).glob("*.out"),
+                run.results_path,
+            )
+            try:
+                out = out.relative_to(Path.cwd())
+            except ValueError:
+                pass
+            table.add_row(
+                run.run_id,
+                " ".join(run.command),
+                job.state,
+                str(out),
+                # style=row_style
+                end_section=(task_id == len(job.tasks) - 1),
+            )
+
+    return table
 
 
 async def monitor_jobs_async(

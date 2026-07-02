@@ -8,7 +8,7 @@ import logging
 import os
 import tomllib
 from dataclasses import field
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
@@ -28,35 +28,46 @@ class PartialClusterConfig:
     sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
     """Per-cluster sbatch flags, overriding the global `sbatch_args`."""
 
-    results_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
+    results_path: str | None = None
     """Path to the results directory for a specific cluster."""
 
-    datasets_path: str | None = None  # TODO: Change to `Path` instead. Fix any pydantic errors.
+    datasets_path: str | None = None
     """Different path where the datasets should be replicated on this cluster.
 
     When `None`, this defaults to the top-level config's `datasets_path`.
 
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
-
-    ignore: bool = False
-    """Whether to ignore this cluster when running commands on all clusters."""
 
     job_script_path: str | None = None
     """Path to the job script to use by default on this cluster."""
 
+    project_dir: str | None = None
+    """Path where the project should be cloned on this cluster."""
+
+    ignore: bool = False
+    """Whether to ignore this cluster when running commands on all clusters."""
+
 
 @dataclass(frozen=True)
-class ClusterConfig:
-    """Per-cluster configuration options."""
+class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
+    """Per-cluster configuration options.
+
+    The path fields in this class are by default 'pure' posix paths, to make it explicit that they
+    can't be used on the local filesystem, and to avoid errors like trying to call .open/.mkdir/etc.
+    On the current cluster, when calling `current_cluster_config`, they are actual `Path`s.
+    """
 
     env: dict[str, str]
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    results_path: Path
+    sbatch_args: dict[str, str | int | float | bool]
+    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
+
+    results_path: PathType
     """Path to the results directory for a specific cluster."""
 
-    datasets_path: Path | None
+    datasets_path: PathType | None
     """Different path where the datasets should be replicated on this cluster.
 
     When `None`, this defaults to the top-level config's `datasets_path`.
@@ -64,30 +75,14 @@ class ClusterConfig:
     This folder will be synced from the current cluster to all other clusters at their respective `dataset_path`.
     """
 
-    ignore: bool
-    """Whether to ignore this cluster when running commands on all clusters."""
-
-    job_script_path: Path | None
+    job_script_path: PathType | None
     """Path to the job script to use by default on this cluster."""
 
-    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
-    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
+    project_dir: PathType | None
+    """Path where the project should be cloned on this cluster."""
 
-    def expandvars(self):
-        return ClusterConfig(
-            env=self.env,
-            sbatch_args=self.sbatch_args,
-            results_path=Path(os.path.expandvars(str(self.results_path))),
-            datasets_path=(
-                Path(os.path.expandvars(str(self.datasets_path))) if self.datasets_path else None
-            ),
-            job_script_path=(
-                Path(os.path.expandvars(str(self.job_script_path)))
-                if self.job_script_path
-                else None
-            ),
-            ignore=self.ignore,
-        )
+    ignore: bool
+    """Whether to ignore this cluster when running commands on all clusters."""
 
 
 class CluvConfig(BaseModel):
@@ -133,6 +128,9 @@ class CluvConfig(BaseModel):
     overridden on the fly by passing a different job script to `cluv submit`.
     """
 
+    project_dir: str | None = None
+    """Default path where the project should be cloned on clusters."""
+
     clusters: dict[str, PartialClusterConfig] = {}
     """Configuration options for each cluster.
 
@@ -148,10 +146,15 @@ class CluvConfig(BaseModel):
 
         The environment variables as part of paths will *not* be resolved.
         """
-        cluster_config = self.clusters[cluster]
+        cluster_config = self.clusters.get(cluster)
+        if cluster_config is None:
+            raise KeyError(
+                f"Cluster {cluster!r} is not configured. Available: {self.clusters_names}"
+            )
         results_path = cluster_config.results_path or self.results_path
         datasets_path = cluster_config.datasets_path or self.datasets_path
         job_script_path = cluster_config.job_script_path or self.job_script_path
+        project_dir = cluster_config.project_dir or self.project_dir
 
         # # Idea: Use the second portion of data_source when on the source cluster, effectively
         # # ignoring the datasets_path setting on that cluster.
@@ -166,9 +169,10 @@ class CluvConfig(BaseModel):
         return ClusterConfig(
             env=self.env | cluster_config.env,
             sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
-            results_path=Path(results_path),
-            datasets_path=Path(datasets_path) if datasets_path else None,
-            job_script_path=Path(job_script_path) if job_script_path else None,
+            results_path=PurePosixPath(results_path),
+            datasets_path=PurePosixPath(datasets_path) if datasets_path else None,
+            job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
+            project_dir=PurePosixPath(project_dir) if project_dir else None,
             ignore=cluster_config.ignore,
         )
 
@@ -197,7 +201,7 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     return CluvConfig.model_validate(cluv, extra="forbid")
 
 
-def current_cluster_config() -> ClusterConfig | None:
+def current_cluster_config() -> ClusterConfig[Path] | None:
     """Returns the `ClusterConfig` of the current cluster, or None if not currently on a cluster."""
     cluster = current_cluster()
     if not cluster:
@@ -213,7 +217,7 @@ def current_cluster_config() -> ClusterConfig | None:
         if cluster == source_cluster:
             # use the dataset path from the data_source setting as the datasets_path.
             cluster_config = dataclasses.replace(cluster_config, datasets_path=Path(data_path))
-    return dataclasses.replace(
+    return dataclasses.replace(  # type: ignore
         cluster_config,
         **{
             f.name: Path(os.path.expandvars(v))

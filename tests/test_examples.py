@@ -5,6 +5,9 @@ import pytest
 
 from cluv.remote import Remote
 
+# TODO: Also run this test on the Mila cluster using the same self-hosted runner setup as in
+# mila-docs.
+
 
 @pytest.mark.slow
 @pytest.mark.parametrize(

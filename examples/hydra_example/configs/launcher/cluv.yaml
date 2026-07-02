@@ -17,10 +17,11 @@ hydra:
     subdir: ${hydra.job.num}
 
   launcher:
-    # NEW ARGUMENTS for cluv:
+    ## NEW ARGUMENTS for cluv:
     cluster: mila
-    vram_gb: 10
-    # Usual submitit arguments:
+    # chunking: true  # (Coming soon: Automatically chunk jobs into shorter chunks)
+    # vram_gb: 10  # (Coming soon: Automatically pack multiple runs per GPU)
+    ## Usual submitit arguments:
     stderr_to_stdout: true
     timeout_min: 60
     gpus_per_node: 1

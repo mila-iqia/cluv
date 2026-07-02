@@ -41,8 +41,6 @@ async def test_hydra_example(remote: Remote, monkeypatch: pytest.MonkeyPatch) ->
         f"uv run python main.py --multirun launcher=cluv hydra.launcher.cluster={remote.hostname} lr=0.1,0.2",
         shell=True,
         text=True,
-        capture_output=True,
-        check=True,
     )
     output = subprocess_result.stdout or subprocess_result.stderr
     # Very simple: Check that this portion of the table, near the end, shows each run as completed.

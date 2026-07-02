@@ -9,10 +9,15 @@ It is a drop-in replacement for the
 
 What it adds on top of Submitit:
 
+- **Allows using _remote_ clusters**: Cluv allows you to launch jobs on the current cluster as well as remote clusters.
 - **Automatic sync**: the project is synced to the target cluster before submission (via `cluv sync`).
 - **Automatic result fetch**: results are rsynced back locally once jobs finish.
-- **Cluster selection**: set `cluster: mila` (or any cluster in your config) to pick the target.
-- **`${cluv:...}` resolver**: access live cluv job info (e.g. `results_path`) from Hydra configs.
+- **Cluster selection**: set `cluster: mila` (or any cluster in your config) to pick the target. Default is 'first' to use the first cluster that runs the job.
+<div class="annotate" markdown>
+- **`${cluv:...}` resolver**: access job information (e.g. `results_path`) from Hydra configs. (1)
+</div>
+
+1.   This is similar in spirit to the [`JobEnvironment`](https://github.com/facebookincubator/submitit/blob/ca51a66b6da2400468f338133eabdfb4c9a2936c/submitit/core/job_environment.py#L22) class of submitit.
 
 
 ## 1. Installation
@@ -20,38 +25,21 @@ What it adds on top of Submitit:
 Add the `hydra` extra when installing cluv:
 
 ```console
-uv add cluv[hydra]
+uv add git+https://github.com/mila-iqia/cluv --extra hydra
 ```
 
-Until cluv is published on PyPI, install from the Git repository:
-
-```console
-uv add "git+https://github.com/mila-iqia/cluv[hydra]"
-```
-
-This pulls in `hydra-core`, `hydra-submitit-launcher`, `hydra-zen`, and `remote-slurm-executor`
-alongside the launcher plugin.
+Cluv isn't published on PyPI yet. Once it is, you will be able to just `uv add cluv[hydra]`.
 
 
 ## 2. Configure your project
 
 Your `pyproject.toml` needs a `[tool.cluv]` section with at least a `results_path` and
-the clusters you want to target. A minimal setup:
+the clusters you want to target. A minimal setup can be obtained by running `cluv init`.
 
-```toml
-[tool.cluv]
-results_path = "$SCRATCH/logs/my_project"
-results_symlink = "logs"
+Take a look at the pyproject.toml file of this example:
 
-[tool.cluv.env]
-SBATCH_TIME = "3:00:00"
-SBATCH_REQUEUE = "1"
-
-[tool.cluv.clusters.mila]
-env = {UV_OFFLINE="0", WANDB_MODE="online"}
-
-[tool.cluv.clusters.narval]
-env = {SBATCH_ACCOUNT="def-myallocation"}
+```toml title="pyproject.toml"
+--8<-- "examples/hydra_example/pyproject.toml:26"
 ```
 
 See [config reference](../reference/config.md) for all available fields.
@@ -62,16 +50,8 @@ See [config reference](../reference/config.md) for all available fields.
 The launcher submits jobs using a shell script (just like `cluv submit`). The script receives
 the Python command as positional arguments via `$@`:
 
-```bash
-# scripts/job.sh
-#!/bin/bash
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=16G
-#SBATCH --time=1:00:00
-
-# --output is set automatically by Cluv.
-srun uv run "$@"
+```bash title="scripts/job.sh"
+--8<-- "examples/hydra_example/scripts/job.sh"
 ```
 
 !!! tip
@@ -83,31 +63,8 @@ srun uv run "$@"
 Create a Hydra config file that selects the Cluv launcher. This is typically placed in
 `configs/launcher/cluv.yaml` so it can be activated with `+launcher=cluv` on the command line:
 
-```yaml
-# configs/launcher/cluv.yaml
-# @package _global_
-defaults:
-  - override /hydra/launcher: cluv_launcher
-
-hydra:
-  mode: MULTIRUN
-  sweep:
-    dir: ${cluv:results_path,/tmp/cluv_logs/${now:%Y-%m-%d}/${now:%H-%M-%S}}
-    subdir: ${hydra.job.num}
-
-  launcher:
-    # --- Cluv-specific options ---
-    cluster: mila             # which cluster to submit to
-    job_script: scripts/job.sh
-    vram_gb: 10               # enables job packing when set (future feature)
-    checkpointing: false
-
-    # --- Standard Submitit options (same as submitit_slurm) ---
-    stderr_to_stdout: true
-    timeout_min: 60
-    gpus_per_node: 1
-    cpus_per_task: 2
-    mem_gb: 16
+```yaml title="configs/launcher/cluv.yaml"
+--8<-- "examples/hydra_example/configs/launcher/cluv.yaml"
 ```
 
 !!! note "`cluster: first`"

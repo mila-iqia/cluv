@@ -32,7 +32,22 @@ from cluv.remote import Remote
     ],
     indirect=True,
 )
-async def test_hydra_example(remote: Remote, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "job_script",
+    [
+        "scripts/job.sh",
+        pytest.param(
+            "scripts/safe_job.sh",
+            marks=pytest.mark.xfail(
+                reason="TODO: scripts/safe_job.sh is probably not working. Need to investigate.",
+                strict=True,
+            ),
+        ),
+    ],
+)
+async def test_hydra_example(
+    remote: Remote, monkeypatch: pytest.MonkeyPatch, job_script: str
+) -> None:
     """End-to-end: actually run the hydra example.
 
     Requires an active SSH connection to the cluster and a clean git tree.
@@ -42,8 +57,10 @@ async def test_hydra_example(remote: Remote, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.chdir(repo_root / "examples/hydra_example")
 
     subprocess_result = subprocess.run(
-        f"uv run python main.py --multirun launcher=cluv hydra.launcher.cluster={remote.hostname} lr=0.1,0.2",
+        f"uv run python main.py --multirun launcher=cluv hydra.launcher.cluster={remote.hostname} "
+        f"hydra.launcher.job_script={job_script} lr=0.1,0.2",
         shell=True,
+        capture_output=True,
         text=True,
     )
     output = subprocess_result.stdout or subprocess_result.stderr

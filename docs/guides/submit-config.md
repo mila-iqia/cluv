@@ -9,7 +9,8 @@ automatically.
 | Field | Scope | Purpose |
 |---|---|---|
 | `job_script_path` | global / per-cluster | Default job script when none is passed on the CLI |
-| `results_path` | global / per-cluster | Controls `SBATCH_OUTPUT` (where Slurm writes stdout/stderr) |
+| `project_dir` | global / per-cluster | Where the project is replicated on clusters. |
+| `results_path` | global / per-cluster | Results directory to sync back to the current cluster. |
 | `env` | global / per-cluster | Extra environment variables exported before `sbatch` |
 | `sbatch_args` | global / per-cluster | Extra `sbatch` flags (e.g. `--time`, `--gpus`) |
 
@@ -25,28 +26,23 @@ kept as-is.
 [tool.cluv]
 results_path = "$SCRATCH/results"
 
-[tool.cluv.env]
-SBATCH_MEM_PER_NODE = "16G"
-SBATCH_CPUS_PER_TASK = "4"
-
 [tool.cluv.sbatch_args]
+mem = "16G"
+cpus-per-task = 4
 time = "4:00:00"
 gpus = "1"
 
 [tool.cluv.clusters.narval]
 results_path = "$SCRATCH/results/narval"
 
-[tool.cluv.clusters.narval.env]
-SBATCH_MEM_PER_NODE = "32G"           # overrides the global 16G on narval
-
 [tool.cluv.clusters.narval.sbatch_args]
-time = "12:00:00"             # overrides global time on narval
+mem = "32G"           # overrides the global 16G on narval
+time = "12:00:00"    # overrides global time on narval
 ```
 
 When submitting to `narval`, the effective settings are:
 
-- `env`: `SBATCH_MEM_PER_NODE=32G`, `SBATCH_CPUS_PER_TASK=4` (cluster overrides global, rest kept)
-- `sbatch_args`: `--time=12:00:00 --gpus=1` (cluster overrides global, rest kept)
+- `sbatch_args`: `--mem=32G --cpus-per-task=4 --time=12:00:00 --gpus=1` (cluster overrides global, rest kept)
 - `results_path`: `$SCRATCH/results/narval`
 
 When submitting to any other cluster, the global values apply.
@@ -66,8 +62,9 @@ the exact commit that was running.
 
 !!! note "`SBATCH_OUTPUT` overrides `#SBATCH --output` in your script"
     If your job script contains an `#SBATCH --output` directive, it will be silently overridden by
-    the value cluv computes from `results_path`. This is intentional — it lets `cluv sync` know
-    where to fetch results. You will see a warning in the console if this happens.
+    the value cluv computes from `results_path`. This is intentional - it lets `cluv` change the
+    output dir based on the cluster the job runs on. The cluster name would otherwise have to
+    be hard-coded in the job script file. You will see a warning in the console if this happens.
 
 ## Variables priority
 

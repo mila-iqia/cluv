@@ -2,9 +2,11 @@
 
 import asyncio
 import collections
+import contextlib
 import logging
 import time
 from collections.abc import Sequence
+from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, ClassVar
 
@@ -265,16 +267,19 @@ class CluvLauncher(Launcher):
             # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
             # TODO: Save the command used for submission in the output folder as well, since we
             # don't generate a job script.
-            job = await submit(
-                cluster=cluster,
-                job_script=Path(self.job_script),
-                # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
-                # to do this, but I can't see it right now.
-                sbatch_args=sbatch_args
-                + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t_log.out"],
-                program_args=["python", "main.py", *override],
-                _skip_sync=True,
-            )
+            from cluv.cli.submit import display_commands
+
+            with set_context(display_commands, True):
+                job = await submit(
+                    cluster=cluster,
+                    job_script=Path(self.job_script),
+                    # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
+                    # to do this, but I can't see it right now.
+                    sbatch_args=sbatch_args
+                    + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t_log.out"],
+                    program_args=["python", "main.py", *override],
+                    _skip_sync=True,
+                )
             assert job is not None
             job_id = job.job_id
 
@@ -368,6 +373,16 @@ class CluvLauncher(Launcher):
                 )
         rich.print(table)
         return job_results
+
+
+@contextlib.contextmanager
+def set_context[T](var: ContextVar[T], value: T):
+    """Equivalent of contextlib.ContextVar.set() context manager for Python < 3.14."""
+    token = var.set(value)
+    try:
+        yield
+    finally:
+        var.reset(token)
 
 
 async def monitor_jobs_async(

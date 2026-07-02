@@ -8,6 +8,7 @@ import os
 import shlex
 import subprocess
 import sys
+from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 
 import rich.syntax
@@ -29,6 +30,7 @@ RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
 logger = logging.getLogger(__name__)
 
 __all__ = ["submit"]
+display_commands = ContextVar("display_commands", default=True)
 
 
 def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:
@@ -646,10 +648,13 @@ async def sbatch(
     # to `submit`.
     assert cluster
     sbatch_command = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
+    display = display_commands.get()
     if remote:
-        return await remote.run(sbatch_command, display=False, warn=True, hide=True)
+        return await remote.run(sbatch_command, display=display, warn=True, hide=not display)
     # Run the sbatch command locally.
-    return await run(tuple(shlex.split(sbatch_command)), _display=False, warn=True, hide=True)
+    return await run(
+        tuple(shlex.split(sbatch_command)), _display=display, warn=True, hide=not display
+    )
 
 
 async def get_job_state(remote: Remote | None, job_id: int) -> str:

@@ -130,7 +130,7 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
     ids_str = ",".join(str(jid) for jid in job_ids)
     cmd = (
         f"sacct -j {ids_str} --format=JobID,State,Start,Submit,Elapsed"
-        f" --noheader --allocations --array --parsable2 2>/dev/null"
+        f" --noheader --allocations --array --parsable2"
     )
 
     try:
@@ -138,7 +138,8 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
             raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
         else:
             raw = (await run(tuple(shlex.split(cmd)), hide=True)).stdout.strip()
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"[red]Could not get jobs {ids_str} for {cluster}: {exc}[/red]")
         return {}
 
     jobs: dict[int, LiveJobInfo] = {}

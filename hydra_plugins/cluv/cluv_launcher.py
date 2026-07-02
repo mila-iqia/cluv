@@ -250,7 +250,6 @@ class CluvLauncher(Launcher):
         local_results_dir = get_results_path()
 
         sbatch_args = convert_submitit_style_params_to_sbatch_flags(self.params)
-
         _runid_template = get_run_id(
             cluster=cluster,
             job_id="%j",
@@ -489,8 +488,9 @@ def convert_submitit_style_params_to_sbatch_flags(
     sbatch_args = [
         arg
         for arg in raw
-        if not arg.startswith(("--output=", "--wckey", "--job-name"))
-        or "{folder}" in arg
-        or "{command}" in arg
+        if not any(
+            thing in arg
+            for thing in ("--output=", "--wckey", "--job-name", "{folder}", "{command}")
+        )
     ]
     return sbatch_args

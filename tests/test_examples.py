@@ -1,3 +1,4 @@
+import re
 import subprocess
 from pathlib import Path
 
@@ -47,6 +48,6 @@ async def test_hydra_example(remote: Remote, monkeypatch: pytest.MonkeyPatch) ->
     )
     output = subprocess_result.stdout or subprocess_result.stderr
     # Very simple: Check that this portion of the table, near the end, shows each run as completed.
-    assert "lr=0.1 │ COMPLETED" in output
-    assert "lr=0.2 │ COMPLETED" in output
+    assert re.search(r"lr=0\.1\s+│\s+COMPLETED", output)
+    assert re.search(r"lr=0\.2\s+│\s+COMPLETED", output)
     assert subprocess_result.returncode == 0

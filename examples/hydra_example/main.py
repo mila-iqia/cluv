@@ -114,6 +114,8 @@ def main(config_dict: DictConfig):
         start_time = int(checkpoint_file.read_text()) + 1
         print(f"Resuming from checkpoint {checkpoint_file} at step {start_time + 1}.")
     else:
+        print(f"Starting training from scratch. Checkpoints will be stored in {run_dir}.")
+
         start_time = 0
 
     # TODO: Make this a "real" torch distributed example that run on Tamia and other clusters with

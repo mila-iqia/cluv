@@ -68,8 +68,9 @@ class CluvLauncher(Launcher):
         self,
         ## NEW args:
         cluster: str = "first",  # which cluster to submit to.
-        job_script: str
-        | Path = "scripts/job.sh",  # the job script to run on the cluster. It should be set up to run the command passed to `submit` in its arguments.
+        # The job script to run on the cluster.
+        # It should use "$@" to capture and pass down the arguments to the python script.
+        job_script: str | Path = "scripts/job.sh",
         vram_gb: int | None = None,  # Enables job packing!
         checkpointing: bool = True,  # Enables job chunking (via job arrays!)
         # executor: Callable[[], RemoteSlurmExecutor],
@@ -221,7 +222,7 @@ class CluvLauncher(Launcher):
         assert self.cluster_remotes
         cluster = self.cluster
 
-        # TODO: Remove any 'hydra/launcher'-related configs!
+        # TODO: Remove any 'hydra/launcher'-related configs. This isn't as easy as it sounds!
         new_job_overrides = []
         for overrides in job_overrides:
             new_override = [
@@ -232,18 +233,22 @@ class CluvLauncher(Launcher):
             new_job_overrides.append(new_override)
         job_overrides = new_job_overrides
 
+        # TODO: Add job packing! :)
         # if self.vram_gb:
         # _packing_factor = 5
         # self.params["ntasks_per_gpu"] = 5
         # pack the jobs based on their VRAM requirements and the packing factor
         # job_specs = job_packing(job_overrides, packing_factor)
+
         cluster_results_dir = self.cluv_config.get_cluster_config(cluster).results_path
-        assert self.cluster != "first", "todo"
+
         cluster_remote = self.cluster_remotes[self.cluster]
         cluster_results_dir = PurePosixPath(
             await cluster_remote.get_output(f"echo {cluster_results_dir}")
         )
         local_results_dir = get_results_path()
+
+        sbatch_args = convert_submitit_style_params_to_sbatch_flags(self.params)
 
         _runid_template = get_run_id(
             cluster=cluster,
@@ -254,16 +259,6 @@ class CluvLauncher(Launcher):
             doing_job_chunking=False,
         )
 
-        sbatch_args = convert_submitit_style_params_to_sbatch_flags(self.params)
-        # Drop the flags we don't want.
-        sbatch_args = [
-            arg
-            for arg in sbatch_args
-            if not arg.startswith(("--output=", "--wckey", "--job-name"))
-            or "{folder}" in arg
-            or "{command}" in arg
-        ]
-
         job_infos: list[JobInfo] = []
         for override in job_overrides:
             # Use this so the output is where it would be if we used submitit.
@@ -273,7 +268,10 @@ class CluvLauncher(Launcher):
             job = await submit(
                 cluster=cluster,
                 job_script=Path(self.job_script),
-                sbatch_args=[f"--output={cluster_results_dir}/{_runid_template}/%j_%t_log.out"],
+                # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
+                # to do this, but I can't see it right now.
+                sbatch_args=sbatch_args
+                + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t_log.out"],
                 program_args=["python", "main.py", *override],
                 _skip_sync=True,
             )
@@ -476,8 +474,17 @@ def convert_submitit_style_params_to_sbatch_flags(
     params = submitit_launcher_params.copy()
     params = {eq_dict.get(k, k): v for k, v in params.items()}
     generated_sbatch_script = _make_sbatch_string("{command}", folder="{folder}", **params)
-    return [
+    raw = [
         line.removeprefix("#SBATCH").strip()
         for line in generated_sbatch_script.splitlines()
         if line.startswith("#SBATCH")
     ]
+    # Drop the flags we don't want.
+    sbatch_args = [
+        arg
+        for arg in raw
+        if not arg.startswith(("--output=", "--wckey", "--job-name"))
+        or "{folder}" in arg
+        or "{command}" in arg
+    ]
+    return sbatch_args

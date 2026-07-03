@@ -26,6 +26,7 @@ from cluv.slurm import (
     parse_sinfo_nodes,
     parse_slurm_time,
     parse_timestamp,
+    sacct_job,
 )
 from cluv.utils import console, current_cluster
 
@@ -127,17 +128,12 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
         logger.info(f"No connection to [bold]{cluster}[/bold]; skipping jobs")
         return {}
 
-    ids_str = ",".join(str(jid) for jid in job_ids)
-    cmd = (
-        f"sacct -j {ids_str} --format=JobID,State,Start,Submit,Elapsed"
-        f" --noheader --allocations --array --parsable2"
-    )
+    ids_str = ",".join(str(id) for id in job_ids)
 
     try:
-        if remote:
-            raw = await remote.get_output(cmd, hide=True, warn=True, display=False)
-        else:
-            raw = (await run(tuple(shlex.split(cmd)), hide=True)).stdout.strip()
+        raw = await sacct_job(
+            remote, ids_str, format="JobID,State,Start,Submit,Elapsed", additional_args="--array"
+        )
     except Exception as exc:
         logger.warning(f"[red]Could not get jobs {ids_str} for {cluster}: {exc}[/red]")
         return {}

@@ -25,7 +25,7 @@ from cluv.cli.submit import submit
 from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
-from cluv.slurm import sacct_job
+from cluv.slurm import run_sacct
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -247,7 +247,7 @@ async def test_submit(remote: Remote, fake_scratch: Path):
             "DEADLINE",
         }
         async with asyncio.timeout(TEST_SUBMIT_TIMEOUT_SECONDS):
-            while (job_state := await sacct_job(remote, job_id)) not in TERMINAL_STATES:
+            while (job_state := await run_sacct(remote, job_id)) not in TERMINAL_STATES:
                 print(
                     f"Job {job_id} is in state {job_state}, waiting for it to reach a terminal state..."
                 )

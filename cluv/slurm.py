@@ -50,13 +50,12 @@ def parse_slurm_time(time: str) -> timedelta:
     )
 
 
-async def sacct_job(
-    remote: Remote | None, job_id: str | int, format: str = "State", additional_args: str = ""
+async def run_sacct(
+    remote: Remote | None, jobs: str | int, format: str = "State", additional_args: str = ""
 ) -> str:
     """Run sacct on the given job id(s) and return the output."""
     sacct_command = (
-        f"sacct -j {job_id} --format={format} "
-        f"--parsable2 --noheader --allocations {additional_args}"
+        f"sacct -j {jobs} --format={format} --parsable2 --noheader --allocations {additional_args}"
     )
     if remote:
         return await remote.get_output(sacct_command, hide=True)

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=4G
+#SBATCH --mem=4G
 #SBATCH --time=0:05:00
 
 project_name="cluv"  # to be replaced with the user's project name.

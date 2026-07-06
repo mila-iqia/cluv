@@ -75,17 +75,16 @@ async def sync(
     config = get_cluv_config()
 
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
-    all_remotes = await get_active_remotes()
     if clusters:
         remotes = await login(clusters)
-    elif not all_remotes:
+    else:
+        remotes = await get_active_remotes()
+        clusters = [remote.hostname for remote in remotes]
+    if not remotes:
         raise RuntimeError(
             "[red]Not currently connected to any Slurm cluster.[/red] "
             "Use `cluv login` to login and create reusable connections."
         )
-    else:
-        remotes = all_remotes.copy()
-        clusters = [remote.hostname for remote in all_remotes]
 
     if "GITHUB_ACTIONS" not in os.environ and not await _head_is_up_to_date():
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
@@ -109,11 +108,11 @@ async def sync(
     ):
         _source_host, _, source_path = config.data_source.partition(":")
         # Fetch the data from the source cluster and copy it to the local datasets_path.
-        source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
+        source_remote = next((r for r in remotes if r.hostname == source_cluster), None)
         if not source_remote:
             raise RuntimeError(
                 f"[red]Unable to sync datasets, need a connection to the source cluster "
-                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
+                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in remotes]}\n"
                 f"Use `cluv login {source_cluster}` to create a reusable connection to the "
                 f"source cluster."
             )

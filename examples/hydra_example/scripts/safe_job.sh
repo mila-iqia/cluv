@@ -9,6 +9,7 @@ project_name="hydra_example"
 project_root="$HOME/repos/cluv/examples/hydra_example"
 results_path="$SCRATCH/logs/cluv"
 
+set -e  # exit on error
 
 echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
 # Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.

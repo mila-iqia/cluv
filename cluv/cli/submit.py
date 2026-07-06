@@ -452,6 +452,10 @@ def get_sbatch_command(
     env_vars: dict[str, str] = {**config.env}
     env_vars.update(cluster_config.env)
 
+    # The sbatch args from the config are overwritten by the ones passed to the submit command.
+    config_sbatch_args = sbatch_args_from_dict(cluster_config.sbatch_args)
+    sbatch_args = config_sbatch_args + sbatch_args
+
     # Prefix the job name with "cluv-" so it is easy to identify cluv-submitted jobs in sacct.
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
@@ -494,9 +498,8 @@ def get_sbatch_command(
         )
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    config_sbatch_args = sbatch_args_from_dict(cluster_config.sbatch_args)
-    all_sbatch_args = config_sbatch_args + sbatch_args
-    sbatch_args_str = shlex.join(all_sbatch_args)
+
+    sbatch_args_str = shlex.join(sbatch_args)
     program_args_str = shlex.join(program_args)
 
     return (

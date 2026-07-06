@@ -109,11 +109,12 @@ async def sync(
     ):
         _source_host, _, source_path = config.data_source.partition(":")
         # Fetch the data from the source cluster and copy it to the local datasets_path.
-        source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
+        available_remotes = {remote.hostname: remote for remote in [*all_remotes, *remotes]}
+        source_remote = available_remotes.get(source_cluster)
         if not source_remote:
             raise RuntimeError(
                 f"[red]Unable to sync datasets, need a connection to the source cluster "
-                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
+                f"({source_cluster})[/red]. Current connections: {list(available_remotes)}\n"
                 f"Use `cluv login {source_cluster}` to create a reusable connection to the "
                 f"source cluster."
             )

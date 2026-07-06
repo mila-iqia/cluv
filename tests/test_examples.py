@@ -37,13 +37,7 @@ from cluv.remote import Remote
     "job_script",
     [
         "scripts/job.sh",
-        pytest.param(
-            "scripts/safe_job.sh",
-            marks=pytest.mark.xfail(
-                reason="TODO: scripts/safe_job.sh is probably not working. Need to investigate.",
-                strict=True,
-            ),
-        ),
+        "scripts/safe_job.sh",
     ],
 )
 async def test_hydra_example(

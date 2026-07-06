@@ -64,6 +64,7 @@ async def test_hydra_example(
         text=True,
     )
     output = subprocess_result.stdout or subprocess_result.stderr
+    print(f"Output of hydra example:\n{output}")
     # Very simple: Check that this portion of the table, near the end, shows each run as completed.
     assert re.search(r"lr=0\.1\s+│\s+COMPLETED", output)
     assert re.search(r"lr=0\.2\s+│\s+COMPLETED", output)

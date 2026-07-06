@@ -7,13 +7,13 @@ import unittest.mock
 from pathlib import Path
 from unittest import mock
 
-
 import pytest
 
 import cluv.__main__ as cluv_main
 import cluv.cli.init
 import cluv.cli.submit
 import cluv.remote
+import cluv.slurm
 import cluv.utils
 from cluv.cli.submit import (
     build_submit_command,
@@ -624,6 +624,9 @@ async def test_submit_first_considers_current_cluster(
 
     monkeypatch.setattr(
         cluv.remote, cluv.remote.run.__name__, _mock := unittest.mock.AsyncMock(wraps=fake_run)
+    )
+    monkeypatch.setattr(
+        cluv.slurm, cluv.slurm.run.__name__, _mock := unittest.mock.AsyncMock(wraps=fake_run)
     )
     monkeypatch.setattr(
         cluv.cli.submit,

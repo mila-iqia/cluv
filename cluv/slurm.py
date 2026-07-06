@@ -6,8 +6,11 @@ All functions are free of I/O and can be unit-tested against fixture strings.
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+
+from cluv.remote import Remote, run
 
 FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
 
@@ -45,6 +48,19 @@ def parse_slurm_time(time: str) -> timedelta:
         minutes=int(match.group(3)),
         seconds=int(match.group(4)),
     )
+
+
+async def run_sacct(
+    remote: Remote | None, jobs: str | int, format: str = "State", additional_args: str = ""
+) -> str:
+    """Run sacct on the given job id(s) and return the output."""
+    sacct_command = (
+        f"sacct -j {jobs} --format={format} --parsable2 --noheader --allocations {additional_args}"
+    )
+    if remote:
+        return await remote.get_output(sacct_command, hide=True)
+    result = await run(tuple(shlex.split(sacct_command)), hide=True)
+    return result.stdout.strip()
 
 
 # ---------------------------------------------------------------------------

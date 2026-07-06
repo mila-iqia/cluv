@@ -109,7 +109,8 @@ async def sync(
     ):
         _source_host, _, source_path = config.data_source.partition(":")
         # Fetch the data from the source cluster and copy it to the local datasets_path.
-        # Prefer remotes returned by `login`, since they may include freshly-created connections.
+        # Prefer remotes returned by `login`: for duplicate hostnames, later dict entries overwrite
+        # earlier ones, so freshly-created/reused login remotes take precedence over all_remotes.
         available_remotes = {remote.hostname: remote for remote in [*all_remotes, *remotes]}
         source_remote = available_remotes.get(source_cluster)
         if not source_remote:

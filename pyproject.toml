@@ -107,6 +107,9 @@ results_path = "$SCRATCH/logs/cluv"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
 results_symlink = "logs"
+# The path where the project should be replicated on remote clusters.
+project_dir = "$HOME/repos/cluv"
+
 ## Where to read the data from when synchronizing data to all clusters.
 #data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
 ## Where the dataset should be replicated on all clusters.

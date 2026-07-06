@@ -1,3 +1,4 @@
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -57,11 +58,12 @@ async def test_hydra_example(
     monkeypatch.chdir(repo_root / "examples/hydra_example")
 
     subprocess_result = subprocess.run(
-        f"uv run python main.py --multirun launcher=cluv hydra.launcher.cluster={remote.hostname} "
+        f"python main.py --multirun launcher=cluv hydra.launcher.cluster={remote.hostname} "
         f"hydra.launcher.job_script={job_script} lr=0.1,0.2",
         shell=True,
         capture_output=True,
         text=True,
+        env=os.environ.copy(),
     )
     output = subprocess_result.stdout or subprocess_result.stderr
     print(f"Output of hydra example:\n{output}")

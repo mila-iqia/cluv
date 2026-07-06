@@ -8,4 +8,8 @@
 
 # Run the job command passed as an argument when submitting the job ('python main.py' for example)
 echo "Running command: $@"
+
+echo "Environment variables:"
+env
+
 srun uv run "$@"

@@ -21,7 +21,7 @@ from remote_slurm_executor.slurm_remote import RemoteSlurmJob
 from submitit.helpers import _default_custom_logging
 from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
-from cluv.cli.submit import display_commands, raise_on_command_error, submit
+from cluv.cli.submit import display_commands, submit
 from cluv.cli.sync import expandvars, fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import JobInfo, RunInfo, current_run_info, get_results_path, get_run_id
@@ -272,7 +272,7 @@ class CluvLauncher(Launcher):
 
 
 async def run_sweep(
-    job_overrides: list[list[str]],
+    job_commands: list[list[str]],
     cluster: str,
     cluv_config: CluvConfig,
     cluster_remotes: dict[str, Remote],
@@ -299,12 +299,12 @@ async def run_sweep(
     )
 
     job_infos: list[JobInfo] = []
-    for override in job_overrides:
+    for job_command in job_commands:
         # Use this so the output is where it would be if we used submitit.
         # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
         # TODO: Save the command used for submission in the output folder as well, since we
         # don't generate a job script.
-        with set_context(display_commands, True), set_context(raise_on_command_error, True):
+        with set_context(display_commands, True):
             job = await submit(
                 cluster=cluster,
                 job_script=Path(job_script) if job_script is not None else None,
@@ -312,7 +312,7 @@ async def run_sweep(
                 # to do this, but I can't see it right now.
                 sbatch_args=sbatch_args
                 + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t.out"],
-                program_args=["python", "main.py", *override],
+                program_args=["python", "main.py", *job_command],
                 _skip_sync=True,
             )
         if job is None:
@@ -345,7 +345,7 @@ async def run_sweep(
                     cluster=cluster,
                     run_id=run_id,
                     results_path=local_job_results_path,
-                    command=override,
+                    command=job_command,
                 )
             ],
         )

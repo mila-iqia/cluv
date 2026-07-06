@@ -25,7 +25,7 @@ from milatools.utils.parallel_progress import (
 
 from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.config import CluvConfig, find_pyproject, get_cluv_config
+from cluv.config import CluvConfig, find_pyproject, get_cluv_config, load_cluv_config
 from cluv.job import get_datasets_path
 from cluv.remote import Remote, get_ssh_options_for_host, run
 from cluv.utils import console, console_lock, current_cluster
@@ -164,9 +164,18 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     config = get_cluv_config()
     cluster = remote.hostname
     cluster_config = config.get_cluster_config(remote.hostname)
-    project_path = cluster_config.project_dir or PurePosixPath(
-        find_pyproject().parent.relative_to(Path.home())
-    )
+    project_path = cluster_config.project_dir
+    if project_path is None:
+        if find_pyproject().parent.is_relative_to(Path.home()):
+            project_path = PurePosixPath(
+                "$HOME" / find_pyproject().parent.relative_to(Path.home())
+            )
+        else:
+            raise RuntimeError(
+                f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
+                f"project root ({find_pyproject().parent}) is not under $HOME. "
+                f"Please set `cluv.project_dir` in the Cluv config section of pyproject.toml."
+            )
     project_path = await expandvars(remote, project_path)
 
     def _update_progress(progress: int, status: str, total: int):
@@ -296,6 +305,32 @@ async def clone_project(
     """
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
 
+    # In the case of a subproject (like the examples in the cluv repo), these are different!
+    local_project_root = find_pyproject().parent
+    local_repo_dir = Path(subprocess.getoutput("git rev-parse --show-toplevel").strip())
+
+    if local_project_root == local_repo_dir:
+        cluster_repo_dir = project_path
+    elif not local_repo_dir.is_relative_to(Path.home()):
+        # Try to find the directory where the project should be cloned on the cluster
+        # by reading the pyproject.toml at the repo root. Hopefully it has a cluv config with project_dir set.
+        cluster_repo_dir = None
+        if (local_repo_dir / "pyproject.toml").exists():
+            cluster_repo_dir = (
+                load_cluv_config(local_repo_dir / "pyproject.toml")
+                .get_cluster_config(remote.hostname)
+                .project_dir
+            )
+        if not cluster_repo_dir:
+            raise RuntimeError(
+                f"Can't tell where to clone the current git repository on {remote.hostname}, "
+                f"because the project isn't under $HOME, and there is no `project_dir` in the "
+                f"subproject or in the root pyproject.toml."
+            )
+    else:
+        cluster_repo_dir = PurePosixPath("$HOME" / local_repo_dir.relative_to(Path.home()))
+        cluster_repo_dir = await expandvars(remote, cluster_repo_dir)
+
     if project_state.checked_out_git_commit == current_git_commit:
         logger.info(
             f"Project is already at commit {current_git_commit} on {remote.hostname}. Skipping."
@@ -330,10 +365,12 @@ async def clone_project(
     gitenv = {"GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new"}
 
     # If the project isn't cloned yet, clone it.
-    if not await remote_test("-d", project_path, remote):
+    if not await remote_test("-d", cluster_repo_dir, remote):
         logger.info(f"Project isn't cloned yet on {remote.hostname}.")
-        await remote.run(f"git clone {github_repo_url} {project_path}", hide=True, env=gitenv)
+        await remote.run(f"git clone {github_repo_url} {cluster_repo_dir}", hide=True, env=gitenv)
 
+    # Doesn't matter if we run git fetch/pull/checkout in the repo root or the subdirectory,
+    # no need to use `cluster_repo_dir` here.
     await remote.run(f"git -C {project_path} fetch --all --prune", hide=True, env=gitenv)
 
     if not detached_head:

@@ -369,16 +369,16 @@ async def clone_project(
         logger.info(f"Project isn't cloned yet on {remote.hostname}.")
         await remote.run(f"git clone {github_repo_url} {cluster_repo_dir}", hide=True, env=gitenv)
 
-    # Doesn't matter if we run git fetch/pull/checkout in the repo root or the subdirectory,
-    # no need to use `cluster_repo_dir` here.
-    await remote.run(f"git -C {project_path} fetch --all --prune", hide=True, env=gitenv)
+    # It actually matters where we do the fetch/pull commands from: We need to do them in the git
+    # repo root, since the project subdir might not exist on the main/master branch!
+    await remote.run(f"git -C {cluster_repo_dir} fetch --all --prune", hide=True, env=gitenv)
 
     if not detached_head:
         # Simplest case. We're on a branch, life is good.
         await remote.run(
-            f"git -C {project_path} checkout {current_git_branch}", hide=False, env=gitenv
+            f"git -C {cluster_repo_dir} checkout {current_git_branch}", hide=False, env=gitenv
         )
-        await remote.run(f"git -C {project_path} pull", hide=False, env=gitenv)
+        await remote.run(f"git -C {cluster_repo_dir} pull", hide=False, env=gitenv)
 
         # Set the checked out commit for that project on that cluster. This will be written to the
         # cache to avoid unnecessary syncs later.
@@ -402,7 +402,7 @@ async def clone_project(
     if not github_head_ref:
         # Push on master, for example after merging a PR.
         await remote.run(
-            f"git -C {project_path} checkout --detach {current_git_commit}",
+            f"git -C {cluster_repo_dir} checkout --detach {current_git_commit}",
             hide=False,
             env=gitenv,
         )
@@ -430,12 +430,12 @@ async def clone_project(
         # The head branch of a PR from a fork doesn't exist on the base repo, so
         # fetch the PR ref instead and create the branch from FETCH_HEAD.
         await remote.run(
-            f"git -C {project_path} fetch {git_remote_name} {github_ref}",
+            f"git -C {cluster_repo_dir} fetch {git_remote_name} {github_ref}",
             hide=False,
             env=gitenv,
         )
         await remote.run(
-            f"git -C {project_path} checkout -B {github_head_ref} FETCH_HEAD",
+            f"git -C {cluster_repo_dir} checkout -B {github_head_ref} FETCH_HEAD",
             hide=False,
             env=gitenv,
         )
@@ -448,12 +448,12 @@ async def clone_project(
 
     safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
     await remote.run(
-        f"git -C {project_path} checkout -B {github_head_ref} {safe_tracking_ref}",
+        f"git -C {cluster_repo_dir} checkout -B {github_head_ref} {safe_tracking_ref}",
         hide=False,
         env=gitenv,
     )
     await remote.run(
-        f"git -C {project_path} pull {git_remote_name} {github_head_ref}",
+        f"git -C {cluster_repo_dir} pull {git_remote_name} {github_head_ref}",
         hide=False,
         env=gitenv,
     )

@@ -69,17 +69,17 @@ async def sync(
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
     here = current_cluster()
-    if clusters and here in clusters:
-        clusters.remove(here)
-
     config = get_cluv_config()
 
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     if clusters:
+        if here in clusters:
+            clusters.remove(here)
         remotes = await login(clusters)
     else:
         remotes = await get_active_remotes()
         clusters = [remote.hostname for remote in remotes]
+
     if not remotes:
         raise RuntimeError(
             "[red]Not currently connected to any Slurm cluster.[/red] "

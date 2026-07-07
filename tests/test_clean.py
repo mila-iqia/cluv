@@ -89,9 +89,21 @@ def test_new_runs_are_kept():
 
 
 @pytest.fixture
+def expected_commands(
+    request: pytest.FixtureRequest,
+) -> dict[tuple[str, str], str | subprocess.CalledProcessError]:
+    """Returns a dict mapping (hostname, command) to the desired stdout string or error.
+
+    If a command is not in the dict, it will return an empty string. This allows simulating different remote outputs for different commands.
+    """
+    return getattr(request, "param", {})
+
+
+@pytest.fixture
 def commands_run_during_test(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
+    expected_commands: dict[tuple[str, str], str | subprocess.CalledProcessError],
 ) -> list[tuple[str, str]]:
     """Returns the list of (hostname, command) pairs passed to `Remote.run` during the test.
 
@@ -100,12 +112,14 @@ def commands_run_during_test(
     This allows simulating different remote outputs for different commands.
     """
     run_calls: list[tuple[str, str]] = []
-    command_to_output: dict[tuple[str, str], str] = getattr(request, "param", {})
 
     async def fake_remote_run(self: Remote, command: str, **kwargs):
         run_calls.append((self.hostname, command))
-        if (self.hostname, command) in command_to_output:
-            stdout = command_to_output[self.hostname, command]
+        if (self.hostname, command) in expected_commands:
+            stdout_or_error = expected_commands[self.hostname, command]
+            if isinstance(stdout_or_error, subprocess.CalledProcessError):
+                raise stdout_or_error
+            stdout = stdout_or_error
             return mock.Mock(
                 spec=subprocess.CompletedProcess, returncode=0, stdout=stdout, stderr=""
             )
@@ -176,60 +190,65 @@ async def test_declining_confirmation_makes_no_delete_calls(
 
 
 async def test_force_skips_confirmation_and_deletes(
-    clean_env, commands_run_during_test: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+    clean_env,
+    commands_run_during_test: list[tuple[str, str]],
+    mock_confirm: mock.Mock,
 ):
-    ask = mock.Mock()
-    monkeypatch.setattr(cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, ask)
-
     await clean(force=True)
 
-    ask.assert_not_called()
+    mock_confirm.assert_not_called()
     assert len(commands_run_during_test) == 2
-    for _hostname, command in commands_run_during_test:
-        assert "run_pruned" in command
-        assert "run_kept" not in command
+    for hostname, command in commands_run_during_test:
+        assert f"{hostname}_run_pruned" in command
+        assert f"{hostname}_run_kept" not in command
 
 
 async def test_confirming_deletes_pruned_run_on_every_cluster(
-    clean_env, commands_run_during_test: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+    clean_env,
+    commands_run_during_test: list[tuple[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+    mock_confirm: mock.Mock,
 ):
-    monkeypatch.setattr(
-        cluv.cli.clean.Confirm,
-        cluv.cli.clean.Confirm.ask.__name__,
-        mock_ask := mock.Mock(spec=cluv.cli.clean.Confirm.ask, side_effect=lambda *a, **k: True),
-    )
-
     await clean()
-    mock_ask.assert_called_once()
-    assert {hostname for hostname, _ in commands_run_during_test} == {"foo", "bar"}
-
-
-@pytest.mark.parametrize(
-    commands_run_during_test.__name__,
-    [{("foo", "rm -rf /results/foo_run_pruned"): ""}],
-    indirect=True,
-)
-async def test_one_cluster_failure_does_not_abort_the_others(
-    clean_env, commands_run_during_test: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(
-        cluv.cli.clean.Confirm,
-        cluv.cli.clean.Confirm.ask.__name__,
-        mock_confirm := mock.Mock(spec=rich.prompt.Confirm.ask, return_value=True),
+    mock_confirm.assert_called_once()
+    assert sorted(commands_run_during_test) == sorted(
+        [
+            ("foo", "rm -rf /results/foo_run_pruned"),
+            ("bar", "rm -rf /results/bar_run_pruned"),
+        ]
     )
 
-    async def failing_remote_run(self, command: str, **kwargs):
-        if self.hostname == "mila":
-            return mock.Mock(returncode=1, stderr="boom")
-        clean_env.append((self.hostname, command))
-        return mock.Mock(returncode=0, stderr="")
 
-    monkeypatch.setattr(Remote, "run", failing_remote_run)
+async def test_one_cluster_failure_does_not_abort_the_others(
+    clean_env,
+    commands_run_during_test: list[tuple[str, str]],
+    expected_commands: dict[tuple[str, str], str | subprocess.CalledProcessError],
+    mock_confirm: mock.Mock,
+):
+    expected_commands.update(
+        {
+            ("foo", "rm -rf /results/foo_run_pruned"): subprocess.CalledProcessError(
+                1, "rm -rf /results/foo_run_pruned", stderr="boom"
+            ),
+            ("bar", "rm -rf /results/bar_run_pruned"): "",
+        }
+    )
 
     await clean()  # must not raise
     mock_confirm.assert_called_once()
 
-    assert clean_env == [("tamia", mock.ANY)]
+    assert commands_run_during_test == [("bar", "rm -rf /results/bar_run_pruned")]
+
+
+@pytest.fixture
+def mock_confirm(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    value = getattr(request, "param", True)
+    monkeypatch.setattr(
+        cluv.cli.clean.Confirm,
+        cluv.cli.clean.Confirm.ask.__name__,
+        mock_confirm := mock.Mock(spec=rich.prompt.Confirm.ask, return_value=value),
+    )
+    return mock_confirm
 
 
 async def test_never_synced_cluster_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -274,6 +293,7 @@ def test_clean_cli_parses_force_and_dry_run(monkeypatch: pytest.MonkeyPatch) -> 
     mock_clean.assert_called_once_with(clusters=["rorqual", "narval"], force=True, dry_run=True)
 
 
+@pytest.mark.parametrize("cluster", "tamia", indirect=True)
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.skipif(
@@ -281,19 +301,18 @@ def test_clean_cli_parses_force_and_dry_run(monkeypatch: pytest.MonkeyPatch) -> 
     reason="Integration tests are only run on a self-hosted github runner or on a dev machine.",
 )
 async def test_clean_removes_pruned_run_but_keeps_new_one(
-    monkeypatch: pytest.MonkeyPatch, fake_scratch: Path
+    cluster: str, remote: Remote, monkeypatch: pytest.MonkeyPatch, fake_scratch: Path
 ):
     """End-to-end: an old, locally-pruned run is removed from the cluster; a brand-new,
     never-fetched run is left alone."""
     assert not current_cluster(), "test needs to run locally for now."
-    cluster = "tamia"
-    remote = await Remote.connect(cluster)
 
     monkeypatch.chdir("examples/pytorch-example")
     config = get_cluv_config()
     results_path_on_cluster = await expandvars(
         remote, config.get_cluster_config(cluster).results_path
     )
+    assert False, results_path_on_cluster  # TODO: remove this assert after debugging
 
     await remote.run(f"rm -rf {results_path_on_cluster}", warn=True, hide=True)
     await remote.run(f"mkdir -p {results_path_on_cluster}", hide=True)

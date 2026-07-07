@@ -5,11 +5,13 @@ from __future__ import annotations
 import importlib
 import os
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
 import pytest
+import rich.prompt
 
 import cluv.__main__ as cluv_main
 import cluv.cli.clean
@@ -34,7 +36,7 @@ sync_module = importlib.import_module("cluv.cli.sync")
 
 
 async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    async def fake_list_remote_run_dirs(remote, path):
+    async def fake_list_remote_run_dirs(remote: Remote, path):
         return [
             ("run_a", datetime(2026, 7, 1, tzinfo=timezone.utc)),
             ("run_b", datetime(2026, 7, 3, tzinfo=timezone.utc)),
@@ -50,9 +52,9 @@ async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pyte
 
     config = CluvConfig(
         results_path=str(tmp_path / "results"),
-        clusters={"mila": PartialClusterConfig(project_dir="/home/user/myproject")},
+        clusters={"foo": PartialClusterConfig(project_dir="/home/user/myproject")},
     )
-    remote = Remote(hostname="mila")
+    remote = Remote(hostname="foo")
     project_state = ProjectStateOnCluster()
 
     await fetch_results(remote, config, project_state)
@@ -77,11 +79,7 @@ def test_never_synced_cluster_selects_nothing():
     assert compute_runs_to_delete(set(), remote_runs, watermark=None) == []
 
 
-def test_new_run_not_the_newest_is_still_kept():
-    """Guards against re-deriving the watermark as max(remote mtimes) *inside* this
-    function instead of using the externally-supplied, previously-cached watermark --
-    the over-deletion bug found while designing this feature (see the design spec's
-    "Rejected alternative: sync-first" section)."""
+def test_new_runs_are_kept():
     watermark = datetime(2026, 7, 1, tzinfo=timezone.utc)
     remote_runs = [
         ("new_run_1", datetime(2026, 7, 2, tzinfo=timezone.utc)),
@@ -90,26 +88,51 @@ def test_new_run_not_the_newest_is_still_kept():
     assert compute_runs_to_delete(set(), remote_runs, watermark) == []
 
 
-def _config(tmp_path: Path) -> CluvConfig:
-    return CluvConfig(
-        results_path=str(tmp_path / "results"),
-        clusters={"mila": PartialClusterConfig(), "tamia": PartialClusterConfig()},
-    )
+@pytest.fixture
+def commands_run_during_test(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> list[tuple[str, str]]:
+    """Returns the list of (hostname, command) pairs passed to `Remote.run` during the test.
+
+    Can be indirectly parametrized with a dict mapping (hostname, command) to the desired stdout string
+    to return for that command. If a command is not in the dict, it will return an empty string.
+    This allows simulating different remote outputs for different commands.
+    """
+    run_calls: list[tuple[str, str]] = []
+    command_to_output: dict[tuple[str, str], str] = getattr(request, "param", {})
+
+    async def fake_remote_run(self: Remote, command: str, **kwargs):
+        run_calls.append((self.hostname, command))
+        if (self.hostname, command) in command_to_output:
+            stdout = command_to_output[self.hostname, command]
+            return mock.Mock(
+                spec=subprocess.CompletedProcess, returncode=0, stdout=stdout, stderr=""
+            )
+        return mock.Mock(spec=subprocess.CompletedProcess, returncode=0, stderr="")
+
+    monkeypatch.setattr(Remote, "run", fake_remote_run)
+    return run_calls  # return the list, which will be modified in-place during the test.
 
 
 @pytest.fixture
-def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Two clusters, each reporting one prunable run ("run_pruned") and one kept run
-    ("run_kept", which exists locally). Returns the list of (hostname, command) pairs
-    passed to `Remote.run` -- i.e. the deletion calls actually made."""
-    config = _config(tmp_path)
+    ("run_kept", which exists locally).
+
+    Returns the list of (hostname, command) pairs passed to `Remote.run`."""
+    config = CluvConfig(
+        results_path=str(tmp_path / "results"),
+        clusters={"foo": PartialClusterConfig(), "bar": PartialClusterConfig()},
+    )
     monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, lambda: config)
 
-    results_path_here = tmp_path / "results"
+    results_path_here = Path(config.results_path)
     results_path_here.mkdir()
-    (results_path_here / "run_kept").mkdir()
+    (results_path_here / "foo_run_kept").mkdir()
+    (results_path_here / "bar_run_kept").mkdir()
 
-    remotes = [Remote(hostname="mila"), Remote(hostname="tamia")]
+    remotes = [Remote(hostname="foo"), Remote(hostname="bar")]
     monkeypatch.setattr(
         cluv.cli.clean, get_active_remotes.__name__, mock.AsyncMock(return_value=remotes)
     )
@@ -117,47 +140,43 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str
     watermark = datetime(2026, 7, 1, tzinfo=timezone.utc)
     cache = CacheContent(
         project_states={
-            "mila": ProjectStateOnCluster(last_fetch_watermark=watermark),
-            "tamia": ProjectStateOnCluster(last_fetch_watermark=watermark),
+            "foo": ProjectStateOnCluster(last_fetch_watermark=watermark),
+            "bar": ProjectStateOnCluster(last_fetch_watermark=watermark),
         }
     )
     monkeypatch.setattr(cluv.cli.clean, read_cache.__name__, lambda: cache)
 
-    async def fake_list_remote_run_dirs(remote, path):
+    async def fake_list_remote_run_dirs(remote: Remote, path: str):
+        cluster = remote.hostname
         return [
-            ("run_kept", datetime(2026, 6, 20, tzinfo=timezone.utc)),
-            ("run_pruned", datetime(2026, 6, 20, tzinfo=timezone.utc)),
+            (f"{cluster}_run_kept", datetime(2026, 6, 20, tzinfo=timezone.utc)),
+            (f"{cluster}_run_pruned", datetime(2026, 6, 20, tzinfo=timezone.utc)),
         ]
 
     monkeypatch.setattr(cluv.cli.clean, list_remote_run_dirs.__name__, fake_list_remote_run_dirs)
 
-    run_calls: list[tuple[str, str]] = []
 
-    async def fake_remote_run(self, command: str, **kwargs):
-        run_calls.append((self.hostname, command))
-        return mock.Mock(returncode=0, stderr="")
-
-    monkeypatch.setattr(Remote, "run", fake_remote_run)
-    return run_calls
-
-
-async def test_dry_run_makes_no_delete_calls(clean_env: list[tuple[str, str]]):
+async def test_dry_run_makes_no_delete_calls(
+    clean_env, commands_run_during_test: list[tuple[str, str]]
+):
     await clean(dry_run=True)
-    assert clean_env == []
+    assert (
+        commands_run_during_test == []
+    )  # no calls were made to Remote.run, so nothing was deleted
 
 
 async def test_declining_confirmation_makes_no_delete_calls(
-    clean_env: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+    clean_env, commands_run_during_test: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(
         cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, lambda *a, **k: False
     )
     await clean()
-    assert clean_env == []
+    assert commands_run_during_test == []
 
 
 async def test_force_skips_confirmation_and_deletes(
-    clean_env: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+    clean_env, commands_run_during_test: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ):
     ask = mock.Mock()
     monkeypatch.setattr(cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, ask)
@@ -165,29 +184,38 @@ async def test_force_skips_confirmation_and_deletes(
     await clean(force=True)
 
     ask.assert_not_called()
-    assert len(clean_env) == 2
-    for _hostname, command in clean_env:
+    assert len(commands_run_during_test) == 2
+    for _hostname, command in commands_run_during_test:
         assert "run_pruned" in command
         assert "run_kept" not in command
 
 
 async def test_confirming_deletes_pruned_run_on_every_cluster(
-    clean_env: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+    clean_env, commands_run_during_test: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(
-        cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, lambda *a, **k: True
+        cluv.cli.clean.Confirm,
+        cluv.cli.clean.Confirm.ask.__name__,
+        mock_ask := mock.Mock(spec=cluv.cli.clean.Confirm.ask, side_effect=lambda *a, **k: True),
     )
 
     await clean()
+    mock_ask.assert_called_once()
+    assert {hostname for hostname, _ in commands_run_during_test} == {"foo", "bar"}
 
-    assert {hostname for hostname, _ in clean_env} == {"mila", "tamia"}
 
-
+@pytest.mark.parametrize(
+    commands_run_during_test.__name__,
+    [{("foo", "rm -rf /results/foo_run_pruned"): ""}],
+    indirect=True,
+)
 async def test_one_cluster_failure_does_not_abort_the_others(
-    clean_env: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
+    clean_env, commands_run_during_test: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(
-        cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, lambda *a, **k: True
+        cluv.cli.clean.Confirm,
+        cluv.cli.clean.Confirm.ask.__name__,
+        mock_confirm := mock.Mock(spec=rich.prompt.Confirm.ask, return_value=True),
     )
 
     async def failing_remote_run(self, command: str, **kwargs):
@@ -199,12 +227,16 @@ async def test_one_cluster_failure_does_not_abort_the_others(
     monkeypatch.setattr(Remote, "run", failing_remote_run)
 
     await clean()  # must not raise
+    mock_confirm.assert_called_once()
 
     assert clean_env == [("tamia", mock.ANY)]
 
 
 async def test_never_synced_cluster_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    config = _config(tmp_path)
+    config = CluvConfig(
+        results_path=str(tmp_path / "results"),
+        clusters={"mila": PartialClusterConfig(), "tamia": PartialClusterConfig()},
+    )
     monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, lambda: config)
     (tmp_path / "results").mkdir()
 

@@ -25,7 +25,10 @@ async def test_list_remote_run_dirs_parses_find_output(monkeypatch: pytest.Monke
 
 
 async def test_list_remote_run_dirs_empty_when_path_missing(monkeypatch: pytest.MonkeyPatch):
+    calls = []
+
     async def fake_get_output(self, command: str, **kwargs) -> str:
+        calls.append(kwargs)
         return ""
 
     monkeypatch.setattr(Remote, "get_output", fake_get_output)
@@ -34,3 +37,4 @@ async def test_list_remote_run_dirs_empty_when_path_missing(monkeypatch: pytest.
     result = await list_remote_run_dirs(remote, PurePosixPath("/scratch/results"))
 
     assert result == []
+    assert calls[0].get("warn") is True

@@ -38,6 +38,10 @@ class ProjectStateOnCluster:
     last_uv_sync_git_commit: str | None = None
     last_pushed_datasets: datetime | None = None
     checked_out_git_commit: str | None = None
+    last_fetch_watermark: datetime | None = None
+    """Max mtime seen among this cluster's `results_path` run dirs, as of the last
+    successful `fetch_results` call. Used by `cluv clean` to distinguish runs the
+    user pruned locally from runs that were never fetched."""
 
 
 @dataclass

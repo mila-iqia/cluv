@@ -197,11 +197,17 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
 
     num_tasks = 5 if config.data_source else 4
 
-    cache = read_cache()
-    project_state = cache.project_states.setdefault(cluster, ProjectStateOnCluster())
+    project_state = read_cache().project_states.get(cluster) or ProjectStateOnCluster()
 
     def _save():
-        assert cache.project_states[cluster] is project_state
+        # Re-read the cache right before writing, instead of reusing the snapshot read at the
+        # top of this function: multiple clusters' sync_task_function calls run concurrently in
+        # the same event loop, each starting from its own initial read, so writing back a stale
+        # full snapshot would clobber other clusters' updates. read_cache/write_cache are
+        # synchronous (no `await` in between), so this merge-and-write is atomic with respect to
+        # the other concurrently-running cluster tasks.
+        cache = read_cache()
+        cache.project_states[cluster] = project_state
         write_cache(cache)
 
     _update_progress(0, "Checking/Installing UV", num_tasks)

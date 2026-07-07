@@ -615,7 +615,7 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
             f"{results_path_here}/",
         ),
         warn=True,
-        hide=False,
+        hide="out",  # hide the stdout
     )
 
     if not results_path_here.exists():

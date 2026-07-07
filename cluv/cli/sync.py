@@ -80,6 +80,8 @@ async def sync(
         remotes = await get_active_remotes()
         clusters = [remote.hostname for remote in remotes]
 
+    remotes = {remote.hostname: remote for remote in remotes}
+
     if not remotes:
         raise RuntimeError(
             "[red]Not currently connected to any Slurm cluster.[/red] "
@@ -96,9 +98,9 @@ async def sync(
 
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
-    for remote in remotes:
+    for hostname, remote in remotes.items():
         tasks.append(functools.partial(sync_task_function, remote=remote))
-        task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
+        task_descriptions.append(f"{here or 'local'} -> {hostname}")
 
     token = console_lock.set(asyncio.Lock())
     if (
@@ -106,13 +108,13 @@ async def sync(
         and config.data_source  # cluster:path
         and (source_cluster := config.data_source.split(":", 1)[0]) != here
     ):
-        _source_host, _, source_path = config.data_source.partition(":")
+        source_cluster, _, source_path = config.data_source.partition(":")
         # Fetch the data from the source cluster and copy it to the local datasets_path.
-        source_remote = next((r for r in remotes if r.hostname == source_cluster), None)
+        source_remote = remotes.get(source_cluster)
         if not source_remote:
             raise RuntimeError(
                 f"[red]Unable to sync datasets, need a connection to the source cluster "
-                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in remotes]}\n"
+                f"({source_cluster})[/red]. Current connections: {list(remotes.keys())}\n"
                 f"Use `cluv login {source_cluster}` to create a reusable connection to the "
                 f"source cluster."
             )
@@ -133,9 +135,9 @@ async def sync(
 
     # Display a consolidated summary of all newly-synced runs across all clusters.
     cwd = Path.cwd()
-    for remote, new_runs in zip(remotes, per_cluster_new_runs):
+    for (hostname, remote), new_runs in zip(remotes.items(), per_cluster_new_runs):
         if new_runs:
-            console.print(f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]")
+            console.print(f"[green]Newly synced runs from [bold]{hostname}[/bold]:[/green]")
             for run_path in sorted(new_runs):
                 try:
                     display_path = run_path.relative_to(cwd)
@@ -143,7 +145,7 @@ async def sync(
                     display_path = run_path
                 console.print(f"  {display_path}")
 
-    return remotes
+    return list(remotes.values())
 
 
 async def get_active_remotes() -> list[Remote]:

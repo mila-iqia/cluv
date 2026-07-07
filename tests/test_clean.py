@@ -32,10 +32,6 @@ from tests.test_integration import IN_GITHUB_CLOUD_CI
 # `tests/test_init.py`) to get the actual module object for monkeypatching.
 sync_module = importlib.import_module("cluv.cli.sync")
 
-# Captured once, before any test monkeypatches `Remote.run` -- reading `Remote.run.__name__`
-# *after* a patch is applied would return the replacement's name instead of "run".
-_REMOTE_RUN_NAME = Remote.run.__name__
-
 
 async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     async def fake_list_remote_run_dirs(remote, path):
@@ -141,7 +137,7 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str
         run_calls.append((self.hostname, command))
         return mock.Mock(returncode=0, stderr="")
 
-    monkeypatch.setattr(Remote, _REMOTE_RUN_NAME, fake_remote_run)
+    monkeypatch.setattr(Remote, "run", fake_remote_run)
     return run_calls
 
 
@@ -200,7 +196,7 @@ async def test_one_cluster_failure_does_not_abort_the_others(
         clean_env.append((self.hostname, command))
         return mock.Mock(returncode=0, stderr="")
 
-    monkeypatch.setattr(Remote, _REMOTE_RUN_NAME, failing_remote_run)
+    monkeypatch.setattr(Remote, "run", failing_remote_run)
 
     await clean()  # must not raise
 

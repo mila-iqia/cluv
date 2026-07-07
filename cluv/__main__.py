@@ -243,8 +243,8 @@ def add_clean_args(subparsers: Subparsers):
         default=None,
         metavar="<cluster>",
         help=(
-            "The cluster(s) to clean. Leave empty to clean every cluster that has been "
-            "synced before."
+            "The cluster(s) to clean. Leave empty to clean every currently logged in cluster "
+            "that has been synced before."
         ),
     )
     clean_parser.add_argument(

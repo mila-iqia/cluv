@@ -1,11 +1,5 @@
 # Cleaning up run results on the clusters
 
-!!! note "Planned feature"
-    `cluv clean` is not implemented yet — this page describes how it's designed
-    to work, based on [issue #65](https://github.com/mila-iqia/cluv/issues/65).
-    It documents the target behavior so it can be reviewed before the command is
-    built.
-
 ## The problem
 
 `cluv sync` copies run results (logs, checkpoints, anything under your
@@ -62,7 +56,8 @@ Preview what would be deleted, without deleting anything:
 cluv clean --dry-run
 ```
 
-Clean up all clusters you've synced before, with a confirmation prompt:
+Clean up every cluster you're currently connected to (and that's been synced
+before), with a confirmation prompt:
 
 ```console
 cluv clean

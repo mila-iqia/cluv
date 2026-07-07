@@ -29,6 +29,5 @@ def test_last_fetch_watermark_roundtrip(fake_cache_dir: Path):
     assert reloaded.project_states["mila"].last_fetch_watermark == watermark
 
 
-def test_last_fetch_watermark_defaults_to_none(fake_cache_dir: Path):
-    cache = read_cache()
-    assert cache.project_states.get("mila") is None
+def test_last_fetch_watermark_defaults_to_none():
+    assert ProjectStateOnCluster().last_fetch_watermark is None

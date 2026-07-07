@@ -13,7 +13,7 @@ from cluv.cache import CacheContent, ProjectStateOnCluster, read_cache, write_ca
 def fake_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir(parents=True)
-    monkeypatch.setattr(cluv.cache, "_get_cache_dir", lambda: cache_dir)
+    monkeypatch.setattr(cluv.cache, cluv.cache._get_cache_dir.__name__, lambda: cache_dir)
     return cache_dir
 
 

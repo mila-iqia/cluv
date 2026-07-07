@@ -13,7 +13,7 @@ async def test_list_remote_run_dirs_parses_find_output(monkeypatch: pytest.Monke
         assert command.startswith("find ")
         return "1751328000.0 run_a\n1751414400.5 run_b\n"
 
-    monkeypatch.setattr(Remote, "get_output", fake_get_output)
+    monkeypatch.setattr(Remote, Remote.get_output.__name__, fake_get_output)
 
     remote = Remote(hostname="mila")
     result = await list_remote_run_dirs(remote, PurePosixPath("/scratch/results"))
@@ -31,7 +31,7 @@ async def test_list_remote_run_dirs_empty_when_path_missing(monkeypatch: pytest.
         calls.append(kwargs)
         return ""
 
-    monkeypatch.setattr(Remote, "get_output", fake_get_output)
+    monkeypatch.setattr(Remote, Remote.get_output.__name__, fake_get_output)
 
     remote = Remote(hostname="mila")
     result = await list_remote_run_dirs(remote, PurePosixPath("/scratch/results"))

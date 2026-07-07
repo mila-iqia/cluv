@@ -13,11 +13,17 @@ import pytest
 
 import cluv.__main__ as cluv_main
 import cluv.cli.clean
-from cluv.cache import CacheContent, ProjectStateOnCluster
+from cluv.cache import CacheContent, ProjectStateOnCluster, read_cache
 from cluv.cli.clean import clean, compute_runs_to_delete
-from cluv.cli.sync import expandvars, fetch_results, sync
+from cluv.cli.sync import (
+    create_results_dir_with_symlink_to_scratch,
+    expandvars,
+    fetch_results,
+    get_active_remotes,
+    sync,
+)
 from cluv.config import CluvConfig, PartialClusterConfig, get_cluv_config
-from cluv.remote import Remote
+from cluv.remote import Remote, list_remote_run_dirs, run
 from cluv.utils import current_cluster
 from tests.test_integration import IN_GITHUB_CLOUD_CI
 
@@ -25,6 +31,10 @@ from tests.test_integration import IN_GITHUB_CLOUD_CI
 # submodule attribute with the `sync` function. Use `importlib.import_module` (same idiom as
 # `tests/test_init.py`) to get the actual module object for monkeypatching.
 sync_module = importlib.import_module("cluv.cli.sync")
+
+# Captured once, before any test monkeypatches `Remote.run` -- reading `Remote.run.__name__`
+# *after* a patch is applied would return the replacement's name instead of "run".
+_REMOTE_RUN_NAME = Remote.run.__name__
 
 
 async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -34,11 +44,13 @@ async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pyte
             ("run_b", datetime(2026, 7, 3, tzinfo=timezone.utc)),
         ]
 
-    monkeypatch.setattr(sync_module, "list_remote_run_dirs", fake_list_remote_run_dirs)
+    monkeypatch.setattr(sync_module, list_remote_run_dirs.__name__, fake_list_remote_run_dirs)
     monkeypatch.setattr(
-        sync_module, "create_results_dir_with_symlink_to_scratch", mock.AsyncMock()
+        sync_module,
+        create_results_dir_with_symlink_to_scratch.__name__,
+        mock.AsyncMock(),
     )
-    monkeypatch.setattr(sync_module, "run", mock.AsyncMock())
+    monkeypatch.setattr(sync_module, run.__name__, mock.AsyncMock())
 
     config = CluvConfig(
         results_path=str(tmp_path / "results"),
@@ -95,14 +107,16 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str
     ("run_kept", which exists locally). Returns the list of (hostname, command) pairs
     passed to `Remote.run` -- i.e. the deletion calls actually made."""
     config = _config(tmp_path)
-    monkeypatch.setattr(cluv.cli.clean, "get_cluv_config", lambda: config)
+    monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, lambda: config)
 
     results_path_here = tmp_path / "results"
     results_path_here.mkdir()
     (results_path_here / "run_kept").mkdir()
 
     remotes = [Remote(hostname="mila"), Remote(hostname="tamia")]
-    monkeypatch.setattr(cluv.cli.clean, "get_active_remotes", mock.AsyncMock(return_value=remotes))
+    monkeypatch.setattr(
+        cluv.cli.clean, get_active_remotes.__name__, mock.AsyncMock(return_value=remotes)
+    )
 
     watermark = datetime(2026, 7, 1, tzinfo=timezone.utc)
     cache = CacheContent(
@@ -111,7 +125,7 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str
             "tamia": ProjectStateOnCluster(last_fetch_watermark=watermark),
         }
     )
-    monkeypatch.setattr(cluv.cli.clean, "read_cache", lambda: cache)
+    monkeypatch.setattr(cluv.cli.clean, read_cache.__name__, lambda: cache)
 
     async def fake_list_remote_run_dirs(remote, path):
         return [
@@ -119,7 +133,7 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str
             ("run_pruned", datetime(2026, 6, 20, tzinfo=timezone.utc)),
         ]
 
-    monkeypatch.setattr(cluv.cli.clean, "list_remote_run_dirs", fake_list_remote_run_dirs)
+    monkeypatch.setattr(cluv.cli.clean, list_remote_run_dirs.__name__, fake_list_remote_run_dirs)
 
     run_calls: list[tuple[str, str]] = []
 
@@ -127,7 +141,7 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str
         run_calls.append((self.hostname, command))
         return mock.Mock(returncode=0, stderr="")
 
-    monkeypatch.setattr(Remote, "run", fake_remote_run)
+    monkeypatch.setattr(Remote, _REMOTE_RUN_NAME, fake_remote_run)
     return run_calls
 
 
@@ -139,7 +153,9 @@ async def test_dry_run_makes_no_delete_calls(clean_env: list[tuple[str, str]]):
 async def test_declining_confirmation_makes_no_delete_calls(
     clean_env: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(cluv.cli.clean.Confirm, "ask", lambda *a, **k: False)
+    monkeypatch.setattr(
+        cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, lambda *a, **k: False
+    )
     await clean()
     assert clean_env == []
 
@@ -148,7 +164,7 @@ async def test_force_skips_confirmation_and_deletes(
     clean_env: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ):
     ask = mock.Mock()
-    monkeypatch.setattr(cluv.cli.clean.Confirm, "ask", ask)
+    monkeypatch.setattr(cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, ask)
 
     await clean(force=True)
 
@@ -162,7 +178,9 @@ async def test_force_skips_confirmation_and_deletes(
 async def test_confirming_deletes_pruned_run_on_every_cluster(
     clean_env: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(cluv.cli.clean.Confirm, "ask", lambda *a, **k: True)
+    monkeypatch.setattr(
+        cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, lambda *a, **k: True
+    )
 
     await clean()
 
@@ -172,7 +190,9 @@ async def test_confirming_deletes_pruned_run_on_every_cluster(
 async def test_one_cluster_failure_does_not_abort_the_others(
     clean_env: list[tuple[str, str]], monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(cluv.cli.clean.Confirm, "ask", lambda *a, **k: True)
+    monkeypatch.setattr(
+        cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, lambda *a, **k: True
+    )
 
     async def failing_remote_run(self, command: str, **kwargs):
         if self.hostname == "mila":
@@ -180,7 +200,7 @@ async def test_one_cluster_failure_does_not_abort_the_others(
         clean_env.append((self.hostname, command))
         return mock.Mock(returncode=0, stderr="")
 
-    monkeypatch.setattr(Remote, "run", failing_remote_run)
+    monkeypatch.setattr(Remote, _REMOTE_RUN_NAME, failing_remote_run)
 
     await clean()  # must not raise
 
@@ -189,15 +209,17 @@ async def test_one_cluster_failure_does_not_abort_the_others(
 
 async def test_never_synced_cluster_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     config = _config(tmp_path)
-    monkeypatch.setattr(cluv.cli.clean, "get_cluv_config", lambda: config)
+    monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, lambda: config)
     (tmp_path / "results").mkdir()
 
     remotes = [Remote(hostname="mila")]
-    monkeypatch.setattr(cluv.cli.clean, "get_active_remotes", mock.AsyncMock(return_value=remotes))
-    monkeypatch.setattr(cluv.cli.clean, "read_cache", lambda: CacheContent())
+    monkeypatch.setattr(
+        cluv.cli.clean, get_active_remotes.__name__, mock.AsyncMock(return_value=remotes)
+    )
+    monkeypatch.setattr(cluv.cli.clean, read_cache.__name__, lambda: CacheContent())
 
     called = mock.AsyncMock()
-    monkeypatch.setattr(cluv.cli.clean, "list_remote_run_dirs", called)
+    monkeypatch.setattr(cluv.cli.clean, list_remote_run_dirs.__name__, called)
 
     await clean()
 
@@ -205,7 +227,9 @@ async def test_never_synced_cluster_is_skipped(tmp_path: Path, monkeypatch: pyte
 
 
 def test_clean_cli_parses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cluv_main, "clean", mock_clean := mock.AsyncMock(spec=cluv_main.clean))
+    monkeypatch.setattr(
+        cluv_main, cluv_main.clean.__name__, mock_clean := mock.AsyncMock(spec=cluv_main.clean)
+    )
 
     cluv_main.main(["clean"])
 
@@ -213,7 +237,9 @@ def test_clean_cli_parses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_clean_cli_parses_force_and_dry_run(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cluv_main, "clean", mock_clean := mock.AsyncMock(spec=cluv_main.clean))
+    monkeypatch.setattr(
+        cluv_main, cluv_main.clean.__name__, mock_clean := mock.AsyncMock(spec=cluv_main.clean)
+    )
 
     cluv_main.main(["clean", "rorqual", "narval", "--force", "--dry-run"])
 

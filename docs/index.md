@@ -59,3 +59,13 @@ cluv sync rorqual
 ```console
 cluv submit rorqual scripts/job.sh --time=00:10:00 -- python main.py
 ```
+
+### Run a one-off command on a specific cluster
+```console
+cluv run mila -- nvidia-smi
+```
+
+### Check the status of your clusters and jobs
+```console
+cluv status
+```

@@ -137,7 +137,10 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     Returns the list of (hostname, command) pairs passed to `Remote.run`."""
     config = CluvConfig(
         results_path=str(tmp_path / "results"),
-        clusters={"foo": PartialClusterConfig(), "bar": PartialClusterConfig()},
+        clusters={
+            "foo": PartialClusterConfig(results_path="/results"),
+            "bar": PartialClusterConfig(results_path="/results"),
+        },
     )
     monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, lambda: config)
 
@@ -237,7 +240,12 @@ async def test_one_cluster_failure_does_not_abort_the_others(
     await clean()  # must not raise
     mock_confirm.assert_called_once()
 
-    assert commands_run_during_test == [("bar", "rm -rf /results/bar_run_pruned")]
+    assert sorted(commands_run_during_test) == sorted(
+        [
+            ("foo", "rm -rf /results/foo_run_pruned"),
+            ("bar", "rm -rf /results/bar_run_pruned"),
+        ]
+    )
 
 
 @pytest.fixture

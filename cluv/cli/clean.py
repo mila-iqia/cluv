@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 from datetime import datetime
+from pathlib import Path
 
-# Unused until clean()'s body is implemented (Task 5) -- kept here now as monkeypatch
-# targets for tests/test_clean.py's orchestration tests.
-from rich.prompt import Confirm  # noqa: F401
-from cluv.cache import CacheContent, read_cache  # noqa: F401
-from cluv.cli.login import login  # noqa: F401
-from cluv.cli.sync import expandvars, get_active_remotes  # noqa: F401
-from cluv.config import get_cluv_config  # noqa: F401
-from cluv.remote import Remote, list_remote_run_dirs  # noqa: F401
-from cluv.utils import console  # noqa: F401
+from rich.prompt import Confirm
+
+from cluv.cache import CacheContent, read_cache
+from cluv.cli.login import login
+from cluv.cli.sync import expandvars, get_active_remotes
+from cluv.config import get_cluv_config
+from cluv.remote import list_remote_run_dirs
+from cluv.utils import console
 
 __all__ = ["clean", "compute_runs_to_delete"]
 
@@ -32,7 +34,16 @@ def compute_runs_to_delete(
 
     Returns an empty list if `watermark` is `None` (the cluster has never been synced).
     """
-    raise NotImplementedError
+    if watermark is None:
+        return []
+    return sorted(
+        name for name, mtime in remote_runs if name not in local_names and mtime < watermark
+    )
+
+
+def _watermark_for(cache: CacheContent, cluster: str) -> datetime | None:
+    project_state = cache.project_states.get(cluster)
+    return project_state.last_fetch_watermark if project_state else None
 
 
 async def clean(
@@ -48,4 +59,88 @@ async def clean(
     Slurm jobs, and cross-cluster run-name collisions, are not specially handled (see the design
     spec's "Non-goals" section).
     """
-    raise NotImplementedError
+    config = get_cluv_config()
+
+    all_remotes = await get_active_remotes()
+    if clusters:
+        remotes = await login(clusters)
+    elif not all_remotes:
+        raise RuntimeError(
+            "[red]Not currently connected to any Slurm cluster.[/red] "
+            "Use `cluv login` to login and create reusable connections."
+        )
+    else:
+        remotes = all_remotes.copy()
+
+    cache = read_cache()
+    results_path_here = Path(os.path.expandvars(config.results_path))
+    local_names = (
+        {p.name for p in results_path_here.iterdir() if p.is_dir()}
+        if results_path_here.exists()
+        else set()
+    )
+
+    per_cluster_to_delete: dict[str, list[str]] = {}
+    skipped: list[str] = []
+    for remote in remotes:
+        cluster = remote.hostname
+        watermark = _watermark_for(cache, cluster)
+        if watermark is None:
+            skipped.append(cluster)
+            continue
+        cluster_config = config.get_cluster_config(cluster)
+        results_path_on_cluster = await expandvars(remote, cluster_config.results_path)
+        remote_runs = await list_remote_run_dirs(remote, results_path_on_cluster)
+        to_delete = compute_runs_to_delete(local_names, remote_runs, watermark)
+        if to_delete:
+            per_cluster_to_delete[cluster] = to_delete
+
+    for cluster in skipped:
+        console.print(
+            f"[yellow]Skipping {cluster}: never synced. Run `cluv sync {cluster}` first.[/yellow]"
+        )
+
+    if not per_cluster_to_delete:
+        console.print("[green]Nothing to clean.[/green]")
+        return
+
+    total = sum(len(names) for names in per_cluster_to_delete.values())
+    console.print("[bold]The following run directories will be removed:[/bold]")
+    for cluster, names in per_cluster_to_delete.items():
+        console.print(f"  [cyan]{cluster}[/cyan]:")
+        for name in names:
+            console.print(f"    {name}")
+
+    if dry_run:
+        return
+
+    if not force and not Confirm.ask(
+        f"Delete {total} run director{'y' if total == 1 else 'ies'} across "
+        f"{len(per_cluster_to_delete)} cluster(s)?",
+        default=False,
+    ):
+        console.print("Aborted.")
+        return
+
+    remote_by_hostname = {remote.hostname: remote for remote in remotes}
+    removed = 0
+    failed: list[tuple[str, str]] = []
+    for cluster, names in per_cluster_to_delete.items():
+        remote = remote_by_hostname[cluster]
+        cluster_config = config.get_cluster_config(cluster)
+        results_path_on_cluster = await expandvars(remote, cluster_config.results_path)
+        for name in names:
+            try:
+                await remote.run(f"rm -rf {results_path_on_cluster / name}", hide=True)
+            except subprocess.CalledProcessError:
+                failed.append((cluster, name))
+            else:
+                removed += 1
+
+    console.print(
+        f"[green]Removed {removed} run director{'y' if removed == 1 else 'ies'}.[/green]"
+    )
+    if failed:
+        console.print(f"[red]Failed to remove {len(failed)}:[/red]")
+        for cluster, name in failed:
+            console.print(f"  {cluster}: {name}")

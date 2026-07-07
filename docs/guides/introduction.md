@@ -27,6 +27,7 @@ These are the main goals of Cluv:
   one starts running first, and cancel the rest.
 - `cluv sync`: Fetch the results from the clusters where I ran jobs previously.
 - `cluv run mila -- ls logs`: Sync the project and run a command in the project dir on a cluster.
+- `cluv clean`: Once I've deleted a run's results locally, remove the matching results from the cluster(s) it ran on. See the [cleaning up runs guide](cleaning-runs.md).
 
 ### Intuitive monitoring of jobs and cluster health across clusters
 

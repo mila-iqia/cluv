@@ -64,6 +64,13 @@ See the [Hydra launcher guide](guides/hydra-launcher.md) for setup and usage.
 cluv sync rorqual
 ```
 
+### Clean up old run results from the clusters
+```console
+cluv clean
+```
+
+See the [cleaning up runs guide](guides/cleaning-runs.md) for details on how this decides what's safe to delete.
+
 ### Submit a job to a specific cluster
 ```console
 cluv submit rorqual scripts/job.sh --time=00:10:00 -- python main.py

@@ -12,13 +12,13 @@ import hydra_zen
 import omegaconf
 import rich
 import rich.box
+import rich.live
 import rich.table
 from hydra.core.utils import JobReturn, JobStatus
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
 from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-from submitit.helpers import _default_custom_logging
 from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
 from cluv.cli.submit import display_commands, submit
@@ -436,15 +436,37 @@ def get_jobs_table(job_infos: list[JobInfo], local_results_dir: Path) -> rich.ta
     return table
 
 
+def _build_monitoring_table(
+    jobs: Sequence[JobInfo],
+    submitit_jobs: Sequence[RemoteSlurmJob],
+    monitoring_start_time: float,
+) -> rich.table.Table:
+    elapsed_minutes = int((time.time() - monitoring_start_time) / 60)
+    table = rich.table.Table(
+        title=f"Monitoring {len(jobs)} jobs (elapsed: {elapsed_minutes}min)",
+        box=rich.box.ROUNDED,
+        header_style="bold white on #1a1a2e",
+        title_style="bold cyan",
+        expand=True,
+    )
+    table.add_column("Run id", style="bold")
+    table.add_column("Command", justify="right")
+    table.add_column("State", justify="right")
+    for job, submitit_job in zip(jobs, submitit_jobs):
+        run = job.tasks[0]
+        table.add_row(run.run_id, " ".join(run.command), submitit_job.state)
+    return table
+
+
 async def monitor_jobs_async(
     jobs: Sequence[JobInfo],
     poll_interval_seconds: float = 30,
     test_mode: bool = False,
-    custom_logging: Callable = _default_custom_logging,
 ) -> None:
     """Async version of `monitor_jobs` from submitit.
 
-    Continuously monitors given jobs until they are all done or failed.
+    Continuously monitors given jobs until they are all done or failed, displaying their
+    status in a live-updating table.
 
     Parameters
     ----------
@@ -467,38 +489,40 @@ async def monitor_jobs_async(
         print("There are no jobs to monitor")
         return
 
-    job_arrays = [job.job_id for job in jobs]
-    print(f"Monitoring {n_jobs} jobs from job arrays {job_arrays} \n")
-
     submitit_jobs = [
         RemoteSlurmJob(
             job.cluster,
             folder="",
             job_id=str(job.job_id),
             tasks=list(range(len(job.tasks))),
-            remote_dir_sync=None,
+            remote_dir_sync=None,  # type: ignore
         )
         for job in jobs
     ]
 
     monitoring_start_time = time.time()
-    while True:
-        if not test_mode:
-            submitit_jobs[0].get_info(mode="force")  # Force update once to sync the state
-        state_jobs = collections.defaultdict(set)
-        for i, job in enumerate(submitit_jobs):
-            state_jobs[job.state.upper()].add(i)
-            if job.done():
-                state_jobs["DONE"].add(i)
+    with rich.live.Live(
+        _build_monitoring_table(jobs, submitit_jobs, monitoring_start_time),
+        refresh_per_second=4,
+    ) as live:
+        while True:
+            if not test_mode:
+                submitit_jobs[0].get_info(mode="force")  # Force update once to sync the state
+            state_jobs = collections.defaultdict(set)
+            for i, job in enumerate(submitit_jobs):
+                state_jobs[job.state.upper()].add(i)
+                if job.done():
+                    state_jobs["DONE"].add(i)
 
-        failed_job_indices = sorted(state_jobs["FAILED"])
-        if len(state_jobs["DONE"]) == len(submitit_jobs):
-            print(f"All jobs finished, jobs with indices {failed_job_indices} failed", flush=True)
-            break
+            live.update(_build_monitoring_table(jobs, submitit_jobs, monitoring_start_time))
 
-        custom_logging(monitoring_start_time, n_jobs, state_jobs)
-        await asyncio.sleep(poll_interval_seconds)
+            if len(state_jobs["DONE"]) == len(submitit_jobs):
+                break
 
+            await asyncio.sleep(poll_interval_seconds)
+
+    failed_job_indices = sorted(state_jobs["FAILED"])
+    print(f"All jobs finished, jobs with indices {failed_job_indices} failed", flush=True)
     print(
         f"Whole process is finished, took {int((time.time() - monitoring_start_time) / 60)} minutes"
     )

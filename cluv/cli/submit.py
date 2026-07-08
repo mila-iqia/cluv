@@ -16,11 +16,10 @@ import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, save_job
-
 from cluv.cli.sync import sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
-from cluv.slurm import FAILED_JOB_STATES, clean_job_state
+from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
@@ -352,7 +351,7 @@ async def wait_for_running_job(
         wait_time = min(wait_time * 2, max_wait_time_seconds)
 
         job_states = await asyncio.gather(
-            *(get_job_state(cluster_to_remote[cluster], job_id) for cluster, job_id in to_query)
+            *(run_sacct(cluster_to_remote[cluster], job_id) for cluster, job_id in to_query)
         )
 
         for (cluster, job_id), job_state in zip(to_query.copy(), job_states):
@@ -381,7 +380,7 @@ async def wait_for_jobs_to_cancel(
     to_cancel.remove((first_running_job.cluster, first_running_job.job_id))
 
     job_states = await asyncio.gather(
-        *(get_job_state(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
+        *(run_sacct(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
     )
     for (cluster, job_id), job_state in zip(to_cancel, job_states):
         logger.info(f"Job {job_id} on cluster {cluster} state: {job_state}")
@@ -416,7 +415,7 @@ async def wait_for_jobs_to_cancel(
         wait_time = min(wait_time * 2, max_wait_time_seconds)
 
         job_states = await asyncio.gather(
-            *(get_job_state(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
+            *(run_sacct(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
         )
         logger.debug(f"Job states: {job_states}")
 
@@ -629,15 +628,6 @@ async def sbatch(
         return await remote.run(sbatch_command, display=False, warn=True, hide=True)
     # Run the sbatch command locally.
     return await run(tuple(shlex.split(sbatch_command)), _display=False, warn=True, hide=True)
-
-
-async def get_job_state(remote: Remote | None, job_id: int) -> str:
-    """Get the state of the job with the given id on the remote cluster with `sacct`."""
-    sacct_command = f"sacct -j {job_id} --format=State --parsable2 --noheader --allocations"
-    if remote:
-        return await remote.get_output(sacct_command, hide=True)
-    result = await run(tuple(shlex.split(sacct_command)), hide=True)
-    return result.stdout.strip()
 
 
 async def cancel_job(remote: Remote | None, job_id: int, print: bool = False) -> str:

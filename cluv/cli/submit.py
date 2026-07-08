@@ -632,7 +632,7 @@ def get_sbatch_command(
         else:
             env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j/slurm-%j.out"
 
-    output_from_cluv = env_vars["SBATCH_OUTPUT"]
+    output_from_cluv = env_vars.get("SBATCH_OUTPUT")
     if (
         output_from_file := next(
             (

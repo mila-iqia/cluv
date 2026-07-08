@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest import mock
 
 import pytest
@@ -321,7 +321,8 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
     monkeypatch.chdir("examples/pytorch-example")
     config = get_cluv_config()
     results_path_on_cluster = config.get_cluster_config(cluster).results_path
-    assert results_path_on_cluster == "$SCRATCH/logs/pytorch-example"  # sanity check
+    # sanity check
+    assert results_path_on_cluster == PurePosixPath("$SCRATCH/logs/pytorch_example")
     results_path_on_cluster = await expandvars(remote, results_path_on_cluster)
 
     # Move the directory temporarily, instead of deleting it, so we can clean up after the test.
@@ -330,34 +331,35 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
         warn=True,
         hide=False,
     )
-    await remote.run(f"mkdir -p {results_path_on_cluster}", hide=True)
+    try:
+        await remote.run(f"mkdir -p {results_path_on_cluster}", hide=True)
 
-    old_run = results_path_on_cluster / "old_run"
-    await remote.run(f"mkdir -p {old_run}", hide=True)
-    await remote.run(f"touch -d '2020-01-01' {old_run}", hide=True)
+        old_run = results_path_on_cluster / "old_run"
+        await remote.run(f"mkdir -p {old_run}", hide=True)
+        await remote.run(f"touch -d '2020-01-01' {old_run}", hide=True)
 
-    await sync([cluster], sync_datasets=False)
+        await sync([cluster], sync_datasets=False)
 
-    local_results_path = Path(os.path.expandvars(config.results_path))
-    shutil.rmtree(local_results_path / "old_run")
+        local_results_path = Path(os.path.expandvars(config.results_path))
+        shutil.rmtree(local_results_path / "old_run")
 
-    new_run = results_path_on_cluster / "new_run"
-    await remote.run(f"mkdir -p {new_run}", hide=True)
+        new_run = results_path_on_cluster / "new_run"
+        await remote.run(f"mkdir -p {new_run}", hide=True)
 
-    await clean([cluster], force=True)
+        await clean([cluster], force=True)
 
-    remaining = (
-        (await remote.get_output(f"ls {results_path_on_cluster}", warn=True, hide=False))
-        .strip()
-        .splitlines()
-    )
-    assert "old_run" not in remaining
-    assert "new_run" in remaining
-
-    # Cleanup after the test.
-    await remote.run(f"rmdir {results_path_on_cluster / 'new_run'}", hide=False)
-    await remote.run(f"rmdir {results_path_on_cluster}", hide=False)
-    await remote.run(
-        f"mv {results_path_on_cluster.with_suffix('.backup')} {results_path_on_cluster}",
-        hide=False,
-    )
+        remaining = (
+            (await remote.get_output(f"ls {results_path_on_cluster}", warn=True, hide=False))
+            .strip()
+            .splitlines()
+        )
+        assert "old_run" not in remaining
+        assert "new_run" in remaining
+    finally:
+        # Cleanup after the test.
+        await remote.run(f"rmdir {results_path_on_cluster / 'new_run'}", hide=False)
+        await remote.run(f"rmdir {results_path_on_cluster}", hide=False)
+        await remote.run(
+            f"mv {results_path_on_cluster.with_suffix('.backup')} {results_path_on_cluster}",
+            hide=False,
+        )

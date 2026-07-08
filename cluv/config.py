@@ -155,17 +155,6 @@ class CluvConfig(BaseModel):
         datasets_path = cluster_config.datasets_path or self.datasets_path
         job_script_path = cluster_config.job_script_path or self.job_script_path
         project_dir = cluster_config.project_dir or self.project_dir
-
-        # # Idea: Use the second portion of data_source when on the source cluster, effectively
-        # # ignoring the datasets_path setting on that cluster.
-        # # This might make sense to avoid duplicating data, but we should document it somewhere.
-        # if self.data_source:
-        #     source_cluster, _, data_path = self.data_source.partition(":")
-        #     if cluster == source_cluster:
-        #         # use the dataset path from the data_source setting as the datasets_path.
-        #         # TODO: maybe log a warning in this case?
-        #         datasets_path = Path(data_path)
-
         return ClusterConfig(
             env=self.env | cluster_config.env,
             sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
@@ -208,11 +197,6 @@ def current_cluster_config() -> ClusterConfig[Path] | None:
         return None  # not on a cluster.
     cluv_config = get_cluv_config()
     cluster_config = cluv_config.get_cluster_config(cluster)
-    # Idea: Use the second portion of data_source when on the source cluster, effectively
-    # ignoring the datasets_path setting on that cluster.
-    # This might make sense to avoid duplicating data, but we should document it somewhere.
-    # TODO: When doing `cluv sync`, we needlessly copy the dataset from the source cluster to
-    # itself, at the datasets_path. We should avoid doing this.
     data_source = cluv_config.data_source
     if data_source:
         source_cluster, _, data_path = data_source.partition(":")

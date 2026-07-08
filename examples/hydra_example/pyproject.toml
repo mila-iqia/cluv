@@ -11,7 +11,6 @@ dependencies = [
     "cluv[dev,hydra]",
     "hydra-colorlog>=1.2.0",
     "numpy>=2.4.4",
-    # "remote-slurm-executor",
     "torch>=2.7.0,<2.11.0",
     "torchvision>=0.25.0",
     "wandb>=0.27.0",
@@ -32,8 +31,6 @@ results_symlink = "logs"
 # Where to read the data from when synchronizing data to all clusters.
 data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
 # Where the dataset should be replicated on all clusters.
-# TODO?: On the source cluster (ex Mila), the folder will only contain symlinks, to avoid
-# duplicating the data.
 datasets_path = "$SCRATCH/datasets/cifar10"
 
 [tool.cluv.env]

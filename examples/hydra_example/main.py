@@ -22,11 +22,6 @@ from torchvision.datasets import CIFAR10
 import cluv
 import cluv.config
 import cluv.job
-import cluv.utils
-
-# from cluv.job import current_run_info, get_datasets_path
-
-# OmegaConf.register_new_resolver("eval", eval)
 logger = logging.getLogger(__name__)
 
 
@@ -54,8 +49,6 @@ def main(config_dict: DictConfig):
     print(f"Output directory: {output_dir}")
     hydra_job_info = hydra.core.hydra_config.HydraConfig.get().job
     print(f"Job info: {hydra_job_info}")
-
-    # job_info = cluv.job.current_run_info()
 
     ### Using Cluv in your Python script
     # Use cluv in your script to get where to get information that would otherwise depend on which

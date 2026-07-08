@@ -25,10 +25,6 @@ from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
 
-RUNNING_JOB_STATES = ["PENDING", "RUNNING"]
-
-logger = logging.getLogger(__name__)
-
 __all__ = ["submit"]
 display_commands = ContextVar("display_commands", default=True)
 raise_on_command_error = ContextVar("raise_on_command_error", default=False)

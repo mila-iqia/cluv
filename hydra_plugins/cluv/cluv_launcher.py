@@ -353,7 +353,6 @@ async def run_sweep(
 
     # TODO: Create a 'live' rich table instead and update it as the status of the jobs change.
     await monitor_jobs_async(job_infos, poll_interval_seconds=30)
-    # await asyncio.gather(*(job.awaitable().wait(poll_interval=30) for job in submitit_jobs))
 
     await asyncio.gather(
         *(
@@ -469,7 +468,6 @@ async def monitor_jobs_async(
         return
 
     job_arrays = [job.job_id for job in jobs]
-    # job_arrays = ", ".join(sorted(set(str(job.job_id).split("_", 1)[0] for job in jobs)))
     print(f"Monitoring {n_jobs} jobs from job arrays {job_arrays} \n")
 
     submitit_jobs = [

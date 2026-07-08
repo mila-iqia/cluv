@@ -65,7 +65,6 @@ class RunInfo:
 
     @property
     def cluster_config(self) -> cluv.config.ClusterConfig:
-        # cluster_name = cluv.utils.current_cluster()
         cluv_config = cluv.config.get_cluv_config()
         cluster_config = cluv_config.get_cluster_config(self.cluster)
 

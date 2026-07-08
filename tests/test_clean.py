@@ -14,8 +14,9 @@ import pytest
 import rich.prompt
 
 import cluv.__main__ as cluv_main
+import cluv.cache
 import cluv.cli.clean
-from cluv.cache import CacheContent, ProjectStateOnCluster, read_cache
+from cluv.cache import CacheContent, ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.clean import clean, compute_runs_to_delete
 from cluv.cli.sync import (
     create_results_dir_with_symlink_to_scratch,
@@ -74,6 +75,15 @@ def test_run_present_locally_is_kept():
     watermark = datetime(2026, 7, 1, tzinfo=timezone.utc)
     remote_runs = [("run_a", datetime(2026, 6, 30, tzinfo=timezone.utc))]
     assert compute_runs_to_delete({"run_a"}, remote_runs, watermark) == []
+
+
+def test_pruned_run_equal_to_watermark_is_selected():
+    """A run that was itself the max-mtime run during the last sync sets the watermark to its own
+    mtime. Since it was seen (and thus is safe to prune once removed locally), it must be selected
+    even though its mtime is not *strictly* less than the watermark."""
+    watermark = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    remote_runs = [("old_run", datetime(2020, 1, 1, tzinfo=timezone.utc))]
+    assert compute_runs_to_delete(set(), remote_runs, watermark) == ["old_run"]
 
 
 def test_never_synced_cluster_selects_nothing():
@@ -303,6 +313,26 @@ def test_clean_cli_parses_force_and_dry_run(monkeypatch: pytest.MonkeyPatch) -> 
     mock_clean.assert_called_once_with(clusters=["rorqual", "narval"], force=True, dry_run=True)
 
 
+@pytest.fixture
+def clear_cluv_cache(monkeypatch: pytest.MonkeyPatch):
+    """Clear the cluv cache before each test to avoid state leakage."""
+    cache = CacheContent()
+
+    def _write_cache(content: CacheContent):
+        nonlocal cache
+        cache = content
+
+    monkeypatch.setattr(cluv.cache, read_cache.__name__, lambda: cache)
+    monkeypatch.setattr(cluv.cache, write_cache.__name__, _write_cache)
+    monkeypatch.setattr(sync_module, read_cache.__name__, lambda: cache)
+    monkeypatch.setattr(sync_module, write_cache.__name__, _write_cache)
+    # `cluv.cli.clean` does `from cluv.cache import read_cache`, a separate name binding that
+    # patching `cluv.cache.read_cache` above doesn't affect -- it must be patched directly too.
+    monkeypatch.setattr(cluv.cli.clean, read_cache.__name__, lambda: cache)
+
+    yield
+
+
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.skipif(
@@ -313,11 +343,12 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
     cluster: str,  # noqa
     remote: Remote,  # noqa
     monkeypatch: pytest.MonkeyPatch,
+    clear_cluv_cache: None,
 ):
     """End-to-end: an old, locally-pruned run is removed from the cluster; a brand-new,
     never-fetched run is left alone."""
     assert not current_cluster(), "test needs to run locally for now."
-
+    assert cluv.cache.read_cache() == CacheContent(), "test assumes no previous cache content"
     monkeypatch.chdir("examples/pytorch-example")
     config = get_cluv_config()
     results_path_on_cluster = config.get_cluster_config(cluster).results_path
@@ -325,6 +356,10 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
     assert results_path_on_cluster == PurePosixPath("$SCRATCH/logs/pytorch_example")
     results_path_on_cluster = await expandvars(remote, results_path_on_cluster)
 
+    local_results_path = Path(os.path.expandvars(config.results_path))
+    # Move the local results dir:
+    if local_results_path.exists():
+        local_results_path.rename(local_results_path.with_suffix(".backup"))
     # Move the directory temporarily, instead of deleting it, so we can clean up after the test.
     await remote.run(
         f"mv {results_path_on_cluster} {results_path_on_cluster.with_suffix('.backup')}",
@@ -336,10 +371,12 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
         old_run = results_path_on_cluster / "old_run"
         await remote.run(f"mkdir -p {old_run}", hide=True)
         await remote.run(f"touch -d '2020-01-01' {old_run}", hide=True)
-
         await sync([cluster], sync_datasets=False)
 
-        local_results_path = Path(os.path.expandvars(config.results_path))
+        last_fetch_watermark = cluv.cache.read_cache().project_states[cluster].last_fetch_watermark
+        assert last_fetch_watermark
+        assert last_fetch_watermark.replace(hour=0) == datetime(2020, 1, 1, tzinfo=timezone.utc)
+
         shutil.rmtree(local_results_path / "old_run")
 
         new_run = results_path_on_cluster / "new_run"
@@ -356,6 +393,12 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
         assert "new_run" in remaining
     finally:
         # Cleanup after the test.
+        print("Test cleanup.")
+        # Restore the local results dir, if it existed before the test.
+        shutil.rmtree(local_results_path)
+        if (local_results_dir_backup := local_results_path.with_suffix(".backup")).exists():
+            local_results_dir_backup.rename(local_results_path)
+
         await remote.run(f"rmdir {results_path_on_cluster / 'old_run'}", hide=False, warn=True)
         await remote.run(f"rmdir {results_path_on_cluster / 'new_run'}", hide=False, warn=True)
         await remote.run(f"rmdir {results_path_on_cluster}", hide=False)

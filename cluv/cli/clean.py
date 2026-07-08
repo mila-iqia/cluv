@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from datetime import datetime
@@ -18,6 +19,8 @@ from cluv.utils import console
 
 __all__ = ["clean", "compute_runs_to_delete"]
 
+logger = logging.getLogger(__name__)
+
 
 def compute_runs_to_delete(
     local_names: set[str],
@@ -26,19 +29,25 @@ def compute_runs_to_delete(
 ) -> list[str]:
     """Returns the names of remote run dirs that are safe to delete.
 
-    A remote run dir is safe to delete only if it has no local counterpart AND it's
-    older than `watermark` (the max remote mtime observed during the last successful
-    sync of that cluster). A genuinely new, never-fetched run always has
-    `mtime >= watermark`, so it's never selected even though it also has no local
-    counterpart -- only runs the user pruned locally are.
+    A remote run dir is safe to delete only if it has no local counterpart AND it was already
+    visible during the last successful sync of that cluster, i.e. `mtime <= watermark` (the max
+    remote mtime observed during that sync). A genuinely new, never-fetched run always has
+    `mtime > watermark`, so it's never selected even though it also has no local counterpart --
+    only runs the user pruned locally are.
 
     Returns an empty list if `watermark` is `None` (the cluster has never been synced).
     """
     if watermark is None:
         return []
-    return sorted(
-        name for name, mtime in remote_runs if name not in local_names and mtime < watermark
+    to_delete = sorted(
+        name for name, mtime in remote_runs if name not in local_names and mtime <= watermark
     )
+    logger.debug(
+        f"watermark={watermark.isoformat()}, "
+        f"remote_runs={[(name, mtime.isoformat()) for name, mtime in remote_runs]}, "
+        f"local_names={sorted(local_names)}, to_delete={to_delete}"
+    )
+    return to_delete
 
 
 def _watermark_for(cache: CacheContent, cluster: str) -> datetime | None:
@@ -59,6 +68,7 @@ async def clean(
     Slurm jobs, and cross-cluster run-name collisions, are not specially handled (see the design
     spec's "Non-goals" section).
     """
+    logger.info(f"Starting cluv clean: clusters={clusters}, force={force}, dry_run={dry_run}")
     config = get_cluv_config()
 
     all_remotes = await get_active_remotes()
@@ -71,6 +81,7 @@ async def clean(
         )
     else:
         remotes = all_remotes.copy()
+    logger.debug(f"Cleaning on remotes: {[remote.hostname for remote in remotes]}")
 
     cache = read_cache()
     results_path_here = Path(os.path.expandvars(config.results_path))
@@ -79,6 +90,7 @@ async def clean(
         if results_path_here.exists()
         else set()
     )
+    logger.debug(f"Local run dirs in {results_path_here}: {sorted(local_names)}")
 
     per_cluster_to_delete: dict[str, list[str]] = {}
     skipped: list[str] = []
@@ -86,11 +98,15 @@ async def clean(
         cluster = remote.hostname
         watermark = _watermark_for(cache, cluster)
         if watermark is None:
+            logger.debug(f"{cluster}: no fetch watermark cached, skipping")
             skipped.append(cluster)
             continue
         cluster_config = config.get_cluster_config(cluster)
         results_path_on_cluster = await expandvars(remote, cluster_config.results_path)
         remote_runs = await list_remote_run_dirs(remote, results_path_on_cluster)
+        logger.debug(
+            f"{cluster}: {len(remote_runs)} remote run dir(s) in {results_path_on_cluster}"
+        )
         to_delete = compute_runs_to_delete(local_names, remote_runs, watermark)
         if to_delete:
             per_cluster_to_delete[cluster] = to_delete
@@ -101,10 +117,12 @@ async def clean(
         )
 
     if not per_cluster_to_delete:
+        logger.info("Nothing to clean.")
         console.print("[green]Nothing to clean.[/green]")
         return
 
     total = sum(len(names) for names in per_cluster_to_delete.values())
+    logger.info(f"{total} run director{'y' if total == 1 else 'ies'} eligible for deletion")
     console.print("[bold]The following run directories will be removed:[/bold]")
     for cluster, names in per_cluster_to_delete.items():
         console.print(f"  [cyan]{cluster}[/cyan]:")
@@ -112,6 +130,7 @@ async def clean(
             console.print(f"    {name}")
 
     if dry_run:
+        logger.info("Dry run: not deleting anything.")
         return
 
     if not force and not Confirm.ask(
@@ -119,6 +138,7 @@ async def clean(
         f"{len(per_cluster_to_delete)} cluster(s)?",
         default=False,
     ):
+        logger.info("User declined to delete. Aborting.")
         console.print("Aborted.")
         return
 
@@ -130,13 +150,18 @@ async def clean(
         cluster_config = config.get_cluster_config(cluster)
         results_path_on_cluster = await expandvars(remote, cluster_config.results_path)
         for name in names:
+            logger.debug(f"Removing {cluster}:{results_path_on_cluster / name}")
             try:
                 await remote.run(f"rm -rf {results_path_on_cluster / name}", hide=True)
-            except subprocess.CalledProcessError:
+            except subprocess.CalledProcessError as err:
+                logger.warning(f"Failed to remove {cluster}:{name}: {err}")
                 failed.append((cluster, name))
             else:
                 removed += 1
 
+    logger.info(
+        f"Removed {removed} run director{'y' if removed == 1 else 'ies'}; {len(failed)} failed"
+    )
     console.print(
         f"[green]Removed {removed} run director{'y' if removed == 1 else 'ies'}.[/green]"
     )

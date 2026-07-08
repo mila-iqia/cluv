@@ -623,13 +623,14 @@ def get_sbatch_command(
     # might contain unresolved env vars.
     cluster_results_path = PurePosixPath(cluster_config.results_path)
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
-    if in_job_chunking:
-        assert not in_job_packing, "can't do both right now."
-        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
-    elif in_job_packing:
-        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j_%t/slurm-%j_%t.out"
-    else:
-        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j/slurm-%j.out"
+    if not any("--output" in flag for flag in sbatch_args):
+        if in_job_chunking:
+            assert not in_job_packing, "can't do both right now."
+            env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
+        elif in_job_packing:
+            env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j_%t/slurm-%j_%t.out"
+        else:
+            env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j/slurm-%j.out"
 
     output_from_cluv = env_vars["SBATCH_OUTPUT"]
     if (

@@ -311,7 +311,10 @@ async def run_sweep(
                 # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
                 # to do this, but I can't see it right now.
                 sbatch_args=sbatch_args
-                + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t.out"],
+                # TODO: If we leave the '%t' in the output file path, there are files
+                # with a literal '%t' that get created, and apparently only contain the epilog.
+                + [f"--output={cluster_results_dir}/{_runid_template}/%j.out"],
+                # + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t.out"],
                 program_args=["python", "main.py", *job_command],
                 _skip_sync=True,
             )

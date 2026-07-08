@@ -328,7 +328,6 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
     # Move the directory temporarily, instead of deleting it, so we can clean up after the test.
     await remote.run(
         f"mv {results_path_on_cluster} {results_path_on_cluster.with_suffix('.backup')}",
-        warn=True,
         hide=False,
     )
     try:
@@ -357,7 +356,8 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
         assert "new_run" in remaining
     finally:
         # Cleanup after the test.
-        await remote.run(f"rmdir {results_path_on_cluster / 'new_run'}", hide=False)
+        await remote.run(f"rmdir {results_path_on_cluster / 'old_run'}", hide=False, warn=True)
+        await remote.run(f"rmdir {results_path_on_cluster / 'new_run'}", hide=False, warn=True)
         await remote.run(f"rmdir {results_path_on_cluster}", hide=False)
         await remote.run(
             f"mv {results_path_on_cluster.with_suffix('.backup')} {results_path_on_cluster}",

@@ -107,25 +107,18 @@ async def submit(
     )
     ```
     """
-    if job_script is None:
-        _job_script = get_cluv_config().get_cluster_config(cluster).job_script_path
-        job_script = Path(_job_script) if _job_script is not None else None
-        if job_script is None:
-            raise ValueError(
-                f"No job script was provided and no job_script_path is configured for {cluster=}!"
-            )
-        if Path(job_script).exists():
-            raise ValueError(
-                f"The configured job_script value ({job_script}) does not exist on this machine.\n"
-                f"The job script, even though it can be customized per cluster, needs to exist on "
-                f"the local machine, because we need to read its header to infer the values of "
-                f"sbatch arguments."
-            )
 
     # Check git is clean locally (untracked files are fine) and capture current commit hash.
     git_commit = ensure_clean_git_state(
         autocommit=autocommit,
-        submit_command=build_submit_command(cluster, job_script, sbatch_args, program_args),
+        submit_command=build_submit_command(
+            cluster,
+            job_script
+            or (get_job_script_path_from_config(cluster) if cluster != "first" else "")
+            or "<job_script>",
+            sbatch_args,
+            program_args,
+        ),
     )
 
     here = current_cluster()
@@ -138,7 +131,11 @@ async def submit(
             save_job(job)
         return job
 
-    resolved_job_script = get_job_script_path(cluster, job_script)
+    if job_script is None:
+        job_script_from_config = get_job_script_path_from_config(cluster)
+        job_script = _check_job_script_exists_locally(job_script_from_config, cluster)
+    else:
+        job_script = _check_job_script_exists_locally(job_script, cluster)
 
     if cluster != here:
         # The sbatch command will be run over SSH.
@@ -149,7 +146,7 @@ async def submit(
     else:
         # Submitting to the current cluster. The sbatch command will run locally.
         remote = None
-    result = await sbatch(remote, resolved_job_script, sbatch_args, program_args, git_commit)
+    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
     submit_time = datetime.datetime.now()
 
     if result.returncode != 0:
@@ -160,7 +157,7 @@ async def submit(
     job = Job(
         job_id=job_id,
         cluster=cluster,
-        job_script=str(resolved_job_script),
+        job_script=str(job_script),
         git_commit=git_commit,
         sbatch_args=sbatch_args,
         program_args=program_args,
@@ -200,7 +197,10 @@ async def submit_first(
         # `sync` does not return a Remote for the current cluster.
         assert not any(remote.hostname == this_cluster for remote in remotes)
     job_scripts = {
-        cluster: get_job_script_path(cluster, job_script) for cluster in cluster_to_remote
+        cluster: _check_job_script_exists_locally(
+            job_script or get_job_script_path_from_config(cluster), cluster
+        )
+        for cluster in cluster_to_remote
     }
 
     # Submit the job on all the clusters (and possibly locally).
@@ -472,7 +472,7 @@ async def wait_for_jobs_to_cancel(
 
 def build_submit_command(
     cluster: str,
-    job_script: Path,
+    job_script: str | Path | PurePosixPath,
     sbatch_args: list[str],
     program_args: list[str],
 ) -> str:
@@ -551,16 +551,36 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
     return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 
 
-def get_job_script_path(cluster: str, job_script: Path | None) -> Path:
-    """Resolve the job script path for a cluster."""
-    if job_script is not None:
-        return job_script
-    configured_job_script = get_cluv_config().get_cluster_config(cluster).job_script_path
-    if configured_job_script is None:
+def get_job_script_path_from_config(cluster: str) -> Path | PurePosixPath | None:
+    job_script_path = get_cluv_config().get_cluster_config(cluster).job_script_path
+    if cluster == current_cluster() and job_script_path is not None:
+        # Resolve the path to the job script on the local machine.
+        job_script_path = Path(os.path.expandvars(job_script_path))
+        return job_script_path
+    return job_script_path
+
+
+def _check_job_script_not_none[P: Path | PurePosixPath](job_script: P | None, cluster: str) -> P:
+    if job_script is None:
         raise ValueError(
             f"No job script was provided and no [tool.cluv] job_script_path is configured for {cluster}."
         )
-    return Path(configured_job_script)
+    return job_script
+
+
+def _check_job_script_exists_locally(
+    job_script: Path | PurePosixPath | None, cluster: str
+) -> Path:
+    job_script = _check_job_script_not_none(job_script, cluster)
+    job_script = Path(os.path.expandvars(job_script))
+    if not job_script.exists():
+        raise ValueError(
+            f"The configured job_script value ({job_script}) does not exist on this machine.\n"
+            f"The job script, even though it can be customized per cluster, needs to exist on "
+            f"the local machine, because we need to read its header to infer the values of "
+            f"sbatch arguments."
+        )
+    return job_script
 
 
 def get_sbatch_command(
@@ -574,11 +594,15 @@ def get_sbatch_command(
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
     """
     # Resolve remote job script path.
-    project_root = find_pyproject().parent
-    project_root_relative_to_home = project_root.relative_to(Path.home())
-    if not job_script.is_absolute():
-        job_script = job_script.absolute()
-    remote_job_script = f"~/{project_root_relative_to_home}/{job_script.relative_to(project_root)}"
+    local_job_script = job_script
+    local_project_dir = find_pyproject().parent
+    job_script_relative_path = local_job_script.relative_to(local_project_dir)
+
+    # The project either has a project_dir set, or it is assumed to be under $HOME.
+    remote_project_dir = get_cluv_config().get_cluster_config(cluster).project_dir or (
+        PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
+    )
+    remote_job_script = PurePosixPath(remote_project_dir) / job_script_relative_path
 
     # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.
     config = get_cluv_config()
@@ -632,7 +656,7 @@ def get_sbatch_command(
     program_args_str = shlex.join(program_args)
 
     return (
-        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={project_root_relative_to_home} "
+        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
         f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
 

@@ -27,7 +27,9 @@ from cluv.cli.sync import (
 from cluv.config import CluvConfig, PartialClusterConfig, get_cluv_config
 from cluv.remote import Remote, list_remote_run_dirs, run
 from cluv.utils import current_cluster
-from tests.test_integration import IN_GITHUB_CLOUD_CI
+
+# Note: Need to import these fixtures for now. If they were moved to conftest, we wouldn't need to.
+from tests.test_integration import IN_GITHUB_CLOUD_CI, cluster, remote  # noqa
 
 # `cluv/cli/__init__.py` does `from .sync import sync`, which shadows the `cluv.cli.sync`
 # submodule attribute with the `sync` function. Use `importlib.import_module` (same idiom as
@@ -54,7 +56,7 @@ async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pyte
         results_path=str(tmp_path / "results"),
         clusters={"foo": PartialClusterConfig(project_dir="/home/user/myproject")},
     )
-    remote = Remote(hostname="foo")
+    remote = Remote(hostname="foo")  # noqa
     project_state = ProjectStateOnCluster()
 
     await fetch_results(remote, config, project_state)
@@ -163,8 +165,8 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(cluv.cli.clean, read_cache.__name__, lambda: cache)
 
-    async def fake_list_remote_run_dirs(remote: Remote, path: str):
-        cluster = remote.hostname
+    async def fake_list_remote_run_dirs(remote: Remote):  # noqa
+        cluster = remote.hostname  # noqa
         return [
             (f"{cluster}_run_kept", datetime(2026, 6, 20, tzinfo=timezone.utc)),
             (f"{cluster}_run_pruned", datetime(2026, 6, 20, tzinfo=timezone.utc)),
@@ -301,7 +303,6 @@ def test_clean_cli_parses_force_and_dry_run(monkeypatch: pytest.MonkeyPatch) -> 
     mock_clean.assert_called_once_with(clusters=["rorqual", "narval"], force=True, dry_run=True)
 
 
-@pytest.mark.parametrize("cluster", "tamia", indirect=True)
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.skipif(
@@ -309,7 +310,9 @@ def test_clean_cli_parses_force_and_dry_run(monkeypatch: pytest.MonkeyPatch) -> 
     reason="Integration tests are only run on a self-hosted github runner or on a dev machine.",
 )
 async def test_clean_removes_pruned_run_but_keeps_new_one(
-    cluster: str, remote: Remote, monkeypatch: pytest.MonkeyPatch, fake_scratch: Path
+    cluster: str,  # noqa
+    remote: Remote,  # noqa
+    monkeypatch: pytest.MonkeyPatch,
 ):
     """End-to-end: an old, locally-pruned run is removed from the cluster; a brand-new,
     never-fetched run is left alone."""
@@ -317,19 +320,23 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
 
     monkeypatch.chdir("examples/pytorch-example")
     config = get_cluv_config()
-    results_path_on_cluster = await expandvars(
-        remote, config.get_cluster_config(cluster).results_path
-    )
-    assert False, results_path_on_cluster  # TODO: remove this assert after debugging
+    results_path_on_cluster = config.get_cluster_config(cluster).results_path
+    assert results_path_on_cluster == "$SCRATCH/logs/pytorch-example"  # sanity check
+    results_path_on_cluster = await expandvars(remote, results_path_on_cluster)
 
-    await remote.run(f"rm -rf {results_path_on_cluster}", warn=True, hide=True)
+    # Move the directory temporarily, instead of deleting it, so we can clean up after the test.
+    await remote.run(
+        f"mv {results_path_on_cluster} {results_path_on_cluster.with_suffix('.backup')}",
+        warn=True,
+        hide=False,
+    )
     await remote.run(f"mkdir -p {results_path_on_cluster}", hide=True)
 
     old_run = results_path_on_cluster / "old_run"
     await remote.run(f"mkdir -p {old_run}", hide=True)
     await remote.run(f"touch -d '2020-01-01' {old_run}", hide=True)
 
-    await sync([cluster], uv_sync_args=None)
+    await sync([cluster], sync_datasets=False)
 
     local_results_path = Path(os.path.expandvars(config.results_path))
     shutil.rmtree(local_results_path / "old_run")
@@ -340,7 +347,17 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
     await clean([cluster], force=True)
 
     remaining = (
-        (await remote.get_output(f"ls {results_path_on_cluster}", warn=True)).strip().splitlines()
+        (await remote.get_output(f"ls {results_path_on_cluster}", warn=True, hide=False))
+        .strip()
+        .splitlines()
     )
     assert "old_run" not in remaining
     assert "new_run" in remaining
+
+    # Cleanup after the test.
+    await remote.run(f"rmdir {results_path_on_cluster / 'new_run'}", hide=False)
+    await remote.run(f"rmdir {results_path_on_cluster}", hide=False)
+    await remote.run(
+        f"mv {results_path_on_cluster.with_suffix('.backup')} {results_path_on_cluster}",
+        hide=False,
+    )

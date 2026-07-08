@@ -22,7 +22,9 @@ For both `env` and `sbatch_args`, per-cluster values are merged on top of the gl
 A per-cluster key **overrides** the same global key; keys present only in the global config are
 kept as-is.
 
-```toml
+For example, the following config:
+
+```toml title="pyproject.toml"
 [tool.cluv]
 results_path = "$SCRATCH/results"
 
@@ -36,8 +38,8 @@ gpus = "1"
 results_path = "$SCRATCH/results/narval"
 
 [tool.cluv.clusters.narval.sbatch_args]
-mem = "32G"           # overrides the global 16G on narval
-time = "12:00:00"    # overrides global time on narval
+mem = "32G"             # overrides the global 16G on narval
+time = "12:00:00"       # overrides global time on narval
 ```
 
 When submitting to `narval`, the effective settings are:
@@ -66,35 +68,6 @@ the exact commit that was running.
     output dir based on the cluster the job runs on. The cluster name would otherwise have to
     be hard-coded in the job script file. You will see a warning in the console if this happens.
 
-## Variables priority
-
-Settings can reach `sbatch` through multiple levels. When the same option is set at more than one
-level, the following order applies — **higher rows win**:
-
-| Priority | Source | Mechanism |
-|---|---|---|
-| 1 | `cluv submit` CLI flags (e.g. `--time=1:00:00`) | sbatch CLI flag — appended last |
-| 2 | `[tool.cluv.clusters.<name>.sbatch_args]` | sbatch CLI flag — prepended before CLI flags |
-| 3 | `[tool.cluv.sbatch_args]` | sbatch CLI flag — base, overridden by cluster |
-| 4 | cluv auto-injected (`SBATCH_OUTPUT`, `SBATCH_JOB_NAME`) | `SBATCH_*` env var — set after merging user env |
-| 5 | `[tool.cluv.clusters.<name>.env]` | `SBATCH_*` env var — merged over global env |
-| 6 | `[tool.cluv.env]` | `SBATCH_*` env var — global baseline |
-| 7 | `#SBATCH` directives inside the job script | Slurm script directive |
-
-Two important things to understand about this table:
-
-**`sbatch_args` vs `env` are different mechanisms with different Slurm priorities.** Slurm itself
-resolves settings in the order: sbatch CLI flags > `SBATCH_*` env vars > `#SBATCH` script
-directives. This means a `time = "4:00:00"` entry in `sbatch_args` (rows 1–3) will always win
-over an `SBATCH_TIMELIMIT` entry in `env` (rows 4–6) for the same setting, regardless of where
-each was configured.
-
-**Cluv always controls `SBATCH_OUTPUT` and `SBATCH_JOB_NAME`.** These are set unconditionally
-after merging your `env` config (row 4), so they cannot be overridden through `[tool.cluv.env]`
-or `[tool.cluv.clusters.<name>.env]`. For `SBATCH_JOB_NAME`, cluv uses your configured value as
-the *base* and prepends `cluv-` to it — you can influence the name but not remove the prefix.
-Any `#SBATCH --output` directive in your job script will also be silently overridden by cluv's
-computed `SBATCH_OUTPUT`.
 
 ## CLI flags and program args
 
@@ -115,7 +88,7 @@ cluv submit mila job.sh --time=1:00:00 -- python train.py --lr 0.01
 If no job script is passed on the CLI, cluv uses the `job_script_path` configured for that
 cluster, falling back to the global `job_script_path`.
 
-```toml
+```toml title="pyproject.toml"
 [tool.cluv]
 job_script_path = "scripts/job.sh"    # used by all clusters
 
@@ -126,9 +99,9 @@ job_script_path = "scripts/job_narval.sh"   # used only on narval
 A submission without an explicit script then resolves as follows:
 
 ```console
-cluv submit mila           # uses scripts/job.sh
-cluv submit narval         # uses scripts/job_narval.sh
-cluv submit narval job.sh  # always uses job.sh, ignoring config
+cluv submit mila                # uses scripts/job.sh
+cluv submit narval              # uses scripts/job_narval.sh
+cluv submit narval new_job.sh   # uses new_job.sh, ignoring config
 ```
 
 If neither a CLI script nor a configured `job_script_path` exists for the target cluster, `cluv

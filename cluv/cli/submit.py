@@ -93,7 +93,7 @@ async def submit(
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
-        chunking: Whether to chunk the job into multiple smaller jobs.
+        chunking: Whether to split the job up into multiple consecutive short jobs.
 
     Returns:
         The job ID of the submitted job or None if the sbatch command fails.

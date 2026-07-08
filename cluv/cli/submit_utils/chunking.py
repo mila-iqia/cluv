@@ -15,6 +15,7 @@ def chunking_update_sbatch_args(
     # Add job array
     n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
     logger.info(f"Chunking job into {n_chunks} smaller jobs of {CHUNK_SIZE} hours each.")
+    sbatch_args = sbatch_args.copy()
     sbatch_args.append(f"--array=0-{n_chunks - 1}%1")
 
     # Update the time limit (add --time=3:00:00 to sbatch args if not already set,

@@ -92,6 +92,10 @@ results_path = "$SCRATCH/logs/cluv"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
 results_symlink = "logs"
+# Where to read the data from when synchronizing data to all clusters.
+#data_source = "<cluster>:<dataset_path_on_the_cluster>"
+# Where the dataset should be replicated on all clusters.
+#datasets_path = <cloned_datasets_path>
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.

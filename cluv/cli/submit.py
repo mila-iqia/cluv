@@ -596,6 +596,8 @@ def get_sbatch_command(
     # Resolve remote job script path.
     local_job_script = job_script
     local_project_dir = find_pyproject().parent
+    if not local_job_script.is_absolute():
+        local_job_script = local_project_dir / local_job_script
     job_script_relative_path = local_job_script.relative_to(local_project_dir)
 
     # The project either has a project_dir set, or it is assumed to be under $HOME.

@@ -17,7 +17,7 @@ __all__ = ["disable", "enable", "format_remaining"]
 
 
 def parse_duration(period: str) -> timedelta:
-    """Parse a duration string into a :class:`~datetime.timedelta`.
+    """Parse a duration string into a `datetime.timedelta`.
 
     Supported formats:
 
@@ -127,16 +127,17 @@ def enable(cluster: str) -> None:
     was_disabled = enable_cluster(cluster)
     if was_disabled:
         console.print(f"[green]Cluster [bold]{cluster}[/bold] has been re-enabled.[/green]")
+        return
+
+    disabled = get_disabled_clusters()
+    if disabled:
+        names = ", ".join(f"[bold]{c}[/bold]" for c in disabled)
+        console.print(
+            f"[yellow]Cluster [bold]{cluster}[/bold] was not disabled.[/yellow] "
+            f"Currently disabled clusters: {names}."
+        )
     else:
-        disabled = get_disabled_clusters()
-        if disabled:
-            names = ", ".join(f"[bold]{c}[/bold]" for c in disabled)
-            console.print(
-                f"[yellow]Cluster [bold]{cluster}[/bold] was not disabled.[/yellow] "
-                f"Currently disabled clusters: {names}."
-            )
-        else:
-            console.print(
-                f"[yellow]Cluster [bold]{cluster}[/bold] was not disabled.[/yellow] "
-                "No clusters are currently disabled."
-            )
+        console.print(
+            f"[yellow]Cluster [bold]{cluster}[/bold] was not disabled.[/yellow] "
+            f"No clusters are currently disabled."
+        )

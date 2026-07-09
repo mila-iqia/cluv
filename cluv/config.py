@@ -85,6 +85,16 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
     """Whether to ignore this cluster when running commands on all clusters."""
 
 
+@dataclass(frozen=True)
+class LocalConfig:
+    """Config for using cluv on a local machine (not on a Slurm cluster)."""
+
+    env: dict[str, str] = field(default_factory=dict)
+    """Environment variables to set when using cluv on a local machine (not on a Slurm cluster).
+    For example, this can be used to set a fake "$SCRATCH" directory to use when not on a Slurm cluster.
+    """
+
+
 class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
@@ -137,6 +147,8 @@ class CluvConfig(BaseModel):
     The keys are cluster names, and values are configs that override options for that cluster.
     """
 
+    local: LocalConfig = LocalConfig()
+
     @property
     def clusters_names(self) -> list[str]:
         return [name for name, config in self.clusters.items() if not config.ignore]
@@ -187,7 +199,18 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     if not cluv:
         raise RuntimeError(f"No cluv config in {pyproject_path} file.")
 
-    return CluvConfig.model_validate(cluv, extra="forbid")
+    config = CluvConfig.model_validate(cluv, extra="forbid")
+    if current_cluster() is None:
+        for key, value in config.local.env.items():
+            if key in os.environ:
+                logger.debug(
+                    "Overriding local env var %s=%s with value from [tool.cluv.local.env] from pyproject.toml: %s",
+                    key,
+                    os.environ[key],
+                    value,
+                )
+            os.environ[key] = value
+    return config
 
 
 def current_cluster_config() -> ClusterConfig[Path] | None:

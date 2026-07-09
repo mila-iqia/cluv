@@ -123,6 +123,13 @@ results_symlink = "logs"
 UV_OFFLINE = "1"
 WANDB_MODE = "offline"
 
+
+[tool.cluv.local]
+## Settings (environment variables) applied when using cluv on a local machine (not on a Slurm cluster).
+# Fake "$SCRATCH" directory to use when not on a Slurm cluster.
+# (this makes the examples runnable either from a laptop or from a Slurm cluster.
+env = { SCRATCH = "$HOME/scratch" }
+
 [tool.cluv.sbatch_args]
 # sbatch flags applied on all clusters. CLI-supplied flags take precedence.
 time = "3:00:00"

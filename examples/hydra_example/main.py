@@ -81,6 +81,7 @@ def main(config_dict: DictConfig):
         project="cluv-example",
         name=run_id,
         id=run_id,
+        mode="offline",  # to avoid pushing to wandb when running this example.
         dir=run_dir.parent if run_dir else None,
         config={"config": dataclasses.asdict(config)}
         | ({"job": dataclasses.asdict(run_info)} if run_info else {})

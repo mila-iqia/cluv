@@ -17,7 +17,9 @@ jobs:
         python-version: [3.13]
         os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    environment: release
+    environment:
+      name: pypi
+      url: https://pypi.org/p/cluster-uv
     permissions:
       # IMPORTANT: this permission is mandatory for trusted publishing
       id-token: write

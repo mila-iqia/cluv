@@ -140,7 +140,7 @@ def enable_cluster(cluster: str) -> bool:
     cache = read_cache()
     if cluster not in cache.disabled_clusters:
         return False
-    del cache.disabled_clusters[cluster]
+    cache.disabled_clusters.pop(cluster)
     write_cache(cache)
     return True
 
@@ -165,7 +165,7 @@ def is_cluster_disabled(cluster: str) -> bool:
         return True
     if datetime.now(tz=timezone.utc) >= _ensure_utc(disabled.disabled_until):
         # Expiry has passed — auto-remove and re-enable.
-        del cache.disabled_clusters[cluster]
+        cache.disabled_clusters.pop(cluster)
         write_cache(cache)
         return False
     return True
@@ -185,7 +185,7 @@ def get_disabled_clusters() -> dict[str, DisabledCluster]:
     ]
     if expired:
         for cluster in expired:
-            del cache.disabled_clusters[cluster]
+            cache.disabled_clusters.pop(cluster)
         write_cache(cache)
     return dict(cache.disabled_clusters)
 

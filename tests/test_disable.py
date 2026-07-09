@@ -3,24 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 import pytest
 
 import cluv.__main__ as cluv_main
+import cluv.cache
 from cluv.cache import (
+    CacheContent,
     disable_cluster,
     enable_cluster,
     get_disabled_clusters,
     is_cluster_disabled,
+    read_cache,
+    write_cache,
 )
 from cluv.cli.disable import parse_duration
-from cluv.config import get_cluv_config
-
-
-@pytest.fixture(autouse=True)
-def clear_cluv_config_cache():
-    get_cluv_config.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -65,27 +62,19 @@ def test_parse_duration_invalid():
 
 
 @pytest.fixture
-def isolated_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Redirect cache operations to a temporary directory."""
-    fake_pyproject = tmp_path / "myproject" / "pyproject.toml"
-    fake_pyproject.parent.mkdir(parents=True)
-    fake_pyproject.write_text(
-        '[project]\nname = "myproject"\nversion = "0.1.0"\n'
-        '[tool.cluv]\nresults_path = "/tmp/results"\n'
-        '[tool.cluv.clusters.mila]\n[tool.cluv.clusters.narval]\n'
-    )
-    monkeypatch.chdir(fake_pyproject.parent)
+def isolated_cache(monkeypatch: pytest.MonkeyPatch):
+    """Monkeypatch read_cache/write_cache to use an in-memory CacheContent."""
+    cache = CacheContent()
 
-    import platformdirs
+    def _write_cache(content: CacheContent) -> None:
+        nonlocal cache
+        cache = content
 
-    monkeypatch.setattr(
-        platformdirs,
-        "PlatformDirs",
-        lambda *a, **kw: type(
-            "FakePlatformDirs", (), {"user_cache_dir": str(tmp_path / "cache")}
-        )(),
-    )
-    yield tmp_path
+    def _read_cache() -> CacheContent:
+        return cache
+
+    monkeypatch.setattr(cluv.cache, read_cache.__name__, _read_cache)
+    monkeypatch.setattr(cluv.cache, write_cache.__name__, _write_cache)
 
 
 def test_disable_cluster_indefinitely(isolated_cache):

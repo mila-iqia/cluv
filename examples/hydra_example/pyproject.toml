@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [{ name = "Fabrice Normandin", email = "normandf@mila.quebec" }]
 requires-python = ">=3.13"
 dependencies = [
-    "cluv[dev,hydra]",
+    "cluster-uv[dev,hydra]",
     "hydra-colorlog>=1.2.0",
     "numpy>=2.4.4",
     "torch>=2.7.0,<2.11.0",
@@ -16,7 +16,7 @@ dependencies = [
 
 [tool.uv.sources]
 remote-slurm-executor = { git = "https://www.github.com/lebrice/remote-slurm-executor" }
-cluv = { workspace = true }
+cluster-uv = { workspace = true }
 
 ###  --------------   CLUV CONFIG   --------------  ###
 

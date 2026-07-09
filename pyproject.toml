@@ -101,7 +101,7 @@ results_symlink = "logs"
 #data_source = "<cluster>:<dataset_path_on_the_cluster>"
 
 # Where the dataset should be replicated on all clusters.
-#datasets_path = "<cloned_datasets_path>"
+#datasets_path = "<path_to_copy_datasets_on_all_clusters>"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.

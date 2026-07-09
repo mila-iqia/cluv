@@ -202,7 +202,10 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     if current_cluster() is None:
         for key, value in cluv.get("local", {}).get("env", {}).items():
             while "$" in value:
-                value = os.path.expandvars(value)
+                new_value = os.path.expandvars(value)
+                if new_value == value:
+                    break
+                value = new_value
             if key in os.environ:
                 logger.warning(
                     "Not overwriting local env var %s=%s with value from [tool.cluv.local.env] %s",

@@ -26,7 +26,7 @@ These are the main goals of Cluv:
 - `cluv submit first job.sh`: Submit the job on every configured cluster at once, keep whichever
   one starts running first, and cancel the rest.
 - `cluv sync`: Fetch the results from the clusters where I ran jobs previously.
-- `cluv run mila -- nvidia-smi`: Sync the project and run a one-off command on a specific cluster.
+- `cluv run mila -- ls logs`: Sync the project and run a command in the project dir on a cluster.
 
 ### Intuitive monitoring of jobs and cluster health across clusters
 

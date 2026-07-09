@@ -6,7 +6,7 @@ import logging
 import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, Literal
 
 import hydra_zen
 import omegaconf
@@ -273,7 +273,7 @@ class CluvLauncher(Launcher):
 
 async def run_sweep(
     job_commands: list[list[str]],
-    cluster: str,
+    cluster: str | Literal["first"],
     cluv_config: CluvConfig,
     cluster_remotes: dict[str, Remote],
     job_script: PurePosixPath | None,
@@ -281,10 +281,12 @@ async def run_sweep(
     chunking: bool,
     packing: bool,
 ) -> list[JobInfo]:
-    cluster_remote = cluster_remotes[cluster]
-
-    cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
-    cluster_results_dir = await expandvars(cluster_remote, cluster_results_dir)
+    if cluster == "first":
+        cluster_results_dir = None
+    else:
+        cluster_remote = cluster_remotes[cluster]
+        cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
+        cluster_results_dir = await expandvars(cluster_remote, cluster_results_dir)
 
     local_results_dir = get_results_path()
 
@@ -313,7 +315,11 @@ async def run_sweep(
                 sbatch_args=sbatch_args
                 # TODO: If we leave the '%t' in the output file path, there are files
                 # with a literal '%t' that get created, and apparently only contain the epilog.
-                + [f"--output={cluster_results_dir}/{_runid_template}/%j.out"],
+                + (
+                    [f"--output={cluster_results_dir}/{_runid_template}/%j.out"]
+                    if cluster != "first"
+                    else []  # submit_first adds the `SBATCH_OUTPUT` env var that should work.
+                ),
                 # + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t.out"],
                 program_args=["python", "main.py", *job_command],
                 _skip_sync=True,

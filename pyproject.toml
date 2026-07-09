@@ -47,9 +47,7 @@ markers = [
 managed = true
 
 [tool.uv.workspace]
-members = [
-    "examples/pytorch-example",
-]
+members = ["examples/pytorch-example"]
 
 
 [tool.uv-dynamic-versioning]
@@ -86,64 +84,67 @@ show_missing = true
 ###  --------------   CLUV CONFIG   --------------  ###
 
 [tool.cluv]
+# All variables below can be overridden per cluster (except data_source).
 
 # Job script to use by default when one isn't passed to the `submit` command, on all clusters.
-# Can be overridden per cluster below. or per job submission.
+# Can also be overridden per job submission.
 job_script_path = "scripts/job.sh"
-# Where to store job results by default. Can be overridden per cluster.
+
+# Where to store job results by default.
 results_path = "$SCRATCH/logs/cluv"
+
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
 results_symlink = "logs"
-## Where to read the data from when synchronizing data to all clusters.
-#data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
-## Where the dataset should be replicated on all clusters.
-#datasets_path = "$SCRATCH/datasets/cifar10"
+
+# Where to read the data from when synchronizing data to all clusters.
+#data_source = "<cluster>:<dataset_path_on_the_cluster>"
+
+# Where the dataset should be replicated on all clusters.
+#datasets_path = "<path_to_copy_datasets_on_all_clusters>"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
 # Assume that compute nodes don't have internet access by default. Override below when they do.
-UV_OFFLINE="1"
-WANDB_MODE="offline"
+UV_OFFLINE = "1"
+WANDB_MODE = "offline"
 
 [tool.cluv.sbatch_args]
 # sbatch flags applied on all clusters. CLI-supplied flags take precedence.
 time = "3:00:00"
 requeue = true
 
-
 ###  --------------   Clusters Config   --------------  ###
 
 [tool.cluv.clusters.mila]
 # Overrides specific to the Mila cluster.
-env = {UV_OFFLINE="0", WANDB_MODE="online"}
+env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 
 [tool.cluv.clusters.tamia]
 
 [tool.cluv.clusters.killarney]
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
 results_path = "$HOME/logs/cluv"
-# datasets_path = "$HOME/datasets/cifar10"
 
 [tool.cluv.clusters.vulcan]
 
 [tool.cluv.clusters.rorqual]
-sbatch_args = {account="rrg-bengioy-ad"}
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.fir]
-env = {UV_OFFLINE="0", WANDB_MODE="online"}
-sbatch_args = {account="rrg-bengioy-ad"}
+env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.nibi]
-env = {UV_OFFLINE="0", WANDB_MODE="online"}
-sbatch_args = {account="rrg-bengioy-ad"}
+env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.trillium]
-sbatch_args = {account="rrg-bengioy-ad"}
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.trillium-gpu]
-sbatch_args = {account="rrg-bengioy-ad"}
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.
-sbatch_args = {account="def-bengioy"}
+sbatch_args = { account = "def-bengioy" }

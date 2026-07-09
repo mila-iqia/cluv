@@ -54,6 +54,7 @@ def main(args: Args | None = None):
         project="cluv-example",
         name=run_id,
         id=run_id,
+        mode="offline",  # to avoid pushing to wandb when running this example.
         dir=run_dir,
         config=vars(args)
         | ({"job": dataclasses.asdict(job_info)} if job_info else {})

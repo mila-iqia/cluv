@@ -87,7 +87,7 @@ async def sync(
         remotes = all_remotes.copy()
         clusters = [remote.hostname for remote in all_remotes]
 
-    if "GITHUB_ACTIONS" not in os.environ and not _head_is_up_to_date():
+    if "GITHUB_ACTIONS" not in os.environ and not await _head_is_up_to_date():
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
         await run(("git", "push"), hide=False)
 
@@ -281,8 +281,12 @@ async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
     project_state.uv_version = uv_version_here
 
 
-def _head_is_up_to_date() -> bool:
-    """Returns True if `git push` wouldn't push anything (local HEAD matches upstream)."""
+async def _head_is_up_to_date() -> bool:
+    """Returns True if `git push` wouldn't push anything (local HEAD matches upstream).
+
+    Fetches from the remote first, so the comparison reflects the actual state of the
+    remote rather than a possibly-stale local tracking ref.
+    """
     upstream = subprocess.run(
         ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
         capture_output=True,
@@ -290,6 +294,10 @@ def _head_is_up_to_date() -> bool:
     )
     if upstream.returncode != 0:
         # No upstream configured for the current branch; can't tell, so don't skip.
+        return False
+    fetch_result = await run(("git", "fetch"), hide=True, warn=True)
+    if fetch_result.returncode != 0:
+        # Couldn't reach the remote; don't skip the push attempt.
         return False
     local_commit = subprocess.getoutput("git rev-parse HEAD").strip()
     upstream_commit = subprocess.getoutput(f"git rev-parse {upstream.stdout.strip()}").strip()

@@ -230,7 +230,8 @@ class CluvLauncher(Launcher):
         assert inspect.isfunction(self.task_function)
         module_path = inspect.getsourcefile(self.task_function)
         assert module_path
-        prefix = ["python", module_path]
+        module_path = Path(module_path).relative_to(find_pyproject().parent)
+        prefix = ["python", str(module_path)]
 
         # TODO: Remove any 'hydra/launcher'-related configs. This isn't as easy as it sounds!
         new_job_overrides = []

@@ -36,9 +36,7 @@ def parse_duration(period: str) -> timedelta:
         return timedelta(days=int(period))
 
     # Slurm-style: [D-]HH:MM:SS or [D-]H:MM:SS
-    slurm_match = re.fullmatch(
-        r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", period
-    )
+    slurm_match = re.fullmatch(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", period)
     if slurm_match:
         days = int(slurm_match.group(1) or 0)
         hours = int(slurm_match.group(2))

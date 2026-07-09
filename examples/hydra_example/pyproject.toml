@@ -48,15 +48,15 @@ requeue = true
 
 [tool.cluv.clusters.mila]
 # Overrides specific to the Mila cluster.
-env = {UV_OFFLINE="0", WANDB_MODE="online"}
-results_path = "$SCRATCH/logs/cluv"
+env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
+results_path = "$SCRATCH/logs/hydra_example"
 
 [tool.cluv.clusters.tamia]
 
 [tool.cluv.clusters.killarney]
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
 datasets_path = "$HOME/datasets/cifar10"
-results_path = "$HOME/logs/cluv"
+results_path = "$HOME/logs/hydra_example"
 
 [tool.cluv.clusters.vulcan]
 

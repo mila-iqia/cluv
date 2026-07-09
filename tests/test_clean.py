@@ -150,8 +150,8 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     config = CluvConfig(
         results_path=str(tmp_path / "results"),
         clusters={
-            "foo": PartialClusterConfig(results_path="/results"),
-            "bar": PartialClusterConfig(results_path="/results"),
+            "foo": PartialClusterConfig(results_path="/foo/results"),
+            "bar": PartialClusterConfig(results_path="/bar/results"),
         },
     )
     monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, lambda: config)
@@ -175,8 +175,12 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(cluv.cli.clean, read_cache.__name__, lambda: cache)
 
-    async def fake_list_remote_run_dirs(remote: Remote):  # noqa
+    async def fake_list_remote_run_dirs(
+        remote: Remote,  # noqa
+        path: PurePosixPath,
+    ) -> list[tuple[str, datetime]]:
         cluster = remote.hostname  # noqa
+        assert path == PurePosixPath(f"/{cluster}/results")
         return [
             (f"{cluster}_run_kept", datetime(2026, 6, 20, tzinfo=timezone.utc)),
             (f"{cluster}_run_pruned", datetime(2026, 6, 20, tzinfo=timezone.utc)),
@@ -228,8 +232,8 @@ async def test_confirming_deletes_pruned_run_on_every_cluster(
     mock_confirm.assert_called_once()
     assert sorted(commands_run_during_test) == sorted(
         [
-            ("foo", "rm -rf /results/foo_run_pruned"),
-            ("bar", "rm -rf /results/bar_run_pruned"),
+            ("foo", "rm -rf /foo/results/foo_run_pruned"),
+            ("bar", "rm -rf /bar/results/bar_run_pruned"),
         ]
     )
 
@@ -242,10 +246,10 @@ async def test_one_cluster_failure_does_not_abort_the_others(
 ):
     expected_commands.update(
         {
-            ("foo", "rm -rf /results/foo_run_pruned"): subprocess.CalledProcessError(
-                1, "rm -rf /results/foo_run_pruned", stderr="boom"
+            ("foo", "rm -rf /foo/results/foo_run_pruned"): subprocess.CalledProcessError(
+                1, "rm -rf /foo/results/foo_run_pruned", stderr="boom"
             ),
-            ("bar", "rm -rf /results/bar_run_pruned"): "",
+            ("bar", "rm -rf /bar/results/bar_run_pruned"): "",
         }
     )
 
@@ -254,8 +258,8 @@ async def test_one_cluster_failure_does_not_abort_the_others(
 
     assert sorted(commands_run_during_test) == sorted(
         [
-            ("foo", "rm -rf /results/foo_run_pruned"),
-            ("bar", "rm -rf /results/bar_run_pruned"),
+            ("foo", "rm -rf /foo/results/foo_run_pruned"),
+            ("bar", "rm -rf /bar/results/bar_run_pruned"),
         ]
     )
 

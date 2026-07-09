@@ -51,47 +51,10 @@ See the [examples](examples) folder for sample projects using cluv. Each example
 
 ## Configuration
 
-Add a `[tool.cluv]` section to the `pyproject.toml` of your project. `cluv init` generates a default config, or you can write it by hand.
-See the config at the project root for an example, or refer to the schema below.
+Add a `[tool.cluv]` section to the `pyproject.toml` of your project to manage the behavior of the tool.
+The command `cluv init` will add a default config if it doesn't already exists in the `.toml`.
 
-### Top-level fields
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `clusters` | table | Per-cluster settings, keyed by SSH hostname from `~/.ssh/config`. |
-| `env` | table | Global environment variables applied to all clusters. |
-| `results_path` | string | Path relative to the project root for storing results. `cluv sync` rsyncs that directory back from each remote cluster. |
-
-### `[tool.cluv.clusters.<name>.env]`
-Environment variables for a specific cluster. Values here are merged on top of `[tool.cluv.env]` when submitting.
-
-### Variables priority
-Environment variables can be set at multiple levels when submitting jobs, with the following precedence (highest to lowest):
-1. Command-line arguments to `cluv submit`.
-2. Cluster-specific variables in `[tool.cluv.clusters.<name>.env]`
-3. Global variables in `[tool.cluv.env]`
-4. SBATCH directives inside the job script (e.g. `#SBATCH --export=VAR=value`)
-5. Default values from the cluster (e.g. `SBATCH_PARTITION`)
-
-### Example
-
-Here's an example `pyproject.toml` with cluv configuration for three clusters, and some global and cluster-specific environment variables:
-
-```toml
-[tool.cluv]
-results_path = "logs"
-
-[tool.cluv.env]
-SBATCH_TIMELIMIT = "3:00:00"
-WANDB_MODE = "offline"
-
-[tool.cluv.clusters.mila]
-env = { WANDB_MODE="online", SBATCH_PARTITION="long" }
-
-[tool.cluv.clusters.narval]
-
-[tool.cluv.clusters.tamia]
-```
+See the config at the project root for an example, or refer to the [docs](https://mila-iqia.github.io/cluv/).
 
 ## Commands
 

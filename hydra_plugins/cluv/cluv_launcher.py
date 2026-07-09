@@ -282,24 +282,26 @@ async def run_sweep(
     packing: bool,
 ) -> list[JobInfo]:
     if cluster == "first":
-        cluster_results_dir = None
+        # submit_first adds the `SBATCH_OUTPUT` env var that should work as expected.
+        output_args = []
     else:
-        cluster_remote = cluster_remotes[cluster]
-        cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
-        cluster_results_dir = await expandvars(cluster_remote, cluster_results_dir)
+        _cluster_remote = cluster_remotes[cluster]
+        _cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
+        _cluster_results_dir = await expandvars(_cluster_remote, _cluster_results_dir)
+        _runid_template = get_run_id(
+            cluster=cluster,
+            job_id="%j",
+            task_index="%t",
+            array_job_id="%A" if chunking else None,
+            doing_job_packing=packing,
+            doing_job_chunking=chunking,
+        )
+        # TODO: If we leave the '%t' in the output file path, there are files
+        output_args = [f"--output={_cluster_results_dir}/{_runid_template}/%j.out"]
 
     local_results_dir = get_results_path()
 
     sbatch_args = convert_submitit_style_params_to_sbatch_flags(params)
-    # TODO: Fix this, it tries to do `ssh first`!
-    _runid_template = get_run_id(
-        cluster=cluster,
-        job_id="%j",
-        task_index="%t",
-        array_job_id="%A" if chunking else None,
-        doing_job_packing=packing,
-        doing_job_chunking=chunking,
-    )
 
     job_infos: list[JobInfo] = []
     for job_command in job_commands:
@@ -313,20 +315,15 @@ async def run_sweep(
                 job_script=Path(job_script) if job_script is not None else None,
                 # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
                 # to do this, but I can't see it right now.
-                sbatch_args=sbatch_args
-                # TODO: If we leave the '%t' in the output file path, there are files
-                # with a literal '%t' that get created, and apparently only contain the epilog.
-                + (
-                    [f"--output={cluster_results_dir}/{_runid_template}/%j.out"]
-                    if cluster != "first"
-                    else []  # submit_first adds the `SBATCH_OUTPUT` env var that should work.
-                ),
-                # + [f"--output={cluster_results_dir}/{_runid_template}/%j_%t.out"],
+                sbatch_args=sbatch_args + output_args,
                 program_args=["python", "main.py", *job_command],
                 _skip_sync=True,
             )
         if job is None:
             raise RuntimeError("Unable to submit jobs! See the error traces above for details.")
+        # In the case where `cluster` was 'first', it now gets updated to the cluster that was actually
+        # selected to run the job. This avoids later calls doing things like `ssh first`.
+        cluster = job.cluster
         job_id = job.job_id
 
         assert not chunking and not packing  # jobid is the "run id" for now.

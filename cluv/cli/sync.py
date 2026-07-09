@@ -87,7 +87,7 @@ async def sync(
         remotes = all_remotes.copy()
         clusters = [remote.hostname for remote in all_remotes]
 
-    if "GITHUB_ACTIONS" not in os.environ:
+    if "GITHUB_ACTIONS" not in os.environ and not _head_is_up_to_date():
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
         await run(("git", "push"), hide=False)
 
@@ -279,6 +279,21 @@ async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
         await remote.run(f"bash -l -c 'uv self update {uv_version_here}'", hide=True)
 
     project_state.uv_version = uv_version_here
+
+
+def _head_is_up_to_date() -> bool:
+    """Returns True if `git push` wouldn't push anything (local HEAD matches upstream)."""
+    upstream = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        capture_output=True,
+        text=True,
+    )
+    if upstream.returncode != 0:
+        # No upstream configured for the current branch; can't tell, so don't skip.
+        return False
+    local_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+    upstream_commit = subprocess.getoutput(f"git rev-parse {upstream.stdout.strip()}").strip()
+    return local_commit == upstream_commit
 
 
 def _is_github_pr_ref(github_ref: str) -> bool:

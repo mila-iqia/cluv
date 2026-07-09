@@ -10,7 +10,7 @@ In early development. Commands are functional, but expect bugs or missing featur
 
 - Python >= 3.13
 - [UV](https://docs.astral.sh/uv/)
-- SSH access configured for each cluster in `~/.ssh/config` (run `cluv login` to open ControlMaster sessions)
+- SSH access configured for each cluster in `~/.ssh/config`
 - A GitHub repository with your project
 
 ## Installation
@@ -45,16 +45,16 @@ cluv submit mila job.sh
    cluv sync
    ```
 
-## Examples
-
-See the [examples](examples) folder for sample projects using cluv. Each example includes a README with instructions specific to that project.
-
 ## Configuration
 
 Add a `[tool.cluv]` section to the `pyproject.toml` of your project to manage the behavior of the tool.
 The command `cluv init` will add a default config if it doesn't already exists in the `.toml`.
 
 See the config at the project root for an example, or refer to the [docs](https://mila-iqia.github.io/cluv/).
+
+## Examples
+
+See the [examples](examples) folder for sample projects using cluv. Each example includes a README with instructions specific to that project.
 
 ## Commands
 

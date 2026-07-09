@@ -2,6 +2,7 @@
 
 import asyncio
 import collections
+import inspect
 import logging
 import time
 from collections.abc import Sequence
@@ -221,7 +222,15 @@ class CluvLauncher(Launcher):
     ) -> list[JobReturn]:
         assert self.cluv_config
         assert self.cluster_remotes
+        assert self.task_function
         cluster = self.cluster
+        # NOTE: Assumes that passing "python path/to/script.py *overrides" to the job script will work.
+        # (It does work for the example).
+        # TODO: Couldn't we use `sys.argv` or some info about the run command from the Hydra context to help?
+        assert inspect.isfunction(self.task_function)
+        module_path = inspect.getsourcefile(self.task_function)
+        assert module_path
+        prefix = ["python", module_path]
 
         # TODO: Remove any 'hydra/launcher'-related configs. This isn't as easy as it sounds!
         new_job_overrides = []
@@ -231,6 +240,7 @@ class CluvLauncher(Launcher):
                 for override in overrides
                 if not override.startswith(("hydra/launcher", "hydra.launcher", "launcher"))
             ]
+            new_override = prefix + new_override
             new_job_overrides.append(new_override)
         job_overrides = new_job_overrides
 
@@ -316,7 +326,7 @@ async def run_sweep(
                 # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
                 # to do this, but I can't see it right now.
                 sbatch_args=sbatch_args + output_args,
-                program_args=["python", "main.py", *job_command],
+                program_args=job_command,
                 _skip_sync=True,
             )
         if job is None:
@@ -358,7 +368,7 @@ async def run_sweep(
         )
         job_infos.append(job)
 
-    # TODO: Create a 'live' rich table instead and update it as the status of the jobs change.
+    # Creates a rich.Live table and updates it as the status of the jobs change.
     await monitor_jobs_async(job_infos, poll_interval_seconds=30)
 
     await asyncio.gather(

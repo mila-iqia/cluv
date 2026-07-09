@@ -123,7 +123,6 @@ results_symlink = "logs"
 UV_OFFLINE = "1"
 WANDB_MODE = "offline"
 
-
 [tool.cluv.local]
 ## Settings (environment variables) applied when using cluv on a local machine (not on a Slurm cluster).
 # Fake "$SCRATCH" directory to use when not on a Slurm cluster.

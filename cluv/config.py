@@ -195,21 +195,24 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     with pyproject_path.open("rb") as handle:
         data = tomllib.load(handle)
 
-    cluv = data.get("tool", {}).get("cluv", {})
+    cluv: dict = data.get("tool", {}).get("cluv", {})
     if not cluv:
         raise RuntimeError(f"No cluv config in {pyproject_path} file.")
 
-    config = CluvConfig.model_validate(cluv, extra="forbid")
     if current_cluster() is None:
-        for key, value in config.local.env.items():
+        for key, value in cluv.get("local", {}).get("env", {}).items():
+            while "$" in value:
+                value = os.path.expandvars(value)
             if key in os.environ:
-                logger.debug(
-                    "Overriding local env var %s=%s with value from [tool.cluv.local.env] from pyproject.toml: %s",
+                logger.warning(
+                    "Not overwriting local env var %s=%s with value from [tool.cluv.local.env] %s",
                     key,
                     os.environ[key],
                     value,
                 )
+                continue
             os.environ[key] = value
+    config = CluvConfig.model_validate(cluv, extra="forbid")
     return config
 
 

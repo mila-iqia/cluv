@@ -291,6 +291,7 @@ async def run_sweep(
     local_results_dir = get_results_path()
 
     sbatch_args = convert_submitit_style_params_to_sbatch_flags(params)
+    # TODO: Fix this, it tries to do `ssh first`!
     _runid_template = get_run_id(
         cluster=cluster,
         job_id="%j",

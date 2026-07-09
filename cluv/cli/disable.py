@@ -100,7 +100,7 @@ def disable(cluster: str, period: str | None = None) -> None:
     disabled_until: datetime | None = None
     if period is not None:
         duration = parse_duration(period)
-        disabled_until = datetime.now().astimezone() + duration
+        disabled_until = datetime.now(tz=timezone.utc).astimezone() + duration
 
     disable_cluster(cluster, disabled_until=disabled_until)
 
@@ -113,7 +113,7 @@ def disable(cluster: str, period: str | None = None) -> None:
         remaining = format_remaining(disabled_until)
         console.print(
             f"[yellow]Cluster [bold]{cluster}[/bold] has been disabled for {remaining}.[/yellow]\n"
-            f"It will be automatically re-enabled at {disabled_until.strftime('%Y-%m-%d %H:%M:%S %Z')}.\n"
+            f"It will be automatically re-enabled at {disabled_until.strftime('%Y-%m-%d %H:%M:%S %z')}.\n"
             f"Run [bold]cluv enable {cluster}[/bold] to re-enable it earlier."
         )
 

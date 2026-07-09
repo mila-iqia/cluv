@@ -77,14 +77,14 @@ async def sync(
     # Show disabled clusters early so the user is aware.
     disabled = get_disabled_clusters()
     if disabled:
-        from cluv.cli.disable import _format_remaining
+        from cluv.cli.disable import format_remaining
 
         parts = []
         for cluster_name, info in disabled.items():
             if info.disabled_until is None:
                 parts.append(f"[bold]{cluster_name}[/bold] (indefinitely)")
             else:
-                remaining = _format_remaining(info.disabled_until)
+                remaining = format_remaining(info.disabled_until)
                 parts.append(f"[bold]{cluster_name}[/bold] ({remaining} remaining)")
         console.log(
             f"[yellow]Skipping disabled cluster(s): {', '.join(parts)}.[/yellow] "
@@ -98,14 +98,14 @@ async def sync(
         enabled_clusters = [c for c in clusters if c not in disabled]
         skipped = {c: disabled[c] for c in clusters if c in disabled}
         if skipped:
-            from cluv.cli.disable import _format_remaining
+            from cluv.cli.disable import format_remaining
 
             parts = []
             for cluster_name, info in skipped.items():
                 if info.disabled_until is None:
                     parts.append(f"[bold]{cluster_name}[/bold] (indefinitely)")
                 else:
-                    remaining = _format_remaining(info.disabled_until)
+                    remaining = format_remaining(info.disabled_until)
                     parts.append(f"[bold]{cluster_name}[/bold] ({remaining} remaining)")
             console.log(f"[yellow]Skipping disabled cluster(s): {', '.join(parts)}.[/yellow]")
         remotes = await login(enabled_clusters) if enabled_clusters else []

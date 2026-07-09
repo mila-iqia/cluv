@@ -13,7 +13,7 @@ from cluv.cache import (
 )
 from cluv.utils import console
 
-__all__ = ["disable", "enable"]
+__all__ = ["disable", "enable", "format_remaining"]
 
 
 def parse_duration(period: str) -> timedelta:
@@ -66,7 +66,7 @@ def parse_duration(period: str) -> timedelta:
     )
 
 
-def _format_remaining(disabled_until: datetime) -> str:
+def format_remaining(disabled_until: datetime) -> str:
     """Return a human-readable string for remaining disable time."""
     remaining = _ensure_utc(disabled_until) - datetime.now(tz=timezone.utc)
     if remaining.total_seconds() <= 0:
@@ -100,7 +100,7 @@ def disable(cluster: str, period: str | None = None) -> None:
     disabled_until: datetime | None = None
     if period is not None:
         duration = parse_duration(period)
-        disabled_until = datetime.now(tz=timezone.utc) + duration
+        disabled_until = datetime.now().astimezone() + duration
 
     disable_cluster(cluster, disabled_until=disabled_until)
 
@@ -110,10 +110,10 @@ def disable(cluster: str, period: str | None = None) -> None:
             f"Run [bold]cluv enable {cluster}[/bold] to re-enable it."
         )
     else:
-        remaining = _format_remaining(disabled_until)
+        remaining = format_remaining(disabled_until)
         console.print(
             f"[yellow]Cluster [bold]{cluster}[/bold] has been disabled for {remaining}.[/yellow]\n"
-            f"It will be automatically re-enabled at {disabled_until.strftime('%Y-%m-%d %H:%M:%S UTC')}.\n"
+            f"It will be automatically re-enabled at {disabled_until.strftime('%Y-%m-%d %H:%M:%S %Z')}.\n"
             f"Run [bold]cluv enable {cluster}[/bold] to re-enable it earlier."
         )
 

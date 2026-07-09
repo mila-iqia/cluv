@@ -211,6 +211,7 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
                     value,
                 )
                 continue
+            logger.info("Setting local env var %s=%s from [tool.cluv.local.env]", key, value)
             os.environ[key] = value
     config = CluvConfig.model_validate(cluv, extra="forbid")
     return config

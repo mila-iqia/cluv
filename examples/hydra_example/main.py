@@ -22,6 +22,7 @@ from torchvision.datasets import CIFAR10
 import cluv
 import cluv.config
 import cluv.job
+
 logger = logging.getLogger(__name__)
 
 

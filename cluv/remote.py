@@ -156,31 +156,13 @@ async def run(
         raise
 
     assert proc.returncode is not None
-    if proc.returncode != 0:
-        message = (
-            f"{program_and_args!r}"
-            + (f" with input {input!r}" if input else "")
-            + f" exited with {proc.returncode}"
-            + (f": {stderr}" if stderr else "")
-        )
-        logger.debug(message, stacklevel=_stacklevel)
-        if not warn:
-            if stderr and hide not in [True, "err", "stderr"]:
-                logger.error(stderr.decode(), stacklevel=_stacklevel)
-            raise subprocess.CalledProcessError(
-                returncode=proc.returncode,
-                cmd=program_and_args,
-                output=stdout,
-                stderr=stderr,
-            )
-        if hide is not True:  # don't warn if hide is True.
-            logger.warning(RuntimeWarning(message), stacklevel=_stacklevel)
     result = subprocess.CompletedProcess(
         args=program_and_args,
         returncode=proc.returncode,
         stdout=stdout.decode(),
         stderr=stderr.decode(),
     )
+
     async with console_lock.get() or contextlib.nullcontext():
         if _display:
             console.log(
@@ -203,6 +185,25 @@ async def run(
             if hide not in [True, "err", "stderr"]:
                 print(result.stderr, file=sys.stderr)
             logger.debug(result.stderr)
+    if proc.returncode != 0:
+        message = (
+            f"{program_and_args!r}"
+            + (f" with input {input!r}" if input else "")
+            + f" exited with {proc.returncode}"
+            + (f": {stderr}" if stderr else "")
+        )
+        logger.debug(message, stacklevel=_stacklevel)
+        if not warn:
+            if stderr and hide not in [True, "err", "stderr"]:
+                logger.error(stderr.decode(), stacklevel=_stacklevel)
+            raise subprocess.CalledProcessError(
+                returncode=proc.returncode,
+                cmd=program_and_args,
+                output=stdout,
+                stderr=stderr,
+            )
+        if hide is not True:  # don't warn if hide is True.
+            logger.warning(RuntimeWarning(message), stacklevel=_stacklevel)
     return result
 
 

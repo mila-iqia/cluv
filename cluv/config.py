@@ -8,9 +8,9 @@ import logging
 import os
 import tomllib
 from dataclasses import field
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
 
 from cluv.utils import current_cluster, find_pyproject
@@ -88,6 +88,14 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
 class CluvConfig(BaseModel):
     """Configuration options for Cluv, loaded from the pyproject.toml file."""
 
+    # Pydantic Model configuration.
+    model_config = ConfigDict(
+        extra="forbid",  # throw an error if extra fields are provided
+        validate_default=True,  # validate default values
+        use_attribute_docstrings=True,  # for field descriptions
+        revalidate_instances="always",
+    )
+
     env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""
 
@@ -152,8 +160,8 @@ class CluvConfig(BaseModel):
             sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
             results_path=PurePosixPath(results_path),
             datasets_path=PurePosixPath(datasets_path) if datasets_path else None,
-            project_dir=PurePosixPath(project_dir) if project_dir else None,
             job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
+            project_dir=PurePosixPath(project_dir) if project_dir else None,
             ignore=cluster_config.ignore,
         )
 
@@ -188,23 +196,18 @@ def current_cluster_config() -> ClusterConfig[Path] | None:
     if not cluster:
         return None  # not on a cluster.
     cluv_config = get_cluv_config()
+    cluster_config = cluv_config.get_cluster_config(cluster)
     data_source = cluv_config.data_source
-    config = cluv_config.get_cluster_config(cluster)
     if data_source:
-        source_cluster, data_path = data_source.split(":", 1)
+        source_cluster, _, data_path = data_source.partition(":")
         if cluster == source_cluster:
             # use the dataset path from the data_source setting as the datasets_path.
-            config = dataclasses.replace(config, datasets_path=data_path)
-    return ClusterConfig(
-        env=config.env,
-        sbatch_args=config.sbatch_args,
-        results_path=Path(os.path.expandvars(config.results_path)),
-        datasets_path=(
-            Path(os.path.expandvars(config.datasets_path)) if config.datasets_path else None
-        ),
-        project_dir=Path(os.path.expandvars(config.project_dir)) if config.project_dir else None,
-        job_script_path=(
-            Path(os.path.expandvars(config.job_script_path)) if config.job_script_path else None
-        ),
-        ignore=config.ignore,
+            cluster_config = dataclasses.replace(cluster_config, datasets_path=Path(data_path))
+    return dataclasses.replace(  # type: ignore
+        cluster_config,
+        **{
+            f.name: Path(os.path.expandvars(v))
+            for f in dataclasses.fields(cluster_config)
+            if isinstance(v := getattr(cluster_config, f.name), PurePath)
+        },
     )

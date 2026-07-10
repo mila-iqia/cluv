@@ -50,6 +50,15 @@ Need to set up dataset replication with `cluv sync`? See the
 [dataset sync guide](guides/syncing-datasets.md).
 
 
+### Launch a Hydra sweep on a remote cluster
+
+```console
+python main.py -m launcher=cluv lr=0.01,0.001 +seed=1,2,3
+```
+
+See the [Hydra launcher guide](guides/hydra-launcher.md) for setup and usage.
+
+
 ### Sync your project on a specific cluster
 ```console
 cluv sync rorqual

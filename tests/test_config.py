@@ -1,5 +1,6 @@
 """Unit tests for cluv/config.py — pure, no I/O beyond tmp_path."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -332,3 +333,24 @@ class TestRealProjectConfig:
         cfg = load_cluv_config(root_dir / "pyproject.toml")
         assert cfg is not None
         assert set(cfg.clusters_names) == set(DRAC_CLUSTERS + ["mila"])
+
+
+def test_cluv_local_env_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Prevent any modifications to `os.environ` between tests.
+    monkeypatch.setattr(os, "environ", os.environ.copy())
+
+    p = write_pyproject(
+        tmp_path,
+        """[tool.cluv]
+results_path = "logs"
+[tool.cluv.local.env]
+FOO = "$BAR/baz"
+ALREADY_IN_ENV = "new-value"
+""",
+    )
+    os.environ["ALREADY_IN_ENV"] = "old-value"
+    assert "FOO" not in os.environ
+    cfg = load_cluv_config(p)
+    assert cfg.local.env == {"FOO": "$BAR/baz", "ALREADY_IN_ENV": "new-value"}
+    assert os.environ["FOO"] == "$BAR/baz"
+    assert os.environ["ALREADY_IN_ENV"] == "new-value"

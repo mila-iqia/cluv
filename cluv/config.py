@@ -208,13 +208,13 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
                 value = new_value
             if key in os.environ:
                 logger.warning(
-                    "Not overwriting local env var %s=%s with value from [tool.cluv.local.env] %s",
+                    "Overwriting local env var %s=%s with value from [tool.cluv.local.env] %s",
                     key,
                     os.environ[key],
                     value,
                 )
-                continue
-            logger.info("Setting local env var %s=%s from [tool.cluv.local.env]", key, value)
+            else:
+                logger.info("Setting local env var %s=%s from [tool.cluv.local.env]", key, value)
             os.environ[key] = value
     config = CluvConfig.model_validate(cluv, extra="forbid")
     return config

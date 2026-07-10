@@ -469,7 +469,7 @@ async def get_job_infos(
 ) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
     # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
-    cached_jobs.reverse()
+    cached_jobs = list(reversed(cached_jobs))
 
     # Regroup jobs by cluster
     cluster_jobs: dict[str, list[int]] = {}

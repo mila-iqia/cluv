@@ -30,7 +30,7 @@ from cluv.remote import Remote, list_remote_run_dirs, run
 from cluv.utils import current_cluster
 
 # Note: Need to import these fixtures for now. If they were moved to conftest, we wouldn't need to.
-from tests.test_integration import IN_GITHUB_CLOUD_CI, cluster, remote  # noqa
+from tests.test_integration import IN_GITHUB_CLOUD_CI
 
 # `cluv/cli/__init__.py` does `from .sync import sync`, which shadows the `cluv.cli.sync`
 # submodule attribute with the `sync` function. Use `importlib.import_module` (same idiom as
@@ -57,7 +57,7 @@ async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pyte
         results_path=str(tmp_path / "results"),
         clusters={"foo": PartialClusterConfig(project_dir="/home/user/myproject")},
     )
-    remote = Remote(hostname="foo")  # noqa
+    remote = Remote(hostname="foo")
     project_state = ProjectStateOnCluster()
 
     await fetch_results(remote, config, project_state)
@@ -176,10 +176,9 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cluv.cli.clean, read_cache.__name__, lambda: cache)
 
     async def fake_list_remote_run_dirs(
-        remote: Remote,  # noqa
-        path: PurePosixPath,
+        remote: Remote, path: PurePosixPath
     ) -> list[tuple[str, datetime]]:
-        cluster = remote.hostname  # noqa
+        cluster = remote.hostname
         assert path == PurePosixPath(f"/{cluster}/results")
         return [
             (f"{cluster}_run_kept", datetime(2026, 6, 20, tzinfo=timezone.utc)),
@@ -344,8 +343,8 @@ def clear_cluv_cache(monkeypatch: pytest.MonkeyPatch):
     reason="Integration tests are only run on a self-hosted github runner or on a dev machine.",
 )
 async def test_clean_removes_pruned_run_but_keeps_new_one(
-    cluster: str,  # noqa
-    remote: Remote,  # noqa
+    cluster: str,
+    remote: Remote,
     monkeypatch: pytest.MonkeyPatch,
     clear_cluv_cache: None,
 ):

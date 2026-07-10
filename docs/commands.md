@@ -11,41 +11,52 @@ cluv <command> [options]
 
 [`cluv init`](#cluv-init) 
 
-&emsp; Initialize a project.
+Initialize a project.
+{: .indent }
 
 [`cluv login`](#cluv-login)
 
-&emsp; Establish SSH connections to clusters.
+Establish SSH connections to clusters.
+{: .indent }
 
 [`cluv sync`](#cluv-sync)
 
-&emsp; Sync your project on clusters.
+Sync your project on clusters.
+{: .indent }
 
 [`cluv submit`](#cluv-submit)
 
-&emsp; Submit a job to clusters.
+Submit a job to clusters.
+{: .indent }
 
 [`cluv status`](#cluv-status)
 
-&emsp; Show the status of clusters and jobs.
+Show the status of clusters and jobs.
+{: .indent }
 
 [`cluv run`](#cluv-run)
 
-&emsp; Run a command on a specific cluster.
+Run a command on a specific cluster.
+{: .indent }
 
 **Options**
 
+Available for all commands.
+
 `-h`, `--help`
 
-&emsp; TODO
+TODO
+{: .indent }
 
 `-v`, `--verbose`
 
-&emsp; TODO
+TODO
+{: .indent }
 
 `-q`, `--quiet`
 
-&emsp; TODO
+Disable command output.
+{: .indent }
 
 ## [`cluv init`](#cluv-init) 
 
@@ -78,25 +89,53 @@ cluv init [path]
 
 `path`
 
-&emsp; The path to use for the project. Defaults to the current working directory.
+The path to use for the project. Defaults to the current working directory.
+{: .indent }
 
 
 ## [`cluv login`](#cluv-login)
+
+Create an SSH connection with the clusters. Reuse existing connections when possible.
+
+Run this command before any command that requires a live connection (submit, sync, ...).
 
 !!! tip
     If you don't have a SSH config to connect to the clusters, consider using [milatools](https://github.com/mila-iqia/milatools) to generate your config.
 
 **Usage**
+```console
+cluv login [clusters]
+```
+
+**Arguments**
+
+`clusters`
+
+The clusters to connect to. If not specified, will connect to all clusters in the config. Unreachable clusters will be skipped.
+{: .indent }
 
 
 ## [`cluv sync`](#cluv-sync)
-
+TODO
 
 ## [`cluv submit`](#cluv-submit)
-
+TODO
 
 ## [`cluv status`](#cluv-status)
 
+TODO
+
+**Usage**
+```console
+cluv status [table]
+```
+
+**Arguments**
+
+`table`
+
+Which table to display in the status output. Can be one of `jobs`, `clusters`, or `all`. Defaults to `all`.
+{: .indent }
 
 ## [`cluv run`](#cluv-run)
-
+TODO

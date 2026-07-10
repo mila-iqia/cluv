@@ -10,13 +10,7 @@ This is a quick overview. For more information, check out the [introduction](gui
 2. Install this package:
 
 ```console
-uv tool install git+https://github.com/mila-iqia/cluv
-```
-
-3. Navigate to an existing project, and add the cluv config to your `pyproject.toml`:
-
-```console
-cluv init
+uv tool install cluster-uv
 ```
 
 ## Usage

@@ -68,3 +68,13 @@ cluv sync rorqual
 ```console
 cluv submit rorqual scripts/job.sh --time=00:10:00 -- python main.py
 ```
+
+### Run a command in the synced project a specific cluster
+```console
+cluv run mila -- ls logs
+```
+
+### Check the status of your clusters and jobs
+```console
+cluv status
+```

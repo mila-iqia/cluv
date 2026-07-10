@@ -23,8 +23,10 @@ These are the main goals of Cluv:
 
 ### Easily dispatch jobs to different Slurm clusters
 - `cluv submit rorqual job.sh`: Synchronize the project and submit a job on the rorqual cluster.
-- `cluv submit auto job.sh`: Find the best cluster to run this job. I don't care where it runs.
+- `cluv submit first job.sh`: Submit the job on every configured cluster at once, keep whichever
+  one starts running first, and cancel the rest.
 - `cluv sync`: Fetch the results from the clusters where I ran jobs previously.
+- `cluv run mila -- ls logs`: Sync the project and run a command in the project dir on a cluster.
 
 ### Intuitive monitoring of jobs and cluster health across clusters
 

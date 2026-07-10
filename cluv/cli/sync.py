@@ -71,18 +71,23 @@ async def sync(
     here = current_cluster()
     config = get_cluv_config()
 
-    # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     if clusters:
         if here in clusters:
             clusters.remove(here)
-        remotes = await login(clusters)
+        remotes_to_sync = await login(clusters)
+        # Keep a list of the active remotes, even if the user passed a clusters to sync with,
+        # because we may need a remote to the "data source" cluster later when syncing datasets.
+        active_remotes = await get_active_remotes()
     else:
-        remotes = await get_active_remotes()
-        clusters = [remote.hostname for remote in remotes]
+        # When no cluster is passed, sync with clusters for which we have an active SSH connection.
+        active_remotes = await get_active_remotes()
+        remotes_to_sync = active_remotes  # only the active remotes.
+        clusters = [remote.hostname for remote in remotes_to_sync]
 
-    remotes = {remote.hostname: remote for remote in remotes}
+    active_remotes = {remote.hostname: remote for remote in active_remotes}
+    remotes_to_sync = {remote.hostname: remote for remote in remotes_to_sync}
 
-    if not remotes:
+    if not remotes_to_sync:
         raise RuntimeError(
             "[red]Not currently connected to any Slurm cluster.[/red] "
             "Use `cluv login` to login and create reusable connections."
@@ -98,7 +103,7 @@ async def sync(
 
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
-    for hostname, remote in remotes.items():
+    for hostname, remote in remotes_to_sync.items():
         tasks.append(functools.partial(sync_task_function, remote=remote))
         task_descriptions.append(f"{here or 'local'} -> {hostname}")
 
@@ -110,11 +115,11 @@ async def sync(
     ):
         source_cluster, _, source_path = config.data_source.partition(":")
         # Fetch the data from the source cluster and copy it to the local datasets_path.
-        source_remote = remotes.get(source_cluster)
+        source_remote = active_remotes.get(source_cluster)
         if not source_remote:
             raise RuntimeError(
                 f"[red]Unable to sync datasets, need a connection to the source cluster "
-                f"({source_cluster})[/red]. Current connections: {list(remotes.keys())}\n"
+                f"({source_cluster})[/red]. Current connections: {list(remotes_to_sync.keys())}\n"
                 f"Use `cluv login {source_cluster}` to create a reusable connection to the "
                 f"source cluster."
             )
@@ -135,7 +140,7 @@ async def sync(
 
     # Display a consolidated summary of all newly-synced runs across all clusters.
     cwd = Path.cwd()
-    for (hostname, remote), new_runs in zip(remotes.items(), per_cluster_new_runs):
+    for (hostname, remote), new_runs in zip(remotes_to_sync.items(), per_cluster_new_runs):
         if new_runs:
             console.print(f"[green]Newly synced runs from [bold]{hostname}[/bold]:[/green]")
             for run_path in sorted(new_runs):
@@ -145,7 +150,7 @@ async def sync(
                     display_path = run_path
                 console.print(f"  {display_path}")
 
-    return list(remotes.values())
+    return list(remotes_to_sync.values())
 
 
 async def get_active_remotes() -> list[Remote]:

@@ -5,7 +5,7 @@ import pytest_asyncio
 
 import cluv.config
 from cluv.cli.login import get_remote_without_2fa_prompt
-from cluv.config import find_pyproject
+from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars
 from cluv.remote import control_socket_is_running
 from tests.test_integration import ALL_CLUSTERS, IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
 
@@ -16,7 +16,6 @@ def fake_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fake_scratch = tmp_path / "scratch"
     fake_scratch.mkdir()
     monkeypatch.setenv("SCRATCH", str(fake_scratch))
-    from cluv.config import set_local_env_vars
 
     def _mock_set_local_env_vars(env_vars: dict[str, str]) -> None:
         """Mock function swap our the $SCRATCH value from the pyproject.toml
@@ -53,7 +52,6 @@ def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
     As a consequence of this, the ~/repos/cluv path on the clusters might be changed by the test runners.
     This is kind-of to be expected though, and is not different than doing a `cluv sync` ourselves.
     """
-    from cluv.config import get_cluv_config
 
     def mock_get_cluv_config() -> cluv.config.CluvConfig:
         config = get_cluv_config()

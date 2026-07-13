@@ -23,6 +23,7 @@ from cluv.cli.sync import (
     expandvars,
     fetch_results,
     get_active_remotes,
+    remote_test,
     sync,
 )
 from cluv.config import CluvConfig, PartialClusterConfig, get_cluv_config
@@ -363,9 +364,16 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
     # Move the local results dir:
     if local_results_path.exists():
         local_results_path.rename(local_results_path.with_suffix(".backup"))
+
+    remote_backup_dir = results_path_on_cluster.with_suffix(".backup")
+    assert not (await remote_test("-d", remote_backup_dir, remote)), (
+        f"Stale backup already exists on {cluster} at {results_path_on_cluster}! "
+        f"Some Manual cleanup will probably be needed."
+    )
+
     # Move the directory temporarily, instead of deleting it, so we can clean up after the test.
     await remote.run(
-        f"mv {results_path_on_cluster} {results_path_on_cluster.with_suffix('.backup')}",
+        f"mv {results_path_on_cluster} {remote_backup_dir}",
         hide=False,
     )
     try:
@@ -406,6 +414,6 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
         await remote.run(f"rmdir {results_path_on_cluster / 'new_run'}", hide=False, warn=True)
         await remote.run(f"rmdir {results_path_on_cluster}", hide=False)
         await remote.run(
-            f"mv {results_path_on_cluster.with_suffix('.backup')} {results_path_on_cluster}",
+            f"mv {remote_backup_dir} {results_path_on_cluster}",
             hide=False,
         )

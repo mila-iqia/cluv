@@ -240,8 +240,8 @@ class TestGetSbatchCommand:
                 f"""\
                 [tool.cluv]
                 results_path = "{results_path}"
-                [tool.cluv.env]
-                SBATCH_TIMELIMIT="5:00:00"
+                [tool.cluv.sbatch_args]
+                time = "5:00:00"
                 [tool.cluv.clusters.mila]
                 """
             )

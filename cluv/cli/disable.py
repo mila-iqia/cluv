@@ -11,6 +11,7 @@ from cluv.cache import (
     enable_cluster,
     get_disabled_clusters,
 )
+from cluv.slurm import parse_slurm_time
 from cluv.utils import console
 
 __all__ = ["disable", "enable", "format_remaining"]
@@ -36,13 +37,10 @@ def parse_duration(period: str) -> timedelta:
         return timedelta(days=int(period))
 
     # Slurm-style: [D-]HH:MM:SS or [D-]H:MM:SS
-    slurm_match = re.fullmatch(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", period)
-    if slurm_match:
-        days = int(slurm_match.group(1) or 0)
-        hours = int(slurm_match.group(2))
-        minutes = int(slurm_match.group(3))
-        seconds = int(slurm_match.group(4))
-        return timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
+    try:
+        return parse_slurm_time(period)
+    except ValueError:
+        pass
 
     # Suffixed tokens: e.g. "1d 6h 30m", "2h", "45s"
     suffix_map = {"d": "days", "h": "hours", "m": "minutes", "s": "seconds"}

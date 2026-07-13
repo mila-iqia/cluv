@@ -76,7 +76,8 @@ async def sync(
     config = get_cluv_config()
 
     # Show disabled clusters early so the user is aware.
-    disabled = print_disabled_clusters()
+    disabled = get_disabled_clusters()
+    print_disabled_clusters(disabled)
 
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     all_remotes = await get_active_remotes()

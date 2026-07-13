@@ -1,7 +1,8 @@
 import asyncio
 import logging
 
-from cluv.cache import DisabledCluster
+from cluv.cache import DisabledCluster, get_disabled_clusters
+from cluv.cli.disable import print_disabled_clusters
 from cluv.config import get_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 from cluv.utils import console, current_cluster
@@ -26,10 +27,8 @@ async def login(
     Returns:
         A list of `Remote` objects, one for each cluster.
     """
-    if disabled is None:
-        from cluv.cli.disable import print_disabled_clusters
-
-        disabled = print_disabled_clusters()
+    disabled = disabled or get_disabled_clusters()
+    print_disabled_clusters(disabled)
 
     clusters = list(clusters) if clusters else list(get_cluv_config().clusters_names)
     if (this_cluster := current_cluster()) and this_cluster in clusters:

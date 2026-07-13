@@ -26,6 +26,7 @@ from .cli.run import run
 from .cli.status import status
 from .cli.submit import submit
 from .cli.sync import sync
+from .cli.disable import disable, enable
 from .utils import console
 
 logger = logging.getLogger("cluv")
@@ -75,6 +76,12 @@ def main(argv: list[str] | None = None) -> None:
 
     status_parser = add_status_args(subparsers)
     _add_v_arg(status_parser)
+
+    disable_parser = add_disable_args(subparsers)
+    _add_v_arg(disable_parser)
+
+    enable_parser = add_enable_args(subparsers)
+    _add_v_arg(enable_parser)
 
     args = parser.parse_args(argv)
     args_dict = vars(args)
@@ -274,6 +281,48 @@ def add_run_args(subparsers: Subparsers):
     )
     run_parser.set_defaults(func=run)
     return run_parser
+
+
+def add_disable_args(subparsers: Subparsers):
+    disable_parser = subparsers.add_parser(
+        "disable",
+        help="Disable a cluster for a given period (or indefinitely).",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    disable_parser.add_argument(
+        "cluster",
+        metavar="<cluster>",
+        help="The cluster hostname to disable.",
+    )
+    disable_parser.add_argument(
+        "period",
+        nargs="?",
+        default=None,
+        metavar="<period>",
+        help=(
+            "How long to disable the cluster. "
+            "Accepts an integer (days), HH:MM:SS / D-HH:MM:SS (Slurm-style), "
+            "or suffixed values like '2h', '1d 6h'. "
+            "Omit to disable indefinitely."
+        ),
+    )
+    disable_parser.set_defaults(func=disable)
+    return disable_parser
+
+
+def add_enable_args(subparsers: Subparsers):
+    enable_parser = subparsers.add_parser(
+        "enable",
+        help="Re-enable a previously disabled cluster.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    enable_parser.add_argument(
+        "cluster",
+        metavar="<cluster>",
+        help="The cluster hostname to re-enable.",
+    )
+    enable_parser.set_defaults(func=enable)
+    return enable_parser
 
 
 def setup_logging(verbose: int | None, quiet: bool = False) -> None:

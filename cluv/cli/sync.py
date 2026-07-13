@@ -23,7 +23,8 @@ from milatools.utils.parallel_progress import (
     run_async_tasks_with_progress_bar,
 )
 
-from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
+from cluv.cache import ProjectStateOnCluster, get_disabled_clusters, read_cache, write_cache
+from cluv.cli.disable import print_disabled_clusters
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config, load_cluv_config
 from cluv.job import get_datasets_path
@@ -74,10 +75,17 @@ async def sync(
 
     config = get_cluv_config()
 
+    # Show disabled clusters early so the user is aware.
+    disabled = get_disabled_clusters()
+    print_disabled_clusters(disabled)
+
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     all_remotes = await get_active_remotes()
     if clusters:
-        remotes = await login(clusters)
+        # Filter out explicitly-requested clusters that are disabled.
+        enabled_clusters = [c for c in clusters if c not in disabled]
+        # Pass the already-fetched disabled dict so login does not print the warning a second time.
+        remotes = await login(enabled_clusters, disabled=disabled) if enabled_clusters else []
     elif not all_remotes:
         raise RuntimeError(
             "[red]Not currently connected to any Slurm cluster.[/red] "
@@ -148,10 +156,15 @@ async def sync(
 
 
 async def get_active_remotes() -> list[Remote]:
-    """Returns the Remotes for each cluster which has an active SSH connection."""
+    """Returns the Remotes for each cluster which has an active SSH connection.
+
+    Disabled clusters (see `cluv disable`) are excluded.
+    """
     clusters = get_cluv_config().clusters_names
     if (this_cluster := current_cluster()) and this_cluster in clusters:
         clusters.remove(this_cluster)
+    disabled = get_disabled_clusters()
+    clusters = [c for c in clusters if c not in disabled]
     connections = await asyncio.gather(
         *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
     )

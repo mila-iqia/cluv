@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
 import importlib
-import os
 import shutil
 import subprocess
 from datetime import datetime, timezone
@@ -16,11 +16,11 @@ import rich.prompt
 import cluv.__main__ as cluv_main
 import cluv.cache
 import cluv.cli.clean
+import cluv.config
 from cluv.cache import CacheContent, ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.clean import clean, compute_runs_to_delete
 from cluv.cli.sync import (
     create_results_dir_with_symlink_to_scratch,
-    expandvars,
     fetch_results,
     get_active_remotes,
     remote_test,
@@ -115,7 +115,6 @@ def expected_commands(
 @pytest.fixture
 def commands_run_during_test(
     monkeypatch: pytest.MonkeyPatch,
-    request: pytest.FixtureRequest,
     expected_commands: dict[tuple[str, str], str | subprocess.CalledProcessError],
 ) -> list[tuple[str, str]]:
     """Returns the list of (hostname, command) pairs passed to `Remote.run` during the test.
@@ -192,7 +191,8 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_dry_run_makes_no_delete_calls(
     clean_env, commands_run_during_test: list[tuple[str, str]]
 ):
-    await clean(dry_run=True)
+    to_be_removed = await clean(dry_run=True)
+    assert to_be_removed == {"foo": ["foo_run_pruned"], "bar": ["bar_run_pruned"]}
     assert (
         commands_run_during_test == []
     )  # no calls were made to Remote.run, so nothing was deleted
@@ -204,8 +204,20 @@ async def test_declining_confirmation_makes_no_delete_calls(
     monkeypatch.setattr(
         cluv.cli.clean.Confirm, cluv.cli.clean.Confirm.ask.__name__, lambda *a, **k: False
     )
-    await clean()
+    removed = await clean()
+    assert not removed
     assert commands_run_during_test == []
+
+
+@pytest.fixture
+def mock_confirm(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    value = getattr(request, "param", True)
+    monkeypatch.setattr(
+        cluv.cli.clean.Confirm,
+        cluv.cli.clean.Confirm.ask.__name__,
+        mock_confirm := mock.Mock(spec=rich.prompt.Confirm.ask, return_value=value),
+    )
+    return mock_confirm
 
 
 async def test_force_skips_confirmation_and_deletes(
@@ -213,8 +225,8 @@ async def test_force_skips_confirmation_and_deletes(
     commands_run_during_test: list[tuple[str, str]],
     mock_confirm: mock.Mock,
 ):
-    await clean(force=True)
-
+    removed = await clean(force=True)
+    assert removed == {"foo": ["foo_run_pruned"], "bar": ["bar_run_pruned"]}
     mock_confirm.assert_not_called()
     assert len(commands_run_during_test) == 2
     for hostname, command in commands_run_during_test:
@@ -228,7 +240,8 @@ async def test_confirming_deletes_pruned_run_on_every_cluster(
     monkeypatch: pytest.MonkeyPatch,
     mock_confirm: mock.Mock,
 ):
-    await clean()
+    removed = await clean()
+    assert removed == {"foo": ["foo_run_pruned"], "bar": ["bar_run_pruned"]}
     mock_confirm.assert_called_once()
     assert sorted(commands_run_during_test) == sorted(
         [
@@ -253,26 +266,15 @@ async def test_one_cluster_failure_does_not_abort_the_others(
         }
     )
 
-    await clean()  # must not raise
+    removed = await clean()  # must not raise
     mock_confirm.assert_called_once()
-
+    assert removed == {"bar": ["bar_run_pruned"]}  # only the successfully removed run is reported.
     assert sorted(commands_run_during_test) == sorted(
         [
             ("foo", "rm -rf /foo/results/foo_run_pruned"),
             ("bar", "rm -rf /bar/results/bar_run_pruned"),
         ]
     )
-
-
-@pytest.fixture
-def mock_confirm(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
-    value = getattr(request, "param", True)
-    monkeypatch.setattr(
-        cluv.cli.clean.Confirm,
-        cluv.cli.clean.Confirm.ask.__name__,
-        mock_confirm := mock.Mock(spec=rich.prompt.Confirm.ask, return_value=value),
-    )
-    return mock_confirm
 
 
 async def test_never_synced_cluster_is_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -348,80 +350,112 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
     remote: Remote,
     monkeypatch: pytest.MonkeyPatch,
     clear_cluv_cache: None,
+    tmp_path: Path,
 ):
-    """End-to-end: an old, locally-pruned run is removed from the cluster; a brand-new,
-    never-fetched run is left alone."""
+    """Integration test for `cluv clean`.
+
+    Sets up a local results dir along with a fake one on the remote. This requires quite a bit of patching.
+    Then, runs `cluv clean`, and checks that the right dirs were removed on the remote and fetched locally.
+    """
     assert not current_cluster(), "test needs to run locally for now."
-    assert cluv.cache.read_cache() == CacheContent(), "test assumes no previous cache content"
+    assert cluv.cache.read_cache() == CacheContent(), "Assuming a clean cache to begin with."
 
     monkeypatch.chdir("examples/pytorch-example")
     config = get_cluv_config()
     try:
-        results_path_on_cluster = config.get_cluster_config(cluster).results_path
+        cluster_config = config.get_cluster_config(cluster)
     except KeyError as err:
         pytest.skip(
             f"We have an existing connection to the {cluster!r} cluster, but it "
             f"is not configured in the cluv section of that example's pyproject.toml file. (err={err})"
         )
 
-    # sanity check
-    assert results_path_on_cluster == PurePosixPath("$SCRATCH/logs/pytorch_example")
-    results_path_on_cluster = await expandvars(remote, results_path_on_cluster)
+    real_results_path_on_cluster = cluster_config.results_path
 
-    local_results_path = Path(os.path.expandvars(config.results_path))
-    # Move the local results dir:
-    if local_results_path.exists():
-        local_results_path.rename(local_results_path.with_suffix(".backup"))
+    # Local "logs" directory.
+    fake_local_results_dir = tmp_path / real_results_path_on_cluster.name
 
-    remote_backup_dir = results_path_on_cluster.with_suffix(".backup")
-    assert not (await remote_test("-d", remote_backup_dir, remote)), (
-        f"Stale backup already exists on {cluster} at {remote_backup_dir}! "
-        f"Some Manual cleanup will probably be needed."
+    # Directory on the cluster containing the test runs.
+    fake_cluster_results_dir = real_results_path_on_cluster.with_name(
+        f"temp_{real_results_path_on_cluster.name}"
+    )
+    if await remote_test("-d", fake_cluster_results_dir, remote=remote):
+        # Remote test dir already exists, remove it.
+        await remote.run(f"rm -rf {fake_cluster_results_dir}", hide=False)
+    await remote.run(f"mkdir -p {fake_cluster_results_dir}", hide=True)
+    assert not (await remote.get_output(f"ls {fake_cluster_results_dir}", hide=True)), (
+        f"Sanity check: fake cluster results dir at {fake_cluster_results_dir} should be empty!"
     )
 
-    # Move the directory temporarily, instead of deleting it, so we can clean up after the test.
-    await remote.run(
-        f"mv {results_path_on_cluster} {remote_backup_dir}",
-        hide=False,
+    # Patch stuff so that `cluv clean` actually uses the fake local and remote results dirs instead of the real ones.
+    monkeypatch.setattr(config, "results_path", fake_local_results_dir)
+    cluster_config = dataclasses.replace(cluster_config, results_path=fake_cluster_results_dir)
+    monkeypatch.setitem(config.clusters, cluster, cluster_config)
+    monkeypatch.setattr(cluv.config, get_cluv_config.__name__, lambda: config)
+    monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, lambda: config)
+
+    # Setup the local "logs" directory with some fake runs.
+
+    # Setup the remote directory with some fake runs.
+    old_run_on_cluster = fake_cluster_results_dir / "old_run"
+    newer_run_on_cluster = fake_cluster_results_dir / "newer_run"
+    await remote.run(f"mkdir -p {old_run_on_cluster}", hide=True)
+    await remote.run(f"touch -d '2020-01-01' {old_run_on_cluster}", hide=True)
+
+    await remote.run(f"mkdir -p {newer_run_on_cluster}", hide=True)
+    await remote.run(f"touch -d '2026-01-01' {newer_run_on_cluster}", hide=True)
+
+    # Fetch all the runs from the cluster. This also updates the cluv cache with the last-fetch watermark.
+    await sync([cluster], sync_datasets=False)
+
+    last_fetch_watermark = cluv.cache.read_cache().project_states[cluster].last_fetch_watermark
+    assert last_fetch_watermark
+    assert last_fetch_watermark.replace(hour=0) == datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    # Delete the old run locally. We then expect `cluv clean` to remove that run on the cluster.
+    shutil.rmtree(fake_local_results_dir / "old_run")
+
+    # Create a new run directory on the remote after `sync` was run!
+    # NOTE: `cluv clean` doesn't sync results, so we don't expect this new run to be synced
+    # back to the local results dir directly. However, when running `cluv sync` near the end of this test,
+    # we do expect that directory to be synced back, since it is newer than the last-fetch watermark.
+    # We still expect the old run to be deleted on the remote, since it was pruned locally.
+    newest_run_on_cluster = fake_cluster_results_dir / "newest_run"
+    await remote.run(f"mkdir -p {newest_run_on_cluster}", hide=True)
+
+    removed = await clean([cluster], force=True)
+
+    assert removed == {cluster: [str(old_run_on_cluster.name)]}
+
+    runs_on_cluster = (
+        await remote.get_output(f"ls {fake_cluster_results_dir}", hide=True)
+    ).splitlines()
+    print(f"Runs on cluster after `cluv clean`: {runs_on_cluster}")
+    assert old_run_on_cluster.name not in runs_on_cluster, (
+        "Old run directory should have been removed on the cluster"
     )
-    try:
-        await remote.run(f"mkdir -p {results_path_on_cluster}", hide=True)
+    assert newer_run_on_cluster.name in runs_on_cluster, (
+        f"Newer run directory ({newer_run_on_cluster}) should still exist on the cluster!"
+    )
+    assert newest_run_on_cluster.name in runs_on_cluster, (
+        f"Newest run directory ({newest_run_on_cluster}) should still exist on the cluster!"
+    )
 
-        old_run = results_path_on_cluster / "old_run"
-        await remote.run(f"mkdir -p {old_run}", hide=True)
-        await remote.run(f"touch -d '2020-01-01' {old_run}", hide=True)
-        await sync([cluster], sync_datasets=False)
+    assert fake_local_results_dir.exists(), "Local results dir should still exist."
+    assert not (fake_local_results_dir / old_run_on_cluster.name).exists()
+    assert (fake_local_results_dir / newer_run_on_cluster.name).exists()
 
-        last_fetch_watermark = cluv.cache.read_cache().project_states[cluster].last_fetch_watermark
-        assert last_fetch_watermark
-        assert last_fetch_watermark.replace(hour=0) == datetime(2020, 1, 1, tzinfo=timezone.utc)
+    # This newest run directory will not exist locally, because `cluv clean` doesn't do the `sync` step.
+    assert not (fake_local_results_dir / newest_run_on_cluster.name).exists()
 
-        shutil.rmtree(local_results_path / "old_run")
+    # Fetch all the runs again.
+    await sync([cluster], sync_datasets=False)
 
-        new_run = results_path_on_cluster / "new_run"
-        await remote.run(f"mkdir -p {new_run}", hide=True)
+    assert fake_local_results_dir.exists(), "Local results dir should still exist."
+    assert not (fake_local_results_dir / old_run_on_cluster.name).exists()
+    assert (fake_local_results_dir / newer_run_on_cluster.name).exists()
+    # This time, the newest run gets synced back!
+    assert (fake_local_results_dir / newest_run_on_cluster.name).exists()
 
-        await clean([cluster], force=True)
-
-        remaining = (
-            (await remote.get_output(f"ls {results_path_on_cluster}", warn=True, hide=False))
-            .strip()
-            .splitlines()
-        )
-        assert "old_run" not in remaining
-        assert "new_run" in remaining
-    finally:
-        # Cleanup after the test.
-        print("Test cleanup.")
-        # Restore the local results dir, if it existed before the test.
-        shutil.rmtree(local_results_path)
-        if (local_results_dir_backup := local_results_path.with_suffix(".backup")).exists():
-            local_results_dir_backup.rename(local_results_path)
-
-        await remote.run(f"rmdir {results_path_on_cluster / 'old_run'}", hide=False, warn=True)
-        await remote.run(f"rmdir {results_path_on_cluster / 'new_run'}", hide=False, warn=True)
-        await remote.run(f"rmdir {results_path_on_cluster}", hide=False)
-        await remote.run(
-            f"mv {remote_backup_dir} {results_path_on_cluster}",
-            hide=False,
-        )
+    # Remove the temp results dir on the cluster to cleanup the test.
+    await remote.run(f"rm -rf --verbose {fake_cluster_results_dir}", hide=False)

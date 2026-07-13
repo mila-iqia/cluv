@@ -59,7 +59,7 @@ async def clean(
     clusters: list[str] | None = None,
     force: bool = False,
     dry_run: bool = False,
-) -> None:
+) -> dict[str, list[str]]:
     """Removes run directories from remote clusters that were pruned from the local results dir.
 
     Does not run `sync` first: it only reads state cached by the last successful sync of each
@@ -67,6 +67,8 @@ async def clean(
     to distinguish a pruned run from one that's simply never been fetched. Running or pending
     Slurm jobs, and cross-cluster run-name collisions, are not specially handled (see the design
     spec's "Non-goals" section).
+
+    Returns a dictionary mapping from cluster hostname to a list of run directories that were removed.
     """
     logger.info(f"Starting cluv clean: clusters={clusters}, force={force}, dry_run={dry_run}")
     config = get_cluv_config()
@@ -119,11 +121,16 @@ async def clean(
     if not per_cluster_to_delete:
         logger.info("Nothing to clean.")
         console.print("[green]Nothing to clean.[/green]")
-        return
+        return {}
+
+    def _y_or_ies(n: int) -> str:
+        return "y" if n == 1 else "ies"
 
     total = sum(len(names) for names in per_cluster_to_delete.values())
-    logger.info(f"{total} run director{'y' if total == 1 else 'ies'} eligible for deletion")
-    console.print("[bold]The following run directories will be removed:[/bold]")
+    logger.info(f"{total} run director{_y_or_ies(total)} eligible for deletion")
+    console.print(
+        f"[bold]The following run directories {'would' if dry_run else 'will'} be removed:[/bold]"
+    )
     for cluster, names in per_cluster_to_delete.items():
         console.print(f"  [cyan]{cluster}[/cyan]:")
         for name in names:
@@ -131,20 +138,21 @@ async def clean(
 
     if dry_run:
         logger.info("Dry run: not deleting anything.")
-        return
+        return per_cluster_to_delete
 
     if not force and not Confirm.ask(
-        f"Delete {total} run director{'y' if total == 1 else 'ies'} across "
+        f"Delete {total} run director{_y_or_ies(total)} across "
         f"{len(per_cluster_to_delete)} cluster(s)?",
         default=False,
     ):
         logger.info("User declined to delete. Aborting.")
         console.print("Aborted.")
-        return
+        return {}
 
     remote_by_hostname = {remote.hostname: remote for remote in remotes}
     removed = 0
     failed: list[tuple[str, str]] = []
+    actually_removed_per_cluster: dict[str, list[str]] = {}
     for cluster, names in per_cluster_to_delete.items():
         remote = remote_by_hostname[cluster]
         cluster_config = config.get_cluster_config(cluster)
@@ -158,14 +166,12 @@ async def clean(
                 failed.append((cluster, name))
             else:
                 removed += 1
-
-    logger.info(
-        f"Removed {removed} run director{'y' if removed == 1 else 'ies'}; {len(failed)} failed"
-    )
-    console.print(
-        f"[green]Removed {removed} run director{'y' if removed == 1 else 'ies'}.[/green]"
-    )
+                actually_removed_per_cluster.setdefault(cluster, []).append(name)
+    logger.info(f"Removed {removed} run director{_y_or_ies(removed)}; {len(failed)} failed")
+    console.print(f"[green]Removed {removed} run director{_y_or_ies(removed)}.[/green]")
     if failed:
         console.print(f"[red]Failed to remove {len(failed)}:[/red]")
         for cluster, name in failed:
             console.print(f"  {cluster}: {name}")
+
+    return actually_removed_per_cluster

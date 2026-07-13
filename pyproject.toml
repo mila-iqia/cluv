@@ -1,5 +1,5 @@
 [project]
-name = "cluv"
+name = "cluster-uv"
 description = "cluv (from 'cluster' + 'uv') - A versatile tool to work with uv python projects across HPC clusters."
 readme = "README.md"
 authors = [{ name = "Fabrice Normandin", email = "normandf@mila.quebec" }]

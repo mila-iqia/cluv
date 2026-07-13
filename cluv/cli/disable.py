@@ -97,7 +97,7 @@ def disable(cluster: str, period: str | None = None) -> None:
 
     try:
         config = get_cluv_config()
-        if cluster not in config.clusters:
+        if cluster not in config.clusters_names:
             available = ", ".join(f"[bold]{c}[/bold]" for c in config.clusters_names)
             console.print(
                 f"[red]Error: cluster [bold]{cluster}[/bold] is not defined in the config.[/red] "

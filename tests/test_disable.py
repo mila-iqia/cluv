@@ -150,3 +150,5 @@ def test_cli_disable_unknown_cluster(isolated_cache, capsys):
     out = capsys.readouterr().out
     assert "unknown_cluster_xyz" in out
     assert "not defined in the config" in out
+    # The error message should list available clusters; mila is always in the project config.
+    assert "mila" in out

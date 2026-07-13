@@ -303,9 +303,19 @@ def test_init(
 ) -> None:
     monkeypatch.chdir(project_dir)
 
+    pyproject_file = project_dir / "pyproject.toml"
+    content = pyproject_file.read_text()
+    if scratch:
+        content = content.replace(
+            "SCRATCH = $HOME/scratch", f"SCRATCH = {scratch}" if scratch else ""
+        )
+    pyproject_file.write_text(content)
+    monkeypatch.setenv("SCRATCH", str(scratch) if scratch else "")
+
     init()
 
     generated_config = load_cluv_config(project_dir / "pyproject.toml")
+
     assert generated_config.results_path == DEFAULT_RESULTS_PATH
     assert (project_dir / "scripts").is_dir()
     assert (project_dir / "scripts" / "job.sh").is_file()

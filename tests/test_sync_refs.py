@@ -2,16 +2,15 @@
 
 import pytest
 
-from cluv.cli.sync import _github_pr_ref
+from cluv.cli.sync import _is_github_pr_ref
 
 
 @pytest.mark.parametrize(
     "github_ref",
     ["refs/pull/72/merge", "refs/pull/123/head"],
 )
-def test_pr_ref_is_returned(monkeypatch: pytest.MonkeyPatch, github_ref: str):
-    monkeypatch.setenv("GITHUB_REF", github_ref)
-    assert _github_pr_ref() == github_ref
+def test_pr_ref_is_returned(github_ref: str):
+    assert _is_github_pr_ref(github_ref)
 
 
 @pytest.mark.parametrize(
@@ -25,11 +24,5 @@ def test_pr_ref_is_returned(monkeypatch: pytest.MonkeyPatch, github_ref: str):
         "   ",
     ],
 )
-def test_non_pr_ref_is_ignored(monkeypatch: pytest.MonkeyPatch, github_ref: str):
-    monkeypatch.setenv("GITHUB_REF", github_ref)
-    assert _github_pr_ref() is None
-
-
-def test_unset_github_ref(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("GITHUB_REF", raising=False)
-    assert _github_pr_ref() is None
+def test_non_pr_ref_is_ignored(github_ref: str):
+    assert not _is_github_pr_ref(github_ref)

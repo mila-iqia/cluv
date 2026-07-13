@@ -14,6 +14,7 @@ import cluv.cli.init
 import cluv.cli.submit
 import cluv.cli.submit_utils.first
 import cluv.remote
+import cluv.slurm
 import cluv.utils
 from cluv.cli.submit import (
     build_submit_command,
@@ -121,8 +122,8 @@ class TestGetSbatchCommand:
             "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz SBATCH_JOB_NAME=cluv-my_script "
             # Ugly, quite hard-coded.
             f"GIT_COMMIT=abecdef SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out "
-            "sbatch --parsable --chdir=my_project --account=my_account "
-            f"--mem=8G ~/{job_script_relative_path} program_arg_1 program_arg_2'"
+            "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
+            f"--mem=8G $HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
@@ -157,7 +158,7 @@ class TestGetSbatchCommand:
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
-            "sbatch --parsable --chdir=my_project  ~/my_project/scripts/my_script.sh '"
+            "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh '"
         )
 
     def test_config_sbatch_args_prepended_to_cli_args(
@@ -660,6 +661,9 @@ async def test_submit_first_considers_current_cluster(
 
     monkeypatch.setattr(
         cluv.remote, cluv.remote.run.__name__, _mock := unittest.mock.AsyncMock(wraps=fake_run)
+    )
+    monkeypatch.setattr(
+        cluv.slurm, cluv.slurm.run.__name__, _mock := unittest.mock.AsyncMock(wraps=fake_run)
     )
     monkeypatch.setattr(
         cluv.cli.submit,

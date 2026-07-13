@@ -25,7 +25,7 @@ from milatools.utils.parallel_progress import (
 
 from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.config import CluvConfig, find_pyproject, get_cluv_config
+from cluv.config import CluvConfig, find_pyproject, get_cluv_config, load_cluv_config
 from cluv.job import get_datasets_path
 from cluv.remote import Remote, run
 from cluv.utils import console, console_lock, current_cluster
@@ -87,7 +87,7 @@ async def sync(
         remotes = all_remotes.copy()
         clusters = [remote.hostname for remote in all_remotes]
 
-    if "GITHUB_ACTIONS" not in os.environ:
+    if "GITHUB_ACTIONS" not in os.environ and not await _head_is_up_to_date():
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
         await run(("git", "push"), hide=False)
 
@@ -161,9 +161,22 @@ async def get_active_remotes() -> list[Remote]:
 
 async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
-    project_path = PurePosixPath(find_pyproject().parent.relative_to(Path.home()))
     config = get_cluv_config()
     cluster = remote.hostname
+    cluster_config = config.get_cluster_config(remote.hostname)
+    project_path = cluster_config.project_dir
+    if project_path is None:
+        if find_pyproject().parent.is_relative_to(Path.home()):
+            project_path = PurePosixPath(
+                "$HOME" / find_pyproject().parent.relative_to(Path.home())
+            )
+        else:
+            raise RuntimeError(
+                f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
+                f"project root ({find_pyproject().parent}) is not under $HOME. "
+                f"Please set `cluv.project_dir` in the Cluv config section of pyproject.toml."
+            )
+    project_path = await expandvars(remote, project_path)
 
     def _update_progress(progress: int, status: str, total: int):
         info = textwrap.shorten(status, 50, placeholder="...")
@@ -183,7 +196,7 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     _save()
 
     _update_progress(1, "Setting up project", num_tasks)
-    await clone_project(remote, project_state)
+    await clone_project(remote, project_path=project_path, project_state=project_state)
     _save()
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
@@ -200,12 +213,24 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
         if not local_dataset_path:
             raise RuntimeError("data_source is set, so dataset_path should also be set!")
         local_dataset_path = Path(os.path.expandvars(local_dataset_path))
-
         await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
         _save()
 
     _update_progress(num_tasks, "Done", num_tasks)
     return new_runs
+
+
+async def expandvars(remote: Remote, path: str | PurePosixPath) -> PurePosixPath:
+    """Same idea as `os.path.expandvars`, but for a path on a remote machine. Just uses `echo`."""
+    if "$" not in str(path):
+        return PurePosixPath(path)
+    return PurePosixPath(
+        (
+            await remote.get_output(
+                f"bash --login -c 'echo {path}'", hide=True, warn=True, display=False
+            )
+        ).strip()
+    )
 
 
 async def run_uv_sync(
@@ -264,42 +289,90 @@ async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
     project_state.uv_version = uv_version_here
 
 
-def _github_pr_ref() -> str | None:
-    """The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
+async def _head_is_up_to_date() -> bool:
+    """Returns True if `git push` wouldn't push anything (local HEAD matches upstream).
 
-    Unlike the PR head branch, this ref exists on the base repo even when the PR comes
-    from a fork, so the project clones on the clusters can fetch it from their remote.
+    Fetches from the remote first, so the comparison reflects the actual state of the
+    remote rather than a possibly-stale local tracking ref.
     """
-    github_ref = os.environ.get("GITHUB_REF", "").strip()
-    if re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref):
-        return github_ref
-    return None
+    upstream = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        capture_output=True,
+        text=True,
+    )
+    if upstream.returncode != 0:
+        # No upstream configured for the current branch; can't tell, so don't skip.
+        return False
+    fetch_result = await run(("git", "fetch"), hide=True, warn=True)
+    if fetch_result.returncode != 0:
+        # Couldn't reach the remote; don't skip the push attempt.
+        return False
+    local_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+    upstream_commit = subprocess.getoutput(f"git rev-parse {upstream.stdout.strip()}").strip()
+    return local_commit == upstream_commit
 
 
-async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
+def _is_github_pr_ref(github_ref: str) -> bool:
+    """Checks if this value (from the GITHUB_REF environment variable) is a GitHub PR ref."""
+    return re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref) is not None
+
+
+async def clone_project(
+    remote: Remote, project_path: PurePosixPath, project_state: ProjectStateOnCluster
+):
     """Setup the project repo on all the remote clusters.
 
     New idea:
     - Assume GitHub. Push to GitHub if needed. Clone from github on the remotes.
     - Worry about authentication later, just raise an error if need be for now.
     """
+    current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+
+    # In the case of a subproject (like the examples in the cluv repo), these are different!
+    local_project_root = find_pyproject().parent
+    local_repo_dir = Path(subprocess.getoutput("git rev-parse --show-toplevel").strip())
+
+    if local_project_root == local_repo_dir:
+        cluster_repo_dir = project_path
+    elif not local_repo_dir.is_relative_to(Path.home()):
+        # Try to find the directory where the project should be cloned on the cluster
+        # by reading the pyproject.toml at the repo root. Hopefully it has a cluv config with project_dir set.
+        cluster_repo_dir = None
+        if (local_repo_dir / "pyproject.toml").exists():
+            cluster_repo_dir = (
+                load_cluv_config(local_repo_dir / "pyproject.toml")
+                .get_cluster_config(remote.hostname)
+                .project_dir
+            )
+        if not cluster_repo_dir:
+            raise RuntimeError(
+                f"Can't tell where to clone the current git repository on {remote.hostname}, "
+                f"because the project isn't under $HOME, and there is no `project_dir` in the "
+                f"subproject or in the root pyproject.toml."
+            )
+    else:
+        cluster_repo_dir = PurePosixPath("$HOME" / local_repo_dir.relative_to(Path.home()))
+        cluster_repo_dir = await expandvars(remote, cluster_repo_dir)
+
+    if project_state.checked_out_git_commit == current_git_commit:
+        logger.info(
+            f"Project is already at commit {current_git_commit} on {remote.hostname}. Skipping."
+        )
+        return
+
     # TODO: This git info is shared, but currently repeatedly executed for each cluster.
     # Could be done only once.
     current_git_branch = subprocess.getoutput("git rev-parse --abbrev-ref HEAD").strip()
-    safe_current_git_branch = shlex.quote(current_git_branch)
     detached_head = current_git_branch == "HEAD"
+
+    git_remote_name = "origin"
     if not detached_head:
-        try:
-            git_remote_name = subprocess.check_output(
-                ["git", "config", "--get", f"branch.{current_git_branch}.remote"],
-                text=True,
-            ).strip()
-        except subprocess.CalledProcessError:
-            git_remote_name = ""
-    else:
-        git_remote_name = "origin"
-    if not git_remote_name:
-        git_remote_name = "origin"
+        git_remote_name = subprocess.check_output(
+            ["git", "config", "--get", f"branch.{current_git_branch}.remote"],
+            text=True,
+        ).strip()
+        git_remote_name = shlex.quote(git_remote_name)
+
     github_repo_url = subprocess.getoutput(
         f"git config --get remote.{git_remote_name}.url"
     ).strip()
@@ -309,78 +382,104 @@ async def clone_project(remote: Remote, project_state: ProjectStateOnCluster):
             "Make sure your git remote is configured."
         )
 
-    # TODO: Scp the ~/.git-credentials file if needed?
-    # Or configure the config credential-helper to store first?
-
-    # Get the path to the root of the git repository
-    git_root_path = PurePosixPath(
-        subprocess.getoutput("git rev-parse --show-toplevel").strip()
-    ).relative_to(Path.home())
-
-    current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
-    safe_current_git_commit = shlex.quote(current_git_commit)
-    if project_state.checked_out_git_commit == current_git_commit:
-        logger.info(
-            f"Git commit {current_git_commit} is already checked out on {remote.hostname}, skipping."
-        )
-        return
-    # If the project isn't cloned yet, clone it.
-    _is_cloned_on_cluster = (
-        await remote.run(
-            f"test -d {git_root_path}",
-            warn=True,
-            hide=True,
-            display=False,
-        )
-    ).returncode == 0
+    # We want to use git with ssh -o StrictHostKeyChecking=accept-new to facilitate first
+    # communication with GitHub (notably on clusters that default to StrictHostKeyChecking=yes
+    # rather than ask), which can be configured with the GIT_SSH_COMMAND environment variable.
     gitenv = {"GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new"}
-    if not _is_cloned_on_cluster:
+
+    # If the project isn't cloned yet, clone it.
+    if not await remote_test("-d", cluster_repo_dir, remote):
         logger.info(f"Project isn't cloned yet on {remote.hostname}.")
-        await remote.run(f"git clone {github_repo_url} {git_root_path}", hide=True, env=gitenv)
-    await remote.run(f"git -C {git_root_path} fetch --all --prune", hide=True, env=gitenv)
-    if detached_head:
-        github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
-        if github_head_ref:
-            if (
-                not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", github_head_ref)
-                or ".." in github_head_ref
-            ):
-                raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
-            safe_head_ref = shlex.quote(github_head_ref)
-            safe_remote_name = shlex.quote(git_remote_name)
-            github_pr_ref = _github_pr_ref()
-            if github_pr_ref:
-                # The head branch of a PR from a fork doesn't exist on the base repo, so
-                # fetch the PR ref instead and create the branch from FETCH_HEAD.
-                safe_pr_ref = shlex.quote(github_pr_ref)
-                await remote.run(
-                    f"git -C {git_root_path} fetch {safe_remote_name} {safe_pr_ref}",
-                    hide=False,
-                )
-                await remote.run(
-                    f"git -C {git_root_path} checkout -B {safe_head_ref} FETCH_HEAD",
-                    hide=False,
-                )
-                return
-            safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
-            await remote.run(
-                f"git -C {git_root_path} checkout -B {safe_head_ref} {safe_tracking_ref}",
-                hide=False,
-            )
-            await remote.run(
-                f"git -C {git_root_path} pull {safe_remote_name} {safe_head_ref}",
-                hide=False,
-                env=gitenv,
-            )
-            return
+        await remote.run(f"git clone {github_repo_url} {cluster_repo_dir}", hide=True, env=gitenv)
 
+    # It actually matters where we do the fetch/pull commands from: We need to do them in the git
+    # repo root, since the project subdir might not exist on the main/master branch!
+    await remote.run(f"git -C {cluster_repo_dir} fetch --all --prune", hide=True, env=gitenv)
+
+    if not detached_head:
+        # Simplest case. We're on a branch, life is good.
         await remote.run(
-            f"git -C {git_root_path} checkout --detach {safe_current_git_commit}", hide=False
+            f"git -C {cluster_repo_dir} checkout {current_git_branch}", hide=False, env=gitenv
         )
-    else:
-        await remote.run(f"git -C {git_root_path} checkout {safe_current_git_branch}", hide=False)
-        await remote.run(f"git -C {git_root_path} pull", hide=False, env=gitenv)
+        await remote.run(f"git -C {cluster_repo_dir} pull", hide=False, env=gitenv)
 
+        # Set the checked out commit for that project on that cluster. This will be written to the
+        # cache to avoid unnecessary syncs later.
+        project_state.checked_out_git_commit = current_git_commit
+        return
+
+    # Detached head (not on a branch), for example in a CI run on GitHub (pull request/push/release)
+
+    github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
+    # Quote in case there are spaces or other weird characters perhaps embedded in the branch name,
+    # to avoid command injection vulnerabilities. We also check for some weird characters in the
+    # branch name later on, but this is just in case.
+    github_head_ref = shlex.quote(github_head_ref)
+
+    # From the GitHub docs:
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/variables
+    #     GITHUB_HEAD_REF: "The head ref or source branch of the pull request in a workflow run.
+    #      This property is only set when the event that triggers a workflow run is either
+    #      pull_request or pull_request_target. For example, feature-branch-1."
+
+    if not github_head_ref:
+        # Push on master, for example after merging a PR.
+        await remote.run(
+            f"git -C {cluster_repo_dir} checkout --detach {current_git_commit}",
+            hide=False,
+            env=gitenv,
+        )
+        project_state.checked_out_git_commit = current_git_commit
+        return
+
+    # GITHUB_HEAD_REF is set, because we're in a pull request CI run.
+    if (
+        not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", github_head_ref)
+        or ".." in github_head_ref
+    ):
+        raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
+
+    github_ref = os.environ.get("GITHUB_REF", "").strip()
+    github_ref = shlex.quote(github_ref)
+    """The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
+
+    Unlike the PR head branch, this ref exists on the base repo even when the PR comes
+    from a fork, so the project clones on the clusters can fetch it from their remote.
+
+    GitHub docs: "The fully-formed ref of the branch or tag that triggered the workflow run."
+    """
+
+    if _is_github_pr_ref(github_ref):
+        # The head branch of a PR from a fork doesn't exist on the base repo, so
+        # fetch the PR ref instead and create the branch from FETCH_HEAD.
+        await remote.run(
+            f"git -C {cluster_repo_dir} fetch {git_remote_name} {github_ref}",
+            hide=False,
+            env=gitenv,
+        )
+        await remote.run(
+            f"git -C {cluster_repo_dir} checkout -B {github_head_ref} FETCH_HEAD",
+            hide=False,
+            env=gitenv,
+        )
+        project_state.checked_out_git_commit = current_git_commit
+        return
+
+    # GITHUB_REF was not a PR ref, so it could be a release or a tag? Or a branch that exists on the
+    # base repo?
+    # TODO: Use code coverage to check if/when we hit this case.
+
+    safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
+    await remote.run(
+        f"git -C {cluster_repo_dir} checkout -B {github_head_ref} {safe_tracking_ref}",
+        hide=False,
+        env=gitenv,
+    )
+    await remote.run(
+        f"git -C {cluster_repo_dir} pull {git_remote_name} {github_head_ref}",
+        hide=False,
+        env=gitenv,
+    )
     project_state.checked_out_git_commit = current_git_commit
 
 
@@ -486,14 +585,21 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
     # Resolve any environment variables in the results_path on the remote before rsync, otherwise
     # it would try to fetch results from a literal $SCRATCH/... folder, which doesn't exist.
     results_path_on_cluster = str(config.get_cluster_config(remote.hostname).results_path)
-    results_path_on_cluster = await remote.get_output(
-        f"echo {results_path_on_cluster}", hide=False, display=True
+    results_path_on_cluster = await expandvars(remote, results_path_on_cluster)
+
+    project_path_on_cluster = config.get_cluster_config(remote.hostname).project_dir
+    project_path_on_cluster = project_path_on_cluster or PurePosixPath(
+        find_pyproject().parent.relative_to(Path.home())
     )
+    project_path_on_cluster = await expandvars(remote, project_path_on_cluster)
     # Optional, but useful if it isn't already set up: Create a symlink at project_root/<symlink_name>
     # that points to the results_path (usually in $SCRATCH). This works with the example job script
     # templates, which have `--output=logs/%j/slurm-%j.out` (relative to the project root).
     await create_results_dir_with_symlink_to_scratch(
-        remote, config.results_symlink, results_path_on_cluster
+        remote,
+        project_dir=project_path_on_cluster,
+        results_symlink=config.results_symlink,
+        results_path=results_path_on_cluster,
     )
 
     await run(
@@ -517,34 +623,23 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
 
 
 async def create_results_dir_with_symlink_to_scratch(
-    remote: Remote, results_symlink: str, results_path: str
+    remote: Remote, project_dir: PurePosixPath, results_symlink: str, results_path: PurePosixPath
 ):
     """On the remote, create results_path and symlink project/<results_symlink> -> results_path.
 
     results_path may contain env vars (e.g. $SCRATCH); they are resolved via the remote login shell.
     """
-    project_dir = find_pyproject().parent
-    project_dir_relative_to_home = project_dir.relative_to(Path.home())
-    symlink_path = project_dir_relative_to_home / results_symlink
-
-    # Resolve env vars (e.g. $SCRATCH) in results_path using the remote login shell.
-    resolved_path = (
-        await remote.get_output(
-            f"bash --login -c 'echo {results_path}'", hide=True, warn=True, display=False
-        )
-    ).strip()
-    if not resolved_path:
-        logger.warning(
-            f"Could not resolve results_path '{results_path}' on {remote.hostname}. Skipping symlink."
-        )
-        return
+    # Env vars should have been resolved by now.
+    assert "$" not in str(results_path)
+    assert "$" not in str(project_dir)
+    symlink_path = project_dir / results_symlink
 
     # Create the target directory if it doesn't already exist.
-    if not await remote_test("-d", resolved_path, remote):
-        result = await remote.run(f"mkdir -p {resolved_path}", warn=True, hide=True)
+    if not await remote_test("-d", results_path, remote):
+        result = await remote.run(f"mkdir -p {results_path}", warn=True, hide=True)
         if result.returncode != 0:
             logger.warning(
-                f"Failed to create {resolved_path} on {remote.hostname}. "
+                f"Failed to create {results_path} on {remote.hostname}. "
                 f"Results will be stored in {symlink_path}, which may fill up $HOME."
             )
             await remote.run(f"mkdir -p {symlink_path}", warn=True, hide=True)
@@ -558,23 +653,25 @@ async def create_results_dir_with_symlink_to_scratch(
     if await remote_test("-e", symlink_path, remote):
         logger.warning(
             f"{symlink_path} on {remote.hostname} is a real directory, not a symlink. "
-            f"You may end up filling up $HOME. Consider replacing it with a symlink to {resolved_path}."
+            f"You may end up filling up $HOME. Consider replacing it with a symlink to {results_path}."
         )
         return
 
     # Nothing at the path yet, create the symlink.
     result = await remote.run(
-        f"ln -s -T {resolved_path} {symlink_path}",
+        f"ln -s -T {results_path} {symlink_path}",
         warn=True,
         hide=True,
     )
     if result.returncode != 0:
         logger.warning(
-            f"Failed to create symlink {symlink_path} -> {resolved_path} on {remote.hostname}."
+            f"Failed to create symlink {symlink_path} -> {results_path} on {remote.hostname}: {result.stderr}\n"
         )
 
 
-async def remote_test(flag: Literal["-d", "-e", "-L"], path: str | Path, remote: Remote) -> bool:
+async def remote_test(
+    flag: Literal["-d", "-e", "-L"], path: str | PurePosixPath, remote: Remote
+) -> bool:
     """Returns True if `test {flag} {path}` succeeds on the remote."""
     result = await remote.run(f"test {flag} {path}", warn=True, hide=True)
     return result.returncode == 0

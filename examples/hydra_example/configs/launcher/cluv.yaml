@@ -1,0 +1,30 @@
+# @package _global_
+defaults:
+  - override /hydra/launcher: cluv_launcher
+
+hydra:
+  mode: MULTIRUN
+  run:
+    # Output directory. Normally would be {name}/{now:%Y-%m-%d/%H-%M-%S}} but
+    # here we instead use the directory created by cluv based on the config in pyproject.toml
+    # and the cluster name and job id. This is typically "{cluster.results_path}/{cluster_name}_{job_id}",
+    # See `cluv.job.current_run_info` for more details.
+    # TODO: Weird that we have to supply a default value.
+    # Hydra seems to want to create a directory locally when launching a sweep.
+    dir: ${cluv:results_path,/tmp/cluv_logs/${now:%Y-%m-%d}/${now:%H-%M-%S}}
+  sweep:
+    dir: ${cluv:results_path,/tmp/cluv_logs/${now:%Y-%m-%d}/${now:%H-%M-%S}}
+    subdir: ${hydra.job.num}
+
+  launcher:
+    ## NEW ARGUMENTS for cluv:
+    cluster: mila
+    job_script: scripts/job.sh
+    # chunking: true  # (Coming soon: Automatically chunk jobs into shorter chunks)
+    # vram_gb: 10  # (Coming soon: Automatically pack multiple runs per GPU)
+    ## Usual submitit arguments:
+    stderr_to_stdout: true
+    timeout_min: 60
+    gpus_per_node: 1
+    cpus_per_task: 2
+    mem_gb: 16

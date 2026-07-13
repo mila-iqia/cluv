@@ -37,3 +37,10 @@ uv run pytest -m "not integration"
 ```bash
 uv run pre-commit run --all-files
 ```
+
+### Docs
+
+Host a server to see changes in real time :
+```bash
+uv run mkdocs serve --livereload
+```

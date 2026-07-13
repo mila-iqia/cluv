@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from cluv.cli.sync import sync
+from cluv.cli.sync import expandvars, sync
 from cluv.config import get_cluv_config
 from cluv.job import get_datasets_path
 from cluv.remote import Remote
@@ -47,8 +47,8 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
     other_cluster_datasets_path = config.get_cluster_config(other_cluster).datasets_path
     assert other_cluster_datasets_path
 
-    other_cluster_datasets_path = await other_cluster_remote.get_output(
-        f"echo {other_cluster_datasets_path}", hide=False, display=True
+    other_cluster_datasets_path = await expandvars(
+        other_cluster_remote, other_cluster_datasets_path
     )
     other_cluster_files = (
         (

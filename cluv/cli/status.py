@@ -12,6 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from cluv.cache import Job, load_jobs
+from cluv.cli.disable import print_disabled_clusters
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_cluv_config
 from cluv.remote import run
@@ -528,8 +529,6 @@ async def status(table: str) -> None:
     The "jobs" table shows one row per job from the cache, with live status info (state,
     elapsed time, wait time).
     """
-    from cluv.cli.disable import print_disabled_clusters
-
     console.print()
     console.rule("[bold cyan]cluv status[/bold cyan]")
     console.print()

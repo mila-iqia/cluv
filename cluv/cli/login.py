@@ -1,6 +1,7 @@
 import asyncio
 import logging
 
+from cluv.cache import DisabledCluster
 from cluv.config import get_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 from cluv.utils import console, current_cluster
@@ -9,7 +10,7 @@ __all__ = ["login"]
 logger = logging.getLogger(__name__)
 
 
-async def login(clusters: list[str], disabled: dict | None = None) -> list[Remote]:
+async def login(clusters: list[str], disabled: dict[str, DisabledCluster] | None = None) -> list[Remote]:
     """Create an SSH connection with the given clusters, reusing existing connections when possible.
 
     Parameters:

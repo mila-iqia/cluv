@@ -676,7 +676,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "cluster-uv", extras = ["dev", "hydra"], editable = "." },
+    { name = "cluster-uv", extras = ["hydra"], editable = "." },
     { name = "hydra-colorlog", specifier = ">=1.2.0" },
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "torch", specifier = ">=2.7.0,<2.11.0" },

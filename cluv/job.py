@@ -1,8 +1,3 @@
-"""A script that reads something, and produces some output.
-
-This is a simplified job script, used to test the syncing of the 'dataset' across clusters.
-"""
-
 import dataclasses
 import functools
 import os

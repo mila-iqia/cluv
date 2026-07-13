@@ -353,9 +353,17 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
     never-fetched run is left alone."""
     assert not current_cluster(), "test needs to run locally for now."
     assert cluv.cache.read_cache() == CacheContent(), "test assumes no previous cache content"
+
     monkeypatch.chdir("examples/pytorch-example")
     config = get_cluv_config()
-    results_path_on_cluster = config.get_cluster_config(cluster).results_path
+    try:
+        results_path_on_cluster = config.get_cluster_config(cluster).results_path
+    except KeyError as err:
+        pytest.skip(
+            f"We have an existing connection to the {cluster!r} cluster, but it "
+            f"is not configured in the cluv section of that example's pyproject.toml file. (err={err})"
+        )
+
     # sanity check
     assert results_path_on_cluster == PurePosixPath("$SCRATCH/logs/pytorch_example")
     results_path_on_cluster = await expandvars(remote, results_path_on_cluster)

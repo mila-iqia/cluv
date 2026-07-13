@@ -2,6 +2,8 @@
 
 ## cluv
 
+A tool to sync UV-based Python projects across HPC clusters.
+
 **Usage**
 ```console
 cluv <command> [options]
@@ -45,17 +47,17 @@ Available for all commands.
 
 `-h`, `--help`
 
-TODO
+Show the help message for the command and exit.
 {: .indent }
 
 `-v`, `--verbose`
 
-TODO
+Increase logging verbosity. Can be repeated: `-v` shows info-level logs, `-vv` (or more) shows debug-level logs. Defaults to warning-level logs only.
 {: .indent }
 
 `-q`, `--quiet`
 
-Disable command output.
+Disable command output. Has no effect on `cluv status`.
 {: .indent }
 
 ## [`cluv init`](#cluv-init) 
@@ -116,14 +118,82 @@ The clusters to connect to. If not specified, will connect to all clusters in th
 
 
 ## [`cluv sync`](#cluv-sync)
-TODO
+
+Synchronize the current project across clusters.
+
+This pushes local git commits, then on each remote cluster: clones the project (if needed),
+fetches and checks out the current commit, runs `uv sync`, and fetches back any new results
+via `rsync`. Optionally also pushes/pulls datasets, see the
+[dataset sync guide](guides/syncing-datasets.md).
+
+**Usage**
+```console
+cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
+```
+
+**Arguments**
+
+`clusters`
+
+One or more cluster hostnames to synchronize with (space-separated). If omitted, synchronizes with every cluster you currently have an active SSH connection to (see [`cluv login`](#cluv-login)).
+{: .indent }
+
+**Options**
+
+`--sync-datasets`, `--no-sync-datasets`
+
+Push/pull datasets from `data_source` to each cluster as part of the sync. Requires `data_source` to be set in the config. Enabled by default.
+{: .indent }
 
 ## [`cluv submit`](#cluv-submit)
-TODO
+
+Submit a Slurm job on a remote cluster.
+
+Enforces a clean git working tree (untracked files are fine), syncs the project to the target
+cluster (equivalent to running [`cluv sync`](#cluv-sync)), then runs `sbatch` on the remote,
+merging the global and per-cluster `SBATCH_*` environment variables from the config and
+injecting a `GIT_COMMIT` variable.
+
+**Usage**
+```console
+cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]
+```
+
+**Arguments**
+
+`cluster`
+
+The cluster to submit the job on. Can be set to `first` to submit the job to every cluster and wait until one of them starts; once one starts, the others are automatically cancelled.
+{: .indent }
+
+`job.sh`
+
+Path to the sbatch job script, relative to the project root. Defaults to the job script configured at `job_script_path` for the target cluster.
+{: .indent }
+
+`sbatch-args` / `program-args`
+
+Any arguments before `--` are forwarded as flags to `sbatch`. Arguments after `--` are passed to the job script itself.
+{: .indent }
+
+**Options**
+
+`--autocommit`
+
+Automatically create a local commit with the tracked changes before submitting, instead of failing when the working tree is dirty.
+{: .indent }
 
 ## [`cluv status`](#cluv-status)
 
-TODO
+Show the status of clusters and jobs.
+
+The `clusters` table shows each cluster's live GPU availability and storage usage, along with
+counts of your running/pending/failed/completed jobs on that cluster. 
+
+The `jobs` table shows one row per job submitted with `cluv submit` (from the local job cache), enriched with live Slurm
+status, wait time, and elapsed time. 
+
+Requires an active connection (see [`cluv login`](#cluv-login)) to fetch live data for a cluster; otherwise it is shown as disconnected.
 
 **Usage**
 ```console
@@ -138,4 +208,25 @@ Which table to display in the status output. Can be one of `jobs`, `clusters`, o
 {: .indent }
 
 ## [`cluv run`](#cluv-run)
-TODO
+
+Run a command in the synced project on a cluster.
+
+Similar in spirit to `uv run`, but syncs the project to the target cluster first (equivalent to
+[`cluv sync`](#cluv-sync)) and then runs the command there via `uv run`.
+
+**Usage**
+```console
+cluv run <cluster> <command>
+```
+
+**Arguments**
+
+`cluster`
+
+The cluster to run the command on.
+{: .indent }
+
+`command`
+
+The command to run, along with any of its arguments.
+{: .indent }

@@ -344,23 +344,6 @@ datasets_path = "$SCRATCH/datasets/cifar10"
         cfg = load_cluv_config(p)
         assert cfg.data_source == "/data/datasets/cifar10"
 
-    def test_local_data_source_has_no_colon(self, tmp_path: Path) -> None:
-        """The absence of ':' in data_source is the signal used by sync to identify a local path."""
-        p = write_pyproject(
-            tmp_path,
-            """
-[tool.cluv]
-results_path = "logs"
-data_source = "/data/datasets/cifar10"
-datasets_path = "$SCRATCH/datasets/cifar10"
-
-[tool.cluv.clusters.mila]
-""",
-        )
-        cfg = load_cluv_config(p)
-        assert cfg.data_source is not None
-        assert ":" not in cfg.data_source
-
     def test_remote_data_source_has_colon(self, tmp_path: Path) -> None:
         """Remote data_source values always contain ':' separating hostname from path."""
         p = write_pyproject(

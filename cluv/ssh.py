@@ -2,7 +2,6 @@ from pathlib import Path
 import paramiko
 
 
-
 def get_ssh_hostnames() -> set[str]:
     # Resolve at call time so test fixtures can monkeypatch `Path.home`.
     ssh_config_path = Path.home() / ".ssh" / "config"

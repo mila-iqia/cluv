@@ -19,7 +19,6 @@ from cluv.cache import (
 )
 from cluv.cli.disable import parse_duration
 
-
 # ---------------------------------------------------------------------------
 # parse_duration tests
 # ---------------------------------------------------------------------------
@@ -143,11 +142,14 @@ def test_cli_enable_not_disabled(isolated_cache, capsys):
     cluv_main.main(["enable", "mila"])
 
 
-def test_cli_disable_unknown_cluster(isolated_cache, capsys):
+def test_cli_disable_unknown_cluster(isolated_cache):
     """Disabling a cluster that is not in the config should print an error and not disable it."""
-    cluv_main.main(["disable", "unknown_cluster_xyz"])
-    assert not is_cluster_disabled("unknown_cluster_xyz")
-    out = capsys.readouterr().out
+    from cluv.utils import console
+
+    with console.capture() as cap:
+        cluv_main.main(["disable", "unknown_cluster_xyz"])
+        assert not is_cluster_disabled("unknown_cluster_xyz")
+    out = cap.get()
     assert "unknown_cluster_xyz" in out
     assert "not defined in the config" in out
     # The error message should list available clusters; mila is always in the project config.

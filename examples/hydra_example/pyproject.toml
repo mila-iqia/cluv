@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [{ name = "Fabrice Normandin", email = "normandf@mila.quebec" }]
 requires-python = ">=3.13"
 dependencies = [
-    "cluster-uv[dev,hydra]",
+    "cluster-uv[hydra]",
     "hydra-colorlog>=1.2.0",
     "numpy>=2.4.4",
     "torch>=2.7.0,<2.11.0",

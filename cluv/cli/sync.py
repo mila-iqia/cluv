@@ -80,8 +80,8 @@ async def sync(
         remotes = await login(clusters)
     elif not all_remotes:
         raise RuntimeError(
-            "[red]Not currently connected to any Slurm cluster.[/red] "
-            "Use `cluv login` to login and create reusable connections."
+            "Not currently connected to any Slurm cluster. "
+            "Use [bold]cluv login[/bold] to login and create reusable connections."
         )
     else:
         remotes = all_remotes.copy()
@@ -107,14 +107,14 @@ async def sync(
         and config.data_source  # cluster:path
         and (source_cluster := config.data_source.split(":", 1)[0]) != here
     ):
-        _source_host, _, source_path = config.data_source.partition(":")
+        _, _, source_path = config.data_source.partition(":")
         # Fetch the data from the source cluster and copy it to the local datasets_path.
         source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
         if not source_remote:
             raise RuntimeError(
-                f"[red]Unable to sync datasets, need a connection to the source cluster "
-                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
-                f"Use `cluv login {source_cluster}` to create a reusable connection to the "
+                f"Unable to sync datasets, need a connection to the source cluster "
+                f"({source_cluster}). Current connections: {[r.hostname for r in all_remotes]}\n"
+                f"Use [bold]cluv login {source_cluster}[/bold] to create a reusable connection to the "
                 f"source cluster."
             )
         local_datasets_path = get_datasets_path()

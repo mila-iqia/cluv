@@ -118,7 +118,7 @@ def main(argv: list[str] | None = None) -> None:
             logger.error("No standard error.")
         sys.exit(err.returncode)
     except RuntimeError as err:
-        console.print(f"{err}")
+        console.print(f"{err}", style="red")
         sys.exit(1)
 
 

@@ -150,7 +150,7 @@ async def submit(
     submit_time = datetime.datetime.now()
 
     if result.returncode != 0:
-        console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
+        console.print(f"Error during sbatch : {result.stderr}", style="red")
         return None
 
     job_id = int(result.stdout.strip())
@@ -505,7 +505,7 @@ def create_submit_commit(submit_command: str) -> None:
         error_text = (err.stderr or err.stdout or str(err)).strip()
         console.print(
             "[red]Failed to create automatic submit commit before job submission:[/red] "
-            f"{error_text}"
+            f"{error_text}",
         )
         raise
 
@@ -523,7 +523,8 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
             create_submit_commit(submit_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
             console.print(
-                "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
+                "Working directory is dirty. Please commit your changes before submitting.",
+                style="red",
             )
             sys.exit(1)
 

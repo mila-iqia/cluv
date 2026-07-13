@@ -237,7 +237,9 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
             # paths (e.g. C:\...) are not supported.
             local_dataset_path = Path(os.path.expandvars(config.data_source))
         else:
-            local_dataset_path = (config.get_cluster_config(here) if here else config).datasets_path
+            local_dataset_path = (
+                config.get_cluster_config(here) if here else config
+            ).datasets_path
             if not local_dataset_path:
                 raise RuntimeError("data_source is set, so dataset_path should also be set!")
             local_dataset_path = Path(os.path.expandvars(local_dataset_path))

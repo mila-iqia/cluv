@@ -22,11 +22,10 @@ def fake_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """Mock function swap our the $SCRATCH value from the pyproject.toml
         for the fake_scratch value during tests.
         """
-        new_items = {
-            key: str(fake_scratch) if key == "SCRATCH" else value
-            for key, value in env_vars.items()
-        }
-        set_local_env_vars(new_items)
+        new_env_vars = env_vars.copy()
+        if "SCRATCH" in env_vars:
+            new_env_vars["SCRATCH"] = str(fake_scratch)
+        set_local_env_vars(new_env_vars)
 
     # Patch this, so that the SCRATCH environment variable is always set as we expect it to be.
     monkeypatch.setattr(cluv.config, set_local_env_vars.__name__, _mock_set_local_env_vars)

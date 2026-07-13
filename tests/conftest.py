@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+import cluv.config
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.remote import control_socket_is_running
 from tests.test_integration import ALL_CLUSTERS, IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
@@ -14,6 +15,18 @@ def fake_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     fake_scratch = tmp_path / "scratch"
     fake_scratch.mkdir()
     monkeypatch.setenv("SCRATCH", str(fake_scratch))
+    from cluv.config import set_local_env_vars
+
+    def _mock_set_local_env_vars(env_vars: dict[str, str]) -> None:
+        """Mock function to disable setting local env vars during tests."""
+        new_items = {
+            key: str(fake_scratch) if key == "SCRATCH" else value
+            for key, value in env_vars.items()
+        }
+        set_local_env_vars(new_items)
+
+    # Patch this, so that the SCRATCH environment variable is always set as we expect it to be.
+    monkeypatch.setattr(cluv.config, set_local_env_vars.__name__, _mock_set_local_env_vars)
     return fake_scratch
 
 

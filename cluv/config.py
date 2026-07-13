@@ -191,6 +191,25 @@ def has_cluv_config(pyproject_path: Path) -> bool:
     return "cluv" in data.get("tool", {})
 
 
+def set_local_env_vars(env_vars: dict[str, str]) -> None:
+    for key, value in env_vars.items():
+        while "$" in value:
+            new_value = os.path.expandvars(value)
+            if new_value == value:
+                break
+            value = new_value
+        if key in os.environ:
+            logger.warning(
+                "Overwriting local env var %s=%s with value from [tool.cluv.local.env] %s",
+                key,
+                os.environ[key],
+                value,
+            )
+        else:
+            logger.info("Setting local env var %s=%s from [tool.cluv.local.env]", key, value)
+        os.environ[key] = value
+
+
 def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     with pyproject_path.open("rb") as handle:
         data = tomllib.load(handle)
@@ -200,22 +219,7 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
         raise RuntimeError(f"No cluv config in {pyproject_path} file.")
 
     if current_cluster() is None:
-        for key, value in cluv.get("local", {}).get("env", {}).items():
-            while "$" in value:
-                new_value = os.path.expandvars(value)
-                if new_value == value:
-                    break
-                value = new_value
-            if key in os.environ:
-                logger.warning(
-                    "Overwriting local env var %s=%s with value from [tool.cluv.local.env] %s",
-                    key,
-                    os.environ[key],
-                    value,
-                )
-            else:
-                logger.info("Setting local env var %s=%s from [tool.cluv.local.env]", key, value)
-            os.environ[key] = value
+        set_local_env_vars(cluv.get("local", {}).get("env", {}))
     config = CluvConfig.model_validate(cluv, extra="forbid")
     return config
 

@@ -246,14 +246,12 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture(params=[True, False], ids=["with_scratch", "without_scratch"])
 def scratch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest, fake_scratch: Path
 ) -> Path | None:
     """Fixture that sets up a fake SCRATCH directory if requested, or pretends that SCRATCH doesn't exist otherwise."""
     use_scratch = request.param
     if use_scratch:
-        fake_scratch_dir = tmp_path / "fake_scratch"
-        monkeypatch.setenv("SCRATCH", str(fake_scratch_dir))  # Set the SCRATCH env var to tmp_path
-        return fake_scratch_dir
+        return fake_scratch
     if "SCRATCH" in os.environ:
         # Remove the SCRATCH environment variable
         monkeypatch.delenv("SCRATCH")

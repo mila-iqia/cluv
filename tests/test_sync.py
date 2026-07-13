@@ -1,12 +1,15 @@
 """Tests for `cluv sync`"""
 
+import importlib
 import subprocess
+import unittest
+import unittest.mock
 from pathlib import Path
 
 import pytest
 
-from cluv.cli.sync import expandvars, sync
-from cluv.config import get_cluv_config
+from cluv.cli.sync import expandvars, fetch_results, sync
+from cluv.config import LocalConfig, get_cluv_config
 from cluv.job import get_datasets_path
 from cluv.remote import Remote
 from cluv.utils import current_cluster
@@ -22,6 +25,12 @@ pytestmark = [
 ]
 
 
+# `cluv/cli/__init__.py` does `from .sync import sync`, which shadows the `cluv.cli.sync`
+# submodule attribute with the `sync` function. Use `importlib.import_module` (same idiom as
+# `tests/test_init.py`) to get the actual module object for monkeypatching.
+sync_module = importlib.import_module("cluv.cli.sync")
+
+
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_scratch: Path):
@@ -35,9 +44,17 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
     other_cluster_remote = await Remote.connect(other_cluster)
 
     monkeypatch.chdir("examples/pytorch-example")
-
+    # We need to change the "tool.cluv.local.env.SCRATCH" to point to the fake scratch path.
     config = get_cluv_config()
-    assert config
+    monkeypatch.setattr(config, "local", LocalConfig(env={"SCRATCH": str(fake_scratch)}))
+    monkeypatch.setenv("SCRATCH", str(fake_scratch))
+    monkeypatch.setattr(sync_module, get_cluv_config.__name__, lambda: config)
+
+    # Avoid re-fetching results to this fake_scratch directory.
+    monkeypatch.setattr(
+        sync_module, fetch_results.__name__, unittest.mock.AsyncMock(return_value=[])
+    )
+
     assert config.datasets_path
 
     here_datasets_path = get_datasets_path()
@@ -76,7 +93,7 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
     this_cluster_files = subprocess.getoutput(f"ls {here_datasets_path}").strip().splitlines()
     assert this_cluster_files != other_cluster_files
 
-    await sync([other_cluster], uv_sync_args=None)
+    await sync([other_cluster])
 
     # Check that we now have the files for that dataset in the datasets_path on this machine.
     from torchvision.datasets import CIFAR10
@@ -84,10 +101,16 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
     print(CIFAR10(here_datasets_path))
 
     # Dataset is synced on the remote as well.
-    this_cluster_files = subprocess.getoutput(f"ls {here_datasets_path}").strip().splitlines()
-    other_cluster_files = (
-        (await other_cluster_remote.get_output(f"ls {other_cluster_datasets_path}"))
-        .strip()
-        .splitlines()
+    this_cluster_files = list(
+        sorted(subprocess.getoutput(f"ls {here_datasets_path}").strip().splitlines())
+    )
+    other_cluster_files = list(
+        sorted(
+            (
+                (await other_cluster_remote.get_output(f"ls {other_cluster_datasets_path}"))
+                .strip()
+                .splitlines()
+            )
+        )
     )
     assert this_cluster_files == other_cluster_files

@@ -246,14 +246,12 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture(params=[True, False], ids=["with_scratch", "without_scratch"])
 def scratch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest, fake_scratch: Path
 ) -> Path | None:
     """Fixture that sets up a fake SCRATCH directory if requested, or pretends that SCRATCH doesn't exist otherwise."""
     use_scratch = request.param
     if use_scratch:
-        fake_scratch_dir = tmp_path / "fake_scratch"
-        monkeypatch.setenv("SCRATCH", str(fake_scratch_dir))  # Set the SCRATCH env var to tmp_path
-        return fake_scratch_dir
+        return fake_scratch
     if "SCRATCH" in os.environ:
         # Remove the SCRATCH environment variable
         monkeypatch.delenv("SCRATCH")
@@ -303,9 +301,19 @@ def test_init(
 ) -> None:
     monkeypatch.chdir(project_dir)
 
+    pyproject_file = project_dir / "pyproject.toml"
+    if pyproject_file.exists() and scratch:
+        content = pyproject_file.read_text()
+        content = content.replace(
+            "SCRATCH = $HOME/scratch", f"SCRATCH = {scratch}" if scratch else ""
+        )
+        pyproject_file.write_text(content)
+    monkeypatch.setenv("SCRATCH", str(scratch) if scratch else "")
+
     init()
 
     generated_config = load_cluv_config(project_dir / "pyproject.toml")
+
     assert generated_config.results_path == DEFAULT_RESULTS_PATH
     assert (project_dir / "scripts").is_dir()
     assert (project_dir / "scripts" / "job.sh").is_file()

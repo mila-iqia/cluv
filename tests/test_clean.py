@@ -367,7 +367,7 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
 
     remote_backup_dir = results_path_on_cluster.with_suffix(".backup")
     assert not (await remote_test("-d", remote_backup_dir, remote)), (
-        f"Stale backup already exists on {cluster} at {results_path_on_cluster}! "
+        f"Stale backup already exists on {cluster} at {remote_backup_dir}! "
         f"Some Manual cleanup will probably be needed."
     )
 

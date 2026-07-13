@@ -141,3 +141,12 @@ def test_cli_disable_with_period(isolated_cache):
 def test_cli_enable_not_disabled(isolated_cache, capsys):
     # Should not raise; just prints a message.
     cluv_main.main(["enable", "mila"])
+
+
+def test_cli_disable_unknown_cluster(isolated_cache, capsys):
+    """Disabling a cluster that is not in the config should print an error and not disable it."""
+    cluv_main.main(["disable", "unknown_cluster_xyz"])
+    assert not is_cluster_disabled("unknown_cluster_xyz")
+    out = capsys.readouterr().out
+    assert "unknown_cluster_xyz" in out
+    assert "not defined in the config" in out

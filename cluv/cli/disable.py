@@ -93,6 +93,20 @@ def disable(cluster: str, period: str | None = None) -> None:
             like ``"2h"``, ``"1d 6h"``.  When omitted the cluster is disabled
             indefinitely until ``cluv enable <cluster>`` is run.
     """
+    from cluv.config import get_cluv_config
+
+    try:
+        config = get_cluv_config()
+        if cluster not in config.clusters:
+            available = ", ".join(f"[bold]{c}[/bold]" for c in config.clusters_names)
+            console.print(
+                f"[red]Error: cluster [bold]{cluster}[/bold] is not defined in the config.[/red] "
+                f"Available clusters: {available}."
+            )
+            return
+    except (FileNotFoundError, RuntimeError, ValueError):
+        pass  # Config unavailable or invalid — skip validation and proceed anyway.
+
     disabled_until: datetime | None = None
     if period is not None:
         duration = parse_duration(period)

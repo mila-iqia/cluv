@@ -24,6 +24,7 @@ from milatools.utils.parallel_progress import (
 )
 
 from cluv.cache import ProjectStateOnCluster, get_disabled_clusters, read_cache, write_cache
+from cluv.cli.disable import print_disabled_clusters
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config, load_cluv_config
 from cluv.job import get_datasets_path
@@ -75,40 +76,15 @@ async def sync(
     config = get_cluv_config()
 
     # Show disabled clusters early so the user is aware.
-    disabled = get_disabled_clusters()
-    if disabled:
-        from cluv.cli.disable import format_remaining
-
-        parts = []
-        for cluster_name, info in disabled.items():
-            if info.disabled_until is None:
-                parts.append(f"[bold]{cluster_name}[/bold] (indefinitely)")
-            else:
-                remaining = format_remaining(info.disabled_until)
-                parts.append(f"[bold]{cluster_name}[/bold] ({remaining} remaining)")
-        console.log(
-            f"[yellow]Skipping disabled cluster(s): {', '.join(parts)}.[/yellow] "
-            "Run [bold]cluv enable <cluster>[/bold] to re-enable."
-        )
+    disabled = print_disabled_clusters()
 
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     all_remotes = await get_active_remotes()
     if clusters:
         # Filter out explicitly-requested clusters that are disabled.
         enabled_clusters = [c for c in clusters if c not in disabled]
-        skipped = {c: disabled[c] for c in clusters if c in disabled}
-        if skipped:
-            from cluv.cli.disable import format_remaining
-
-            parts = []
-            for cluster_name, info in skipped.items():
-                if info.disabled_until is None:
-                    parts.append(f"[bold]{cluster_name}[/bold] (indefinitely)")
-                else:
-                    remaining = format_remaining(info.disabled_until)
-                    parts.append(f"[bold]{cluster_name}[/bold] ({remaining} remaining)")
-            console.log(f"[yellow]Skipping disabled cluster(s): {', '.join(parts)}.[/yellow]")
-        remotes = await login(enabled_clusters) if enabled_clusters else []
+        # Pass the already-fetched disabled dict so login does not print the warning a second time.
+        remotes = await login(enabled_clusters, disabled=disabled) if enabled_clusters else []
     elif not all_remotes:
         raise RuntimeError(
             "[red]Not currently connected to any Slurm cluster.[/red] "

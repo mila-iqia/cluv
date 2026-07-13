@@ -6,6 +6,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from cluv.cache import (
+    DisabledCluster,
     _ensure_utc,
     disable_cluster,
     enable_cluster,
@@ -14,7 +15,7 @@ from cluv.cache import (
 from cluv.slurm import parse_slurm_time
 from cluv.utils import console
 
-__all__ = ["disable", "enable", "format_remaining"]
+__all__ = ["disable", "enable", "format_remaining", "print_disabled_clusters"]
 
 
 def parse_duration(period: str) -> timedelta:
@@ -81,6 +82,29 @@ def format_remaining(disabled_until: datetime) -> str:
     if seconds and not days:
         parts.append(f"{seconds}s")
     return ", ".join(parts) if parts else "less than a second"
+
+
+def print_disabled_clusters() -> dict[str, DisabledCluster]:
+    """Print a warning listing currently disabled clusters and return the mapping.
+
+    Prints nothing and returns an empty dict when no clusters are disabled. The
+    returned dict is the same value from `get_disabled_clusters` (expired entries
+    already removed).
+    """
+    disabled = get_disabled_clusters()
+    if disabled:
+        parts = []
+        for cluster_name, info in disabled.items():
+            if info.disabled_until is None:
+                parts.append(f"[bold]{cluster_name}[/bold] (indefinitely)")
+            else:
+                remaining = format_remaining(info.disabled_until)
+                parts.append(f"[bold]{cluster_name}[/bold] ({remaining} remaining)")
+        console.print(
+            f"[yellow]Skipping disabled cluster(s): {', '.join(parts)}.[/yellow] "
+            "Run [bold]cluv enable <cluster>[/bold] to re-enable."
+        )
+    return disabled
 
 
 def disable(cluster: str, period: str | None = None) -> None:

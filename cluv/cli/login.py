@@ -9,20 +9,32 @@ __all__ = ["login"]
 logger = logging.getLogger(__name__)
 
 
-async def login(clusters: list[str]) -> list[Remote]:
+async def login(clusters: list[str], disabled: dict | None = None) -> list[Remote]:
     """Create an SSH connection with the given clusters, reusing existing connections when possible.
 
     Parameters:
         clusters: List of cluster hostnames to connect to. If empty, will attempt to connect to all
             clusters in the config that we don't already have an active connection to.
+        disabled: Optional pre-fetched mapping of disabled clusters. When ``None`` (the default),
+            the mapping is fetched from the cache and a warning is printed if any clusters are
+            disabled. Pass an already-fetched dict (e.g. from :func:`print_disabled_clusters`) to
+            suppress the duplicate warning when ``login`` is called from within another command.
 
     Returns:
         A list of `Remote` objects, one for each cluster.
     """
-    clusters = clusters or get_cluv_config().clusters_names
+    if disabled is None:
+        from cluv.cli.disable import print_disabled_clusters
+
+        disabled = print_disabled_clusters()
+
+    clusters = list(clusters or get_cluv_config().clusters_names)
     if (this_cluster := current_cluster()) and this_cluster in clusters:
         # don't try to connect to the cluster we're already on.
         clusters.remove(this_cluster)
+
+    # Skip disabled clusters.
+    clusters = [c for c in clusters if c not in disabled]
 
     connections = await asyncio.gather(
         *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)

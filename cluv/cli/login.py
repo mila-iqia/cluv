@@ -29,7 +29,7 @@ async def login(clusters: list[str], disabled: dict[str, DisabledCluster] | None
 
         disabled = print_disabled_clusters()
 
-    clusters = list(clusters or get_cluv_config().clusters_names)
+    clusters = list(clusters) if clusters else list(get_cluv_config().clusters_names)
     if (this_cluster := current_cluster()) and this_cluster in clusters:
         # don't try to connect to the cluster we're already on.
         clusters.remove(this_cluster)

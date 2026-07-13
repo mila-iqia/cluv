@@ -5,6 +5,7 @@ import pytest_asyncio
 
 import cluv.config
 from cluv.cli.login import get_remote_without_2fa_prompt
+from cluv.config import find_pyproject
 from cluv.remote import control_socket_is_running
 from tests.test_integration import ALL_CLUSTERS, IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
 
@@ -36,6 +37,37 @@ def reset_cluv_config():
     from cluv.config import get_cluv_config
 
     get_cluv_config.cache_clear()
+
+
+@pytest.fixture(autouse=IN_SELF_HOSTED_GITHUB_CI)
+def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
+    monkeypatch: pytest.MonkeyPatch, reset_cluv_config: None
+):
+    """The self-hosted runner is running from ~/action-runners/.../_work/cluv/cluv.
+
+    Patch the output of `get_cluv_config` while in the tests, so that it always uses a project_dir that is
+    "normal", like ~/repos/cluv and ~/repos/cluv/examples/<example_name> instead of replicating entire
+    action-runners/.../_work/cluv on the cluster.
+
+    As a consequence of this, the ~/repos/cluv path on the clusters might be changed by the test runners.
+    This is kind-of to be expected though, and is not different than doing a `cluv sync` ourselves.
+    """
+    from cluv.config import get_cluv_config
+
+    def mock_get_cluv_config() -> cluv.config.CluvConfig:
+        config = get_cluv_config()
+        if config.project_dir is None:
+            project_dir = find_pyproject().parent
+            if project_dir.name == "cluv":
+                monkeypatch.setattr(config, "project_dir", "$HOME/repos/cluv")
+            else:
+                assert project_dir.parent.name == "examples"
+                monkeypatch.setattr(
+                    config, "project_dir", f"$HOME/repos/cluv/examples/{project_dir.name}"
+                )
+        return config
+
+    monkeypatch.setattr(cluv.config, get_cluv_config.__name__, mock_get_cluv_config)
 
 
 @pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)

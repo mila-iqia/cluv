@@ -185,7 +185,7 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
 
     cluv = data.get("tool", {}).get("cluv", {})
     if not cluv:
-        raise RuntimeError(f"No cluv config in {pyproject_path} file.")
+        raise RuntimeError(f"No cluv config in {pyproject_path}.")
 
     return CluvConfig.model_validate(cluv, extra="forbid")
 

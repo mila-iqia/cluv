@@ -117,6 +117,9 @@ def main(argv: list[str] | None = None) -> None:
         else:
             logger.error("No standard error.")
         sys.exit(err.returncode)
+    except RuntimeError as err:
+        console.print(f"{err}")
+        sys.exit(1)
 
 
 def add_submit_args(subparsers: Subparsers):

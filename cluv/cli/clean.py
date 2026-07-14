@@ -75,7 +75,8 @@ async def clean(
 
     all_remotes = await get_active_remotes()
     if clusters:
-        remotes = await login(clusters)
+        disabled = get_disabled_clusters()
+        remotes = await login(clusters, disabled)
     elif not all_remotes:
         raise RuntimeError(
             "[red]Not currently connected to any Slurm cluster.[/red] "
@@ -115,12 +116,12 @@ async def clean(
 
     for cluster in skipped:
         console.print(
-            f"[yellow]Skipping {cluster}: never synced. Run `cluv sync {cluster}` first.[/yellow]"
+            f"Skipping {cluster}: never synced. Run `cluv sync {cluster}` first.", style="yellow"
         )
 
     if not per_cluster_to_delete:
         logger.info("Nothing to clean.")
-        console.print("[green]Nothing to clean.[/green]")
+        console.print("Nothing to clean.", style="green")
         return {}
 
     def _y_or_ies(n: int) -> str:
@@ -132,7 +133,7 @@ async def clean(
         f"[bold]The following run directories {'would' if dry_run else 'will'} be removed:[/bold]"
     )
     for cluster, names in per_cluster_to_delete.items():
-        console.print(f"  [cyan]{cluster}[/cyan]:")
+        console.print(f"  {cluster}:", style="cyan")
         for name in names:
             console.print(f"    {name}")
 
@@ -168,9 +169,9 @@ async def clean(
                 removed += 1
                 actually_removed_per_cluster.setdefault(cluster, []).append(name)
     logger.info(f"Removed {removed} run director{_y_or_ies(removed)}; {len(failed)} failed")
-    console.print(f"[green]Removed {removed} run director{_y_or_ies(removed)}.[/green]")
+    console.print(f"Removed {removed} run director{_y_or_ies(removed)}.", style="green")
     if failed:
-        console.print(f"[red]Failed to remove {len(failed)}:[/red]")
+        console.print(f"Failed to remove {len(failed)}:", style="red")
         for cluster, name in failed:
             console.print(f"  {cluster}: {name}")
 

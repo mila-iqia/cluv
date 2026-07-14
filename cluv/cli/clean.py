@@ -10,7 +10,7 @@ from pathlib import Path
 
 from rich.prompt import Confirm
 
-from cluv.cache import CacheContent, read_cache
+from cluv.cache import CacheContent, get_disabled_clusters, read_cache
 from cluv.cli.login import login
 from cluv.cli.sync import expandvars, get_active_remotes
 from cluv.config import get_cluv_config

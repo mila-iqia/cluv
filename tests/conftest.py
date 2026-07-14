@@ -4,10 +4,7 @@ import pytest
 import pytest_asyncio
 
 import cluv.cli.clean
-import cluv.cli.disable
-import cluv.cli.login
 import cluv.cli.submit
-import cluv.cli.sync
 import cluv.config
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars

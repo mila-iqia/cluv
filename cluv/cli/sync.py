@@ -70,30 +70,13 @@ async def sync(
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
     here = current_cluster()
-    if clusters and here in clusters:
-        clusters.remove(here)
-
     config = get_cluv_config()
 
-    # Show disabled clusters early so the user is aware.
-    disabled = get_disabled_clusters()
-    print_disabled_clusters(disabled)
-
-    # When no cluster is passed, sync with clusters for which we have an active SSH connection.
-    all_remotes = await get_active_remotes()
-    if clusters:
-        # Filter out explicitly-requested clusters that are disabled.
-        enabled_clusters = [c for c in clusters if c not in disabled]
-        # Pass the already-fetched disabled dict so login does not print the warning a second time.
-        remotes = await login(enabled_clusters, disabled=disabled) if enabled_clusters else []
-    elif not all_remotes:
-        raise RuntimeError(
-            "[red]Not currently connected to any Slurm cluster.[/red] "
-            "Use `cluv login` to login and create reusable connections."
-        )
-    else:
-        remotes = all_remotes.copy()
-        clusters = [remote.hostname for remote in all_remotes]
+    # Login or get active remotes, print disabled clusters, raises if none found.
+    # This ignores the current cluster if passed.
+    remotes = await get_remotes(clusters)
+    clusters = [remote.hostname for remote in remotes]
+    assert here not in clusters
 
     if "GITHUB_ACTIONS" not in os.environ and not await _head_is_up_to_date():
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
@@ -112,19 +95,27 @@ async def sync(
     token = console_lock.set(asyncio.Lock())
     if (
         sync_datasets
-        and config.data_source  # cluster:path
-        and (source_cluster := config.data_source.split(":", 1)[0]) != here
+        and config.data_source  # cluster:path (or just /path)
+        and (source_cluster := config.data_source.rpartition(":")[0])
+        and source_cluster != here
     ):
-        _source_host, _, source_path = config.data_source.partition(":")
+        _, _, source_path = config.data_source.rpartition(":")
         # Fetch the data from the source cluster and copy it to the local datasets_path.
-        source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
+        source_remote = await get_remote_without_2fa_prompt(source_cluster)
         if not source_remote:
+            active_connections = await get_active_remotes()
             raise RuntimeError(
-                f"[red]Unable to sync datasets, need a connection to the source cluster "
-                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
+                f"Unable to sync datasets, need a connection to the source cluster "
+                f"({source_cluster}). Current connections: {[r.hostname for r in active_connections]}\n"
                 f"Use `cluv login {source_cluster}` to create a reusable connection to the "
                 f"source cluster."
             )
+        if source_cluster in get_disabled_clusters():
+            raise RuntimeError(
+                f"Not syncing datasets, even though we have a connection to {source_cluster}, because it is marked as disabled. "
+                f"Use `cluv enable {source_cluster}` to re-enable it, or use --no-sync-datasets to skip dataset syncing."
+            )
+
         local_datasets_path = get_datasets_path()
         if not local_datasets_path:
             raise RuntimeError(
@@ -152,6 +143,98 @@ async def sync(
                     display_path = run_path
                 console.print(f"  {display_path}")
 
+    return remotes
+
+
+async def get_remotes(clusters: list[str] | None) -> list[Remote]:
+    """Returns the remotes for the given clusters or clusters with an active connection.
+
+    - When `clusters` is passed and non-empty, does the login with the enabled clusters.
+    - When `clusters` is None or empty, gets the remotes for the enabled clusters that have an active connection.
+      Raises an error if there are no connections to any enabled clusters.
+
+    Raises errors if there any issues connecting to the requested (enabled) clusters.
+
+    If `clusters` contains the current cluster, it is ignored.
+    The list of disabled clusters is printed to the console in all cases.
+
+    Notes:
+        If `clusters` is passed, the returned list may have a different length than `clusters`.
+        Make sure to update `clusters` to reflect the clusters returned, for example like this:
+
+        ```python
+        clusters = ["mila", "tamia", "rorqual"]
+        remotes = await get_remotes(clusters)
+        clusters = [remote.hostname for remote in remotes]
+        ```
+    """
+    disabled_clusters = get_disabled_clusters()
+    here = current_cluster()
+
+    if not clusters:
+        # When clusters=None or an empty list, sync with enabled clusters which have an active connection.
+        # Note: `get_active_remotes` already doesn't return remotes for disabled clusters.
+        # A remote for the current cluster (even if unlikely) would also not be returned by this function.
+        remotes = await get_active_remotes()
+        # `get_active_remotes` doesn't print the list of disabled clusters so we do it here
+        # to be equivalent to the other case below (since `login` does call `print_disabled_clusters`).
+        print_disabled_clusters(disabled_clusters)
+
+        if not remotes:
+            raise RuntimeError(
+                "Not currently connected to any "
+                + (
+                    "Slurm cluster! "
+                    if not disabled_clusters
+                    else f"enabled Slurm cluster! (disabled clusters: {list(disabled_clusters)}) "
+                )
+                + "\nUse `cluv login` to login and create reusable connections, or `cluv enable <cluster>` to re-enable a disabled cluster (if any)."
+            )
+        return remotes
+
+    clusters_to_connect_to = clusters.copy()
+
+    if (here := current_cluster()) and here in clusters_to_connect_to:
+        # Don't try to connect to the cluster we're already on.
+        clusters_to_connect_to.remove(here)
+
+    requested_clusters_that_are_disabled = [
+        c for c in clusters_to_connect_to if c in disabled_clusters
+    ]
+    for disabled_cluster in requested_clusters_that_are_disabled:
+        clusters_to_connect_to.remove(disabled_cluster)
+
+    if not clusters_to_connect_to:
+        raise RuntimeError(
+            f"There are no clusters to connect to! ({clusters=}, {requested_clusters_that_are_disabled=}, "
+            f"current_cluster={here}).\n"
+            f"Use `cluv enable <cluster>` to re-enable a disabled cluster (if any), or "
+            f"use `cluv login` to login to other clusters."
+        )
+
+    # `login` prints the list of disabled clusters.
+    # Note: `login` also already removes the current cluster, and ignores disabled clusters.
+    # We (re)do it manually above so we can differentiate the different cases and give more a more
+    # informative error message to the users in the failure case where no remotes are available.
+    remotes = await login(
+        clusters_to_connect_to,
+        disabled={
+            cluster: v
+            for cluster, v in disabled_clusters.items()
+            if cluster in clusters_to_connect_to
+        },
+    )
+    remotes = sorted(remotes, key=lambda r: r.hostname)
+
+    requested = set(clusters_to_connect_to)
+    connected = set(remote.hostname for remote in remotes)
+    missing = requested - connected
+    if missing:
+        raise RuntimeError(
+            f"Unable to connect to the following clusters: {list(missing)}.\n"
+            f"Use `cluv login {' '.join(missing)}` to login and create reusable connections, or "
+            f"`cluv disable <cluster>` to disable a cluster if needed."
+        )
     return remotes
 
 

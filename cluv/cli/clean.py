@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shlex
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -156,9 +157,13 @@ async def clean(
         cluster_config = config.get_cluster_config(cluster)
         results_path_on_cluster = await expandvars(remote, cluster_config.results_path)
         for name in names:
-            logger.debug(f"Removing {cluster}:{results_path_on_cluster / name}")
+            dir_to_remove_on_cluster = shlex.quote(str(results_path_on_cluster / name))
+            if name.strip() in ["", ".", ".."]:
+                logger.warning(f"Skipping {cluster}:{dir_to_remove_on_cluster}: invalid name")
+                continue
+            logger.debug(f"Removing {cluster}:{dir_to_remove_on_cluster}")
             try:
-                await remote.run(f"rm -rf {results_path_on_cluster / name}", hide=True)
+                await remote.run(f"rm -rf {dir_to_remove_on_cluster}", hide=True)
             except subprocess.CalledProcessError as err:
                 logger.warning(f"Failed to remove {cluster}:{name}: {err}")
                 failed.append((cluster, name))

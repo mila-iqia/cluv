@@ -6,6 +6,7 @@ import dataclasses
 import importlib
 import shutil
 import subprocess
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from unittest import mock
@@ -339,18 +340,25 @@ def clear_cluv_cache(monkeypatch: pytest.MonkeyPatch):
     yield
 
 
+@pytest.fixture(scope="session")
+def unique_str_for_this_run() -> str:
+    """Return a random unique string for this test run, to avoid collisions with other test runs."""
+    return uuid.uuid4().hex[:8]  # 8 hex chars is enough to avoid collisions in practice.
+
+
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.skipif(
     IN_GITHUB_CLOUD_CI,
     reason="Integration tests are only run on a self-hosted github runner or on a dev machine.",
 )
-async def test_clean_removes_pruned_run_but_keeps_new_one(
+async def test_clean(
     cluster: str,
     remote: Remote,
     monkeypatch: pytest.MonkeyPatch,
     clear_cluv_cache: None,
     tmp_path: Path,
+    unique_str_for_this_run: str,
 ):
     """Integration test for `cluv clean`.
 
@@ -377,7 +385,7 @@ async def test_clean_removes_pruned_run_but_keeps_new_one(
 
     # Directory on the cluster containing the test runs.
     fake_cluster_results_dir = real_results_path_on_cluster.with_name(
-        f"temp_{real_results_path_on_cluster.name}"
+        f"temp_{unique_str_for_this_run}_{real_results_path_on_cluster.name}"
     )
     if await remote_test("-d", fake_cluster_results_dir, remote=remote):
         # Remote test dir already exists, remove it.

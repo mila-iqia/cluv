@@ -96,13 +96,15 @@ async def clean(
     logger.debug(f"Local run dirs in {results_path_here}: {sorted(local_names)}")
 
     per_cluster_to_delete: dict[str, list[str]] = {}
-    skipped: list[str] = []
     for remote in remotes:
         cluster = remote.hostname
         watermark = _watermark_for(cache, cluster)
         if watermark is None:
             logger.debug(f"{cluster}: no fetch watermark cached, skipping")
-            skipped.append(cluster)
+            console.print(
+                f"Skipping {cluster}: never synced. Run `cluv sync {cluster}` first.",
+                style="yellow",
+            )
             continue
         cluster_config = config.get_cluster_config(cluster)
         results_path_on_cluster = await expandvars(remote, cluster_config.results_path)
@@ -113,11 +115,6 @@ async def clean(
         to_delete = compute_runs_to_delete(local_names, remote_runs, watermark)
         if to_delete:
             per_cluster_to_delete[cluster] = to_delete
-
-    for cluster in skipped:
-        console.print(
-            f"Skipping {cluster}: never synced. Run `cluv sync {cluster}` first.", style="yellow"
-        )
 
     if not per_cluster_to_delete:
         logger.info("Nothing to clean.")

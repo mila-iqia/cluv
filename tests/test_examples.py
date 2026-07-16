@@ -22,14 +22,7 @@ from cluv.remote import control_socket_is_running
                 reason="Rorqual might take a long time for the job to actually run."
             ),
         ),
-        pytest.param(
-            "first",
-            marks=pytest.mark.xfail(
-                raises=NotImplementedError,
-                strict=True,
-                reason="hydra launcher doesn't support submit-first yet.",
-            ),
-        ),
+        "first",
     ],
 )
 @pytest.mark.parametrize(

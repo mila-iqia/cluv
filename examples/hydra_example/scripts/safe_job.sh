@@ -3,11 +3,13 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=4G
 #SBATCH --time=0:05:00
+#SBATCH --output=$SCRATCH/logs/cluv/%j/slurm-%j.out
 
-project_name="cluv"  # to be replaced with the user's project name.
-project_root="$HOME/repos/$project_name" # to be replaced with the path to the user's project in their $HOME.
-results_path="logs" # to be replaced with the path to the results path name. (--output flag above too)
+project_name="hydra_example"
+project_root="$HOME/repos/cluv/examples/hydra_example"
+results_path="$SCRATCH/logs/cluv"
 
+set -e  # exit on error
 
 echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
 # Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.

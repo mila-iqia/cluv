@@ -23,11 +23,12 @@ from milatools.utils.parallel_progress import (
     run_async_tasks_with_progress_bar,
 )
 
-from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
+from cluv.cache import ProjectStateOnCluster, get_disabled_clusters, read_cache, write_cache
+from cluv.cli.disable import print_disabled_clusters
 from cluv.cli.login import get_remote_without_2fa_prompt, login
-from cluv.config import CluvConfig, find_pyproject, get_cluv_config
+from cluv.config import CluvConfig, find_pyproject, get_cluv_config, load_cluv_config
 from cluv.job import get_datasets_path
-from cluv.remote import Remote, get_ssh_options_for_host, run
+from cluv.remote import Remote, get_ssh_options_for_host, list_remote_run_dirs, run
 from cluv.utils import console, console_lock, current_cluster
 
 milatools.cli.console = console
@@ -74,10 +75,17 @@ async def sync(
 
     config = get_cluv_config()
 
+    # Show disabled clusters early so the user is aware.
+    disabled = get_disabled_clusters()
+    print_disabled_clusters(disabled)
+
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     all_remotes = await get_active_remotes()
     if clusters:
-        remotes = await login(clusters)
+        # Filter out explicitly-requested clusters that are disabled.
+        enabled_clusters = [c for c in clusters if c not in disabled]
+        # Pass the already-fetched disabled dict so login does not print the warning a second time.
+        remotes = await login(enabled_clusters, disabled=disabled) if enabled_clusters else []
     elif not all_remotes:
         raise RuntimeError(
             "[red]Not currently connected to any Slurm cluster.[/red] "
@@ -87,7 +95,7 @@ async def sync(
         remotes = all_remotes.copy()
         clusters = [remote.hostname for remote in all_remotes]
 
-    if "GITHUB_ACTIONS" not in os.environ:
+    if "GITHUB_ACTIONS" not in os.environ and not await _head_is_up_to_date():
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
         await run(("git", "push"), hide=False)
 
@@ -148,10 +156,15 @@ async def sync(
 
 
 async def get_active_remotes() -> list[Remote]:
-    """Returns the Remotes for each cluster which has an active SSH connection."""
+    """Returns the Remotes for each cluster which has an active SSH connection.
+
+    Disabled clusters (see `cluv disable`) are excluded.
+    """
     clusters = get_cluv_config().clusters_names
     if (this_cluster := current_cluster()) and this_cluster in clusters:
         clusters.remove(this_cluster)
+    disabled = get_disabled_clusters()
+    clusters = [c for c in clusters if c not in disabled]
     connections = await asyncio.gather(
         *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
     )
@@ -164,9 +177,18 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     config = get_cluv_config()
     cluster = remote.hostname
     cluster_config = config.get_cluster_config(remote.hostname)
-    project_path = cluster_config.project_dir or PurePosixPath(
-        find_pyproject().parent.relative_to(Path.home())
-    )
+    project_path = cluster_config.project_dir
+    if project_path is None:
+        if find_pyproject().parent.is_relative_to(Path.home()):
+            project_path = PurePosixPath(
+                "$HOME" / find_pyproject().parent.relative_to(Path.home())
+            )
+        else:
+            raise RuntimeError(
+                f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
+                f"project root ({find_pyproject().parent}) is not under $HOME. "
+                f"Please set `cluv.project_dir` in the Cluv config section of pyproject.toml."
+            )
     project_path = await expandvars(remote, project_path)
 
     def _update_progress(progress: int, status: str, total: int):
@@ -175,11 +197,17 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
 
     num_tasks = 5 if config.data_source else 4
 
-    cache = read_cache()
-    project_state = cache.project_states.setdefault(cluster, ProjectStateOnCluster())
+    project_state = read_cache().project_states.get(cluster) or ProjectStateOnCluster()
 
     def _save():
-        assert cache.project_states[cluster] is project_state
+        # Re-read the cache right before writing, instead of reusing the snapshot read at the
+        # top of this function: multiple clusters' sync_task_function calls run concurrently in
+        # the same event loop, each starting from its own initial read, so writing back a stale
+        # full snapshot would clobber other clusters' updates. read_cache/write_cache are
+        # synchronous (no `await` in between), so this merge-and-write is atomic with respect to
+        # the other concurrently-running cluster tasks.
+        cache = read_cache()
+        cache.project_states[cluster] = project_state
         write_cache(cache)
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
@@ -195,7 +223,8 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     _save()
 
     _update_progress(3, "Fetching results", num_tasks)
-    new_runs = await fetch_results(remote, config)
+    new_runs = await fetch_results(remote, config, project_state)
+    _save()
 
     if config.data_source:
         _update_progress(4, "Syncing datasets", num_tasks)
@@ -204,7 +233,6 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
         if not local_dataset_path:
             raise RuntimeError("data_source is set, so dataset_path should also be set!")
         local_dataset_path = Path(os.path.expandvars(local_dataset_path))
-
         await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
         _save()
 
@@ -281,6 +309,29 @@ async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):
     project_state.uv_version = uv_version_here
 
 
+async def _head_is_up_to_date() -> bool:
+    """Returns True if `git push` wouldn't push anything (local HEAD matches upstream).
+
+    Fetches from the remote first, so the comparison reflects the actual state of the
+    remote rather than a possibly-stale local tracking ref.
+    """
+    upstream = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+        capture_output=True,
+        text=True,
+    )
+    if upstream.returncode != 0:
+        # No upstream configured for the current branch; can't tell, so don't skip.
+        return False
+    fetch_result = await run(("git", "fetch"), hide=True, warn=True)
+    if fetch_result.returncode != 0:
+        # Couldn't reach the remote; don't skip the push attempt.
+        return False
+    local_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+    upstream_commit = subprocess.getoutput(f"git rev-parse {upstream.stdout.strip()}").strip()
+    return local_commit == upstream_commit
+
+
 def _is_github_pr_ref(github_ref: str) -> bool:
     """Checks if this value (from the GITHUB_REF environment variable) is a GitHub PR ref."""
     return re.fullmatch(r"refs/pull/[0-9]+/(merge|head)", github_ref) is not None
@@ -296,6 +347,32 @@ async def clone_project(
     - Worry about authentication later, just raise an error if need be for now.
     """
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+
+    # In the case of a subproject (like the examples in the cluv repo), these are different!
+    local_project_root = find_pyproject().parent
+    local_repo_dir = Path(subprocess.getoutput("git rev-parse --show-toplevel").strip())
+
+    if local_project_root == local_repo_dir:
+        cluster_repo_dir = project_path
+    elif not local_repo_dir.is_relative_to(Path.home()):
+        # Try to find the directory where the project should be cloned on the cluster
+        # by reading the pyproject.toml at the repo root. Hopefully it has a cluv config with project_dir set.
+        cluster_repo_dir = None
+        if (local_repo_dir / "pyproject.toml").exists():
+            cluster_repo_dir = (
+                load_cluv_config(local_repo_dir / "pyproject.toml")
+                .get_cluster_config(remote.hostname)
+                .project_dir
+            )
+        if not cluster_repo_dir:
+            raise RuntimeError(
+                f"Can't tell where to clone the current git repository on {remote.hostname}, "
+                f"because the project isn't under $HOME, and there is no `project_dir` in the "
+                f"subproject or in the root pyproject.toml."
+            )
+    else:
+        cluster_repo_dir = PurePosixPath("$HOME" / local_repo_dir.relative_to(Path.home()))
+        cluster_repo_dir = await expandvars(remote, cluster_repo_dir)
 
     if project_state.checked_out_git_commit == current_git_commit:
         logger.info(
@@ -331,18 +408,20 @@ async def clone_project(
     gitenv = {"GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new"}
 
     # If the project isn't cloned yet, clone it.
-    if not await remote_test("-d", project_path, remote):
+    if not await remote_test("-d", cluster_repo_dir, remote):
         logger.info(f"Project isn't cloned yet on {remote.hostname}.")
-        await remote.run(f"git clone {github_repo_url} {project_path}", hide=True, env=gitenv)
+        await remote.run(f"git clone {github_repo_url} {cluster_repo_dir}", hide=True, env=gitenv)
 
-    await remote.run(f"git -C {project_path} fetch --all --prune", hide=True, env=gitenv)
+    # It actually matters where we do the fetch/pull commands from: We need to do them in the git
+    # repo root, since the project subdir might not exist on the main/master branch!
+    await remote.run(f"git -C {cluster_repo_dir} fetch --all --prune", hide=True, env=gitenv)
 
     if not detached_head:
         # Simplest case. We're on a branch, life is good.
         await remote.run(
-            f"git -C {project_path} checkout {current_git_branch}", hide=False, env=gitenv
+            f"git -C {cluster_repo_dir} checkout {current_git_branch}", hide=False, env=gitenv
         )
-        await remote.run(f"git -C {project_path} pull", hide=False, env=gitenv)
+        await remote.run(f"git -C {cluster_repo_dir} pull", hide=False, env=gitenv)
 
         # Set the checked out commit for that project on that cluster. This will be written to the
         # cache to avoid unnecessary syncs later.
@@ -366,7 +445,7 @@ async def clone_project(
     if not github_head_ref:
         # Push on master, for example after merging a PR.
         await remote.run(
-            f"git -C {project_path} checkout --detach {current_git_commit}",
+            f"git -C {cluster_repo_dir} checkout --detach {current_git_commit}",
             hide=False,
             env=gitenv,
         )
@@ -394,12 +473,12 @@ async def clone_project(
         # The head branch of a PR from a fork doesn't exist on the base repo, so
         # fetch the PR ref instead and create the branch from FETCH_HEAD.
         await remote.run(
-            f"git -C {project_path} fetch {git_remote_name} {github_ref}",
+            f"git -C {cluster_repo_dir} fetch {git_remote_name} {github_ref}",
             hide=False,
             env=gitenv,
         )
         await remote.run(
-            f"git -C {project_path} checkout -B {github_head_ref} FETCH_HEAD",
+            f"git -C {cluster_repo_dir} checkout -B {github_head_ref} FETCH_HEAD",
             hide=False,
             env=gitenv,
         )
@@ -412,12 +491,12 @@ async def clone_project(
 
     safe_tracking_ref = shlex.quote(f"{git_remote_name}/{github_head_ref}")
     await remote.run(
-        f"git -C {project_path} checkout -B {github_head_ref} {safe_tracking_ref}",
+        f"git -C {cluster_repo_dir} checkout -B {github_head_ref} {safe_tracking_ref}",
         hide=False,
         env=gitenv,
     )
     await remote.run(
-        f"git -C {project_path} pull {git_remote_name} {github_head_ref}",
+        f"git -C {cluster_repo_dir} pull {git_remote_name} {github_head_ref}",
         hide=False,
         env=gitenv,
     )
@@ -507,11 +586,13 @@ async def _push_datasets_to_remote(
     project_state.last_pushed_datasets = last_push_datetime
 
 
-async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
+async def fetch_results(
+    remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
+) -> list[Path]:
     """Fetches results from a remote cluster to local using rsync via the results symlink.
 
     Returns the list of newly-synced run directories (those that did not exist locally before
-    the rsync ran).
+    the rsync ran). Also updates `project_state.last_fetch_watermark` (see `cluv clean`).
     """
     results_path_here = Path(os.path.expandvars(config.results_path))
     results_path_here.mkdir(parents=True, exist_ok=True)
@@ -557,6 +638,10 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
         warn=True,
         hide=False,
     )
+
+    remote_runs = await list_remote_run_dirs(remote, results_path_on_cluster)
+    if remote_runs:
+        project_state.last_fetch_watermark = max(mtime for _, mtime in remote_runs)
 
     if not results_path_here.exists():
         return []

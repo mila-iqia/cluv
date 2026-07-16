@@ -4,6 +4,21 @@ repo_url: https://github.com/mila-iqia/cluv
 docs_dir: docs
 edit_uri: edit/master/docs/
 
+nav:
+  - Home: index.md
+  - Guides:
+      - Introduction: guides/introduction.md
+      - Syncing datasets: guides/syncing-datasets.md
+      - Hydra launcher: guides/hydra-launcher.md
+  - Reference:
+      - CLI:
+          - init: reference/cli/init.md
+          - login: reference/cli/login.md
+          - run: reference/cli/run.md
+          - submit: reference/cli/submit.md
+          - sync: reference/cli/sync.md
+      - Config: reference/config.md
+      - Remote: reference/remote.md
 
 theme:
   name: material

@@ -11,7 +11,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from cluv.cache import Job, load_jobs
+from cluv.cache import Job, get_disabled_clusters, load_jobs
+from cluv.cli.disable import print_disabled_clusters
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_cluv_config
 from cluv.remote import run
@@ -468,6 +469,9 @@ async def get_job_infos(
     cached_jobs: list[Job], clusters: list[str]
 ) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
+    # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
+    cached_jobs = list(reversed(cached_jobs))
+
     # Regroup jobs by cluster
     cluster_jobs: dict[str, list[int]] = {}
     for job in cached_jobs:
@@ -525,11 +529,13 @@ async def status(table: str) -> None:
     The "jobs" table shows one row per job from the cache, with live status info (state,
     elapsed time, wait time).
     """
-    clusters = get_cluv_config().clusters_names
-
     console.print()
     console.rule("[bold cyan]cluv status[/bold cyan]")
     console.print()
+
+    disabled = get_disabled_clusters()
+    print_disabled_clusters(disabled)
+    clusters = [c for c in get_cluv_config().clusters_names if c not in disabled]
 
     # Load cached jobs
     cached_jobs = load_jobs()
@@ -545,7 +551,7 @@ async def status(table: str) -> None:
             ]
 
         # Show a tip message if all clusters are offline.
-        if all(not c.online for c in clusters_status):
+        if clusters_status and all(not c.online for c in clusters_status):
             console.print(
                 (
                     "[yellow]No active connections to any clusters found. "

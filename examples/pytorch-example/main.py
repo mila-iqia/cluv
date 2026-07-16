@@ -18,7 +18,7 @@ import tqdm
 import wandb
 from torchvision.datasets import CIFAR10
 
-from cluv.job import current_job_info, get_datasets_path
+from cluv.job import current_run_info, get_datasets_path
 
 
 @dataclass(frozen=True)
@@ -37,7 +37,7 @@ class Args:
 def main(args: Args | None = None):
     args = args or simple_parsing.parse(Args, description=__doc__)
 
-    job_info = current_job_info()
+    job_info = current_run_info()
 
     datasets_path = get_datasets_path()
     assert datasets_path, "A datasets_path must be set in the config for this example to work."
@@ -54,6 +54,7 @@ def main(args: Args | None = None):
         project="cluv-example",
         name=run_id,
         id=run_id,
+        mode="offline",  # to avoid pushing to wandb when running this example.
         dir=run_dir,
         config=vars(args)
         | ({"job": dataclasses.asdict(job_info)} if job_info else {})

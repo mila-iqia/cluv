@@ -7,7 +7,9 @@ import functools
 import shlex
 import subprocess
 import sys
+from datetime import datetime, timezone
 from logging import getLogger as get_logger
+from pathlib import PurePosixPath
 from typing import Callable, Literal, Self, TypeVar
 
 from cluv.utils import console, console_lock
@@ -107,6 +109,23 @@ class Remote:
         return (await self.run(command, display=display, warn=warn, hide=hide)).stdout.strip()
 
 
+async def list_remote_run_dirs(remote: Remote, path: PurePosixPath) -> list[tuple[str, datetime]]:
+    """Lists the immediate subdirectories of `path` on the remote, with their mtimes.
+
+    Returns an empty list if `path` doesn't exist on the remote (rather than raising).
+    """
+    output = await remote.get_output(
+        f"find {path} -maxdepth 1 -mindepth 1 -type d -printf '%T@ %f\\n'", warn=True
+    )
+    entries: list[tuple[str, datetime]] = []
+    for line in output.splitlines():
+        epoch_str, _, name = line.partition(" ")
+        if not epoch_str or not name:
+            continue
+        entries.append((name, datetime.fromtimestamp(float(epoch_str), tz=timezone.utc)))
+    return entries
+
+
 async def run(
     program_and_args: tuple[str, ...],
     input: str | None = None,
@@ -156,31 +175,13 @@ async def run(
         raise
 
     assert proc.returncode is not None
-    if proc.returncode != 0:
-        message = (
-            f"{program_and_args!r}"
-            + (f" with input {input!r}" if input else "")
-            + f" exited with {proc.returncode}"
-            + (f": {stderr}" if stderr else "")
-        )
-        logger.debug(message, stacklevel=_stacklevel)
-        if not warn:
-            if stderr and hide not in [True, "err", "stderr"]:
-                logger.error(stderr.decode(), stacklevel=_stacklevel)
-            raise subprocess.CalledProcessError(
-                returncode=proc.returncode,
-                cmd=program_and_args,
-                output=stdout,
-                stderr=stderr,
-            )
-        if hide is not True:  # don't warn if hide is True.
-            logger.warning(RuntimeWarning(message), stacklevel=_stacklevel)
     result = subprocess.CompletedProcess(
         args=program_and_args,
         returncode=proc.returncode,
         stdout=stdout.decode(),
         stderr=stderr.decode(),
     )
+
     async with console_lock.get() or contextlib.nullcontext():
         if _display:
             console.log(
@@ -203,6 +204,25 @@ async def run(
             if hide not in [True, "err", "stderr"]:
                 print(result.stderr, file=sys.stderr)
             logger.debug(result.stderr)
+    if proc.returncode != 0:
+        message = (
+            f"{program_and_args!r}"
+            + (f" with input {input!r}" if input else "")
+            + f" exited with {proc.returncode}"
+            + (f": {stderr}" if stderr else "")
+        )
+        logger.debug(message, stacklevel=_stacklevel)
+        if not warn:
+            if stderr and hide not in [True, "err", "stderr"]:
+                logger.error(stderr.decode(), stacklevel=_stacklevel)
+            raise subprocess.CalledProcessError(
+                returncode=proc.returncode,
+                cmd=program_and_args,
+                output=stdout,
+                stderr=stderr,
+            )
+        if hide is not True:  # don't warn if hide is True.
+            logger.warning(RuntimeWarning(message), stacklevel=_stacklevel)
     return result
 
 

@@ -19,12 +19,12 @@ import pytest_asyncio
 
 from cluv.cache import Job
 from cluv.cli.init import DEFAULT_RESULTS_PATH, init
-from cluv.cli.login import get_remote_without_2fa_prompt, login
+from cluv.cli.login import login
 from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
 from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
-from cluv.remote import Remote, control_socket_is_running
+from cluv.remote import Remote
 from cluv.slurm import run_sacct
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -75,53 +75,6 @@ def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
             Path.cwd().parent.parent
         )  # This should be the _work folder in the self-hosted runner
         monkeypatch.setattr(Path, "home", lambda: work_folder)
-
-
-@pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)
-async def cluster(request: pytest.FixtureRequest) -> str:
-    """Fixture that gives the hostname of the Slurm cluster to run tests with.
-
-    - If the SLURM_CLUSTER environment variable is not set, all tests that depend on this fixture
-      will be skipped.
-    - If it is set and there is not an active SSH connection to that cluster, this fixture will
-      fail, causing all tests that use it to fail, since they require a live connection to a
-      cluster.
-
-    NOTE: This fixture can also be (indirectly) parametrized by tests that want to run with a remote
-    connected to only some clusters in particular. For example:
-
-    ```python
-    @pytest.mark.parametrize("cluster", ["mila", "tamia", "rorqual"], indirect=True)
-    def test_something(remote: Remote):
-        assert remote.hostname in ["mila", "tamia", "rorqual"]
-    ```
-    """
-    cluster = getattr(request, "param", None)
-    if cluster is None:
-        pytest.skip(
-            "No cluster specified. Set the SLURM_CLUSTER environment variable to a "
-            "cluster with an active SSH connection to run these tests."
-        )
-    existing_ssh_connection = await control_socket_is_running(cluster)
-    if existing_ssh_connection:
-        assert isinstance(cluster, str)
-        return cluster
-    if cluster not in REQUIRED_CLUSTERS:
-        pytest.skip(
-            f"No active SSH connection to {cluster}, but it is not necessary to test against it."
-        )
-    if IN_SELF_HOSTED_GITHUB_CI:
-        pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
-    # On a dev machine. Just skip and display some instructions.
-    pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
-
-
-@pytest_asyncio.fixture(scope="session")
-async def remote(cluster: str):
-    remote = await get_remote_without_2fa_prompt(cluster)
-    if remote is None:
-        pytest.xfail(f"Test needs an active SSH connection to the {cluster} cluster.")
-    return remote
 
 
 async def test_login(remote: Remote):
@@ -192,7 +145,7 @@ TEST_SUBMIT_TIMEOUT_SECONDS = 180
 
 
 @pytest.mark.parametrize(
-    cluster.__name__,
+    "cluster",
     [
         "mila",
         pytest.param(
@@ -293,14 +246,12 @@ def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 @pytest.fixture(params=[True, False], ids=["with_scratch", "without_scratch"])
 def scratch(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest, fake_scratch: Path
 ) -> Path | None:
     """Fixture that sets up a fake SCRATCH directory if requested, or pretends that SCRATCH doesn't exist otherwise."""
     use_scratch = request.param
     if use_scratch:
-        fake_scratch_dir = tmp_path / "fake_scratch"
-        monkeypatch.setenv("SCRATCH", str(fake_scratch_dir))  # Set the SCRATCH env var to tmp_path
-        return fake_scratch_dir
+        return fake_scratch
     if "SCRATCH" in os.environ:
         # Remove the SCRATCH environment variable
         monkeypatch.delenv("SCRATCH")
@@ -350,9 +301,19 @@ def test_init(
 ) -> None:
     monkeypatch.chdir(project_dir)
 
+    pyproject_file = project_dir / "pyproject.toml"
+    if pyproject_file.exists() and scratch:
+        content = pyproject_file.read_text()
+        content = content.replace(
+            "SCRATCH = $HOME/scratch", f"SCRATCH = {scratch}" if scratch else ""
+        )
+        pyproject_file.write_text(content)
+    monkeypatch.setenv("SCRATCH", str(scratch) if scratch else "")
+
     init()
 
     generated_config = load_cluv_config(project_dir / "pyproject.toml")
+
     assert generated_config.results_path == DEFAULT_RESULTS_PATH
     assert (project_dir / "scripts").is_dir()
     assert (project_dir / "scripts" / "job.sh").is_file()

@@ -20,12 +20,14 @@ import rich.logging
 import rich_argparse
 import simple_parsing
 
+from .cli.clean import clean
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run
 from .cli.status import status
 from .cli.submit import submit
 from .cli.sync import sync
+from .cli.disable import disable, enable
 from .utils import console
 
 logger = logging.getLogger("cluv")
@@ -70,11 +72,20 @@ def main(argv: list[str] | None = None) -> None:
     sync_parser = add_sync_args(subparsers)
     _add_v_arg(sync_parser)
 
+    clean_parser = add_clean_args(subparsers)
+    _add_v_arg(clean_parser)
+
     submit_parser = add_submit_args(subparsers)
     _add_v_arg(submit_parser)
 
     status_parser = add_status_args(subparsers)
     _add_v_arg(status_parser)
+
+    disable_parser = add_disable_args(subparsers)
+    _add_v_arg(disable_parser)
+
+    enable_parser = add_enable_args(subparsers)
+    _add_v_arg(enable_parser)
 
     args = parser.parse_args(argv)
     args_dict = vars(args)
@@ -220,6 +231,37 @@ def add_sync_args(subparsers: Subparsers):
     return sync_parser
 
 
+def add_clean_args(subparsers: Subparsers):
+    clean_parser = subparsers.add_parser(
+        "clean",
+        help="Remove run results from clusters that have been deleted from the local results dir.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    clean_parser.add_argument(
+        "clusters",
+        nargs="*",
+        default=None,
+        metavar="<cluster>",
+        help=(
+            "The cluster(s) to clean. Leave empty to clean every currently logged in cluster "
+            "that has been synced before."
+        ),
+    )
+    clean_parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Skip the confirmation prompt.",
+    )
+    clean_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted, without deleting anything.",
+    )
+    clean_parser.set_defaults(func=clean)
+    return clean_parser
+
+
 def add_login_args(subparsers: Subparsers):
     login_parser = subparsers.add_parser(
         "login",
@@ -274,6 +316,48 @@ def add_run_args(subparsers: Subparsers):
     )
     run_parser.set_defaults(func=run)
     return run_parser
+
+
+def add_disable_args(subparsers: Subparsers):
+    disable_parser = subparsers.add_parser(
+        "disable",
+        help="Disable a cluster for a given period (or indefinitely).",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    disable_parser.add_argument(
+        "cluster",
+        metavar="<cluster>",
+        help="The cluster hostname to disable.",
+    )
+    disable_parser.add_argument(
+        "period",
+        nargs="?",
+        default=None,
+        metavar="<period>",
+        help=(
+            "How long to disable the cluster. "
+            "Accepts an integer (days), HH:MM:SS / D-HH:MM:SS (Slurm-style), "
+            "or suffixed values like '2h', '1d 6h'. "
+            "Omit to disable indefinitely."
+        ),
+    )
+    disable_parser.set_defaults(func=disable)
+    return disable_parser
+
+
+def add_enable_args(subparsers: Subparsers):
+    enable_parser = subparsers.add_parser(
+        "enable",
+        help="Re-enable a previously disabled cluster.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    enable_parser.add_argument(
+        "cluster",
+        metavar="<cluster>",
+        help="The cluster hostname to re-enable.",
+    )
+    enable_parser.set_defaults(func=enable)
+    return enable_parser
 
 
 def setup_logging(verbose: int | None, quiet: bool = False) -> None:

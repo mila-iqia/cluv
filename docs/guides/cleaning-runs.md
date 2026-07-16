@@ -44,7 +44,7 @@ note telling you to run `cluv sync` first.
 
 !!! note
     Editing files inside a local run folder (adding notes, running analysis
-    scripts that write into it, etc.) doesn't affect whether the folder will be deted or not — `clean` doesn't look
+    scripts that write into it, etc.) doesn't affect whether the folder will be deleted or not — `clean` doesn't look
     at your local folders' modification times, only at whether the folder
     exists.
 

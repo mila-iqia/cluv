@@ -1,4 +1,3 @@
-
 # Introduction
 
 `cluv` aims to be a simple tool to make it easier to work with `uv` and to dispatch jobs across
@@ -30,9 +29,7 @@ These are the main goals of Cluv:
 - `cluv clean`: Once I've deleted a run's results locally, remove the matching results from the cluster(s) it ran on. See the [cleaning up runs guide](cleaning-runs.md).
 
 ### Intuitive monitoring of jobs and cluster health across clusters
-
-- Provide a simple, intuitive interface to monitor job status and cluster health across clusters
-  - `cluv status`: Show me an overview of all my clusters, including GPU availability, queue status, and job progress.
+- `cluv status`: Show me an overview of all my clusters, including GPU availability, queue status, and job progress.
 
 
 ## Non-goals

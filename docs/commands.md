@@ -31,9 +31,24 @@ Sync your project on clusters.
 Submit a job to clusters.
 {: .indent }
 
+[`cluv clean`](#cluv-clean)
+
+Remove run results from clusters once they're gone locally.
+{: .indent }
+
 [`cluv status`](#cluv-status)
 
 Show the status of clusters and jobs.
+{: .indent }
+
+[`cluv disable`](#cluv-disable)
+
+Temporarily skip a cluster in other commands.
+{: .indent }
+
+[`cluv enable`](#cluv-enable)
+
+Re-enable a previously disabled cluster.
 {: .indent }
 
 [`cluv run`](#cluv-run)
@@ -183,14 +198,51 @@ Any arguments before `--` are forwarded as flags to `sbatch`. Arguments after `-
 Automatically create a local commit with the tracked changes before submitting, instead of failing when the working tree is dirty.
 {: .indent }
 
+## [`cluv clean`](#cluv-clean)
+
+Remove run result directories from remote clusters that have been deleted from the local
+results dir.
+
+Only considers clusters that have been synced at least once: it compares each remote's run
+directories against the local results dir, using the watermark recorded by the last successful
+[`cluv sync`](#cluv-sync) to tell "pruned locally" apart from "not fetched yet". A remote run
+directory is only deleted if it has no local counterpart *and* it already existed at the time of
+that last sync; brand-new remote runs that were never fetched locally are left alone. Clusters
+that have never been synced are skipped with a warning. Prompts for confirmation before deleting,
+unless `--force` or `--dry-run` is used.
+
+**Usage**
+```console
+cluv clean [clusters] [-f | --force] [--dry-run]
+```
+
+**Arguments**
+
+`clusters`
+
+One or more cluster hostnames to clean. If omitted, cleans every cluster you currently have an active SSH connection to and that has been synced before.
+{: .indent }
+
+**Options**
+
+`-f`, `--force`
+
+Skip the confirmation prompt.
+{: .indent }
+
+`--dry-run`
+
+Show what would be deleted, without deleting anything.
+{: .indent }
+
 ## [`cluv status`](#cluv-status)
 
 Show the status of clusters and jobs.
 
 The `clusters` table shows each cluster's live GPU availability and storage usage, along with
-counts of your running/pending/failed/completed jobs on that cluster. 
+counts of your running/pending/failed/completed cluv jobs on that cluster. 
 
-The `jobs` table shows one row per job submitted with `cluv submit` (from the local job cache), enriched with live Slurm
+The `jobs` table shows jobs submitted with `cluv submit` (from the local job cache), enriched with live Slurm
 status, wait time, and elapsed time. 
 
 Requires an active connection (see [`cluv login`](#cluv-login)) to fetch live data for a cluster; otherwise it is shown as disconnected.
@@ -205,6 +257,48 @@ cluv status [table]
 `table`
 
 Which table to display in the status output. Can be one of `jobs`, `clusters`, or `all`. Defaults to `all`.
+{: .indent }
+
+## [`cluv disable`](#cluv-disable)
+
+Temporarily skip a cluster in other commands (`sync`, `submit`, `clean`, ...) without removing it
+from the config.
+
+Disabled clusters are recorded locally and are skipped automatically whenever no explicit cluster
+list is given to another command. Re-enable with [`cluv enable`](#cluv-enable), or let the period
+expire.
+
+**Usage**
+```console
+cluv disable <cluster> [period]
+```
+
+**Arguments**
+
+`cluster`
+
+The cluster hostname to disable.
+{: .indent }
+
+`period`
+
+How long to disable the cluster for. Accepts an integer (days), a Slurm-style `HH:MM:SS` / `D-HH:MM:SS` string, or suffixed values like `2h`, `1d 6h`. Omit to disable indefinitely, until [`cluv enable`](#cluv-enable) is run.
+{: .indent }
+
+## [`cluv enable`](#cluv-enable)
+
+Re-enable a previously disabled cluster.
+
+**Usage**
+```console
+cluv enable <cluster>
+```
+
+**Arguments**
+
+`cluster`
+
+The cluster hostname to re-enable.
 {: .indent }
 
 ## [`cluv run`](#cluv-run)

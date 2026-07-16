@@ -2,7 +2,7 @@
 
 `cluv sync` can also replicate datasets to every cluster listed in your Cluv config.
 
-## 1) Configure dataset sync in `pyproject.toml`
+## Configure dataset sync in `pyproject.toml`
 
 Add `data_source` and `datasets_path` under `[tool.cluv]`:
 
@@ -25,7 +25,7 @@ You can override `datasets_path` per cluster:
 datasets_path = "$HOME/datasets/cifar10"
 ```
 
-## 2) Login to clusters (including the source)
+## Login to clusters (including the source)
 
 Before syncing, create reusable SSH connections:
 
@@ -35,7 +35,7 @@ cluv login
 
 If your source is `mila:...`, make sure the `mila` connection exists (for example `cluv login mila`).
 
-## 3) Run sync
+## Run sync
 
 ```console
 cluv sync

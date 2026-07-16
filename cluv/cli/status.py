@@ -12,7 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from cluv.cache import Job, get_disabled_clusters, load_jobs
-from cluv.cli.disable import print_disabled_clusters
+from cluv.cli.disable import DisabledCluster, format_remaining
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_cluv_config
 from cluv.remote import run
@@ -120,9 +120,17 @@ disk-quota 2>/dev/null; echo {_SEP}
 _MILA_CLUSTERS = {"mila"}
 
 
-async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, LiveJobInfo]:
+async def fetch_live_job_info(
+    cluster: str,
+    job_ids: list[int],
+    disabled_clusters: dict[str, DisabledCluster],
+) -> dict[int, LiveJobInfo]:
     """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
     start_time = datetime.now()
+
+    if cluster in disabled_clusters:
+        logger.info(f"[bold]{cluster}[/bold] is disabled; skipping jobs")
+        return {}
 
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None and cluster != current_cluster():
@@ -195,13 +203,20 @@ async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, Liv
     return jobs
 
 
-async def get_cluster_status(cluster: str) -> ClusterStatus:
+async def get_cluster_status(
+    cluster: str,
+    disabled_clusters: dict[str, DisabledCluster],
+) -> ClusterStatus:
     """Fetch live Slurm data from a remote cluster and return a ClusterStatus.
 
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
     """
     start_time = datetime.now()
+
+    if cluster in disabled_clusters:
+        logger.info(f"[bold]{cluster}[/bold] is disabled; returning empty status")
+        return get_default_cluster_status(cluster)
 
     # Use get_remote_without_2fa_prompt directly so we never filter out the
     # "current" cluster the way login() does. A working socket for mila is
@@ -333,7 +348,9 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 # Main display
 # ---------------------------------------------------------------------------
 def _build_cluster_table(
-    data: list[ClusterStatus], clusters_job_stats: dict[str, ClusterJobStats]
+    data: list[ClusterStatus],
+    clusters_job_stats: dict[str, ClusterJobStats],
+    disabled_clusters: dict[str, DisabledCluster],
 ) -> Table:
     """Build the cluster overview table with live status info and job counts."""
     table = Table(
@@ -353,6 +370,17 @@ def _build_cluster_table(
 
     for c in data:
         status = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
+        cluster_name = Text(c.name, style="bold magenta" if c.online else "bold bright_black")
+        cluster_status = status + cluster_name + "\n"
+
+        if disabled_clusters_info := disabled_clusters.get(c.name):
+            if disabled_clusters_info.disabled_until:
+                cluster_status += Text(
+                    f"Disabled\n({format_remaining(disabled_clusters_info.disabled_until)})"
+                )
+            else:
+                cluster_status += Text("Disabled")
+
         job_stats = clusters_job_stats.get(
             c.name, ClusterJobStats(running=0, cancelled=0, completed=0, pending=0)
         )
@@ -368,16 +396,12 @@ def _build_cluster_table(
             c.storage.scratch_used, c.storage.scratch_quota
         )
 
-        # Dim the whole row if the cluster is offline
-        row_style = "dim" if not c.online else ""
-
         table.add_row(
-            status + Text(c.name, style="bold magenta" if c.online else "bold bright_black"),
+            cluster_status,
             Text(c.gpu_model, style="bright_blue") if c.online else "-",
             _gpu_bar(c.gpu_idle, c.gpu_total) if c.online else "-",
             my_jobs if c.online else "-",
             home_bar + "\n" + scratch_bar if c.online else "-",
-            style=row_style,
         )
 
     return table
@@ -386,7 +410,7 @@ def _build_cluster_table(
 def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobInfo]) -> Table:
     """Build the jobs overview table with one row per cached job, enriched with live status info."""
     table = Table(
-        title="Jobs Overview",
+        title="Cluv Jobs Overview",
         box=box.SIMPLE_HEAVY,
         header_style="bold white on #1a1a2e",
         title_style="bold cyan",
@@ -466,7 +490,9 @@ def _build_legend() -> Panel:
 
 
 async def get_job_infos(
-    cached_jobs: list[Job], clusters: list[str]
+    cached_jobs: list[Job],
+    clusters: list[str],
+    disabled_clusters: dict[str, DisabledCluster],
 ) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
     # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
@@ -480,7 +506,7 @@ async def get_job_infos(
 
     # Fetch live job info for all cached jobs
     results = await asyncio.gather(
-        *(fetch_live_job_info(c, ids) for c, ids in cluster_jobs.items())
+        *(fetch_live_job_info(c, ids, disabled_clusters) for c, ids in cluster_jobs.items())
     )
     live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
 
@@ -533,21 +559,25 @@ async def status(table: str) -> None:
     console.rule("[bold cyan]cluv status[/bold cyan]")
     console.print()
 
-    disabled = get_disabled_clusters()
-    print_disabled_clusters(disabled)
-    clusters = [c for c in get_cluv_config().clusters_names if c not in disabled]
+    clusters = get_cluv_config().clusters_names
+    disabled_clusters = get_disabled_clusters()
 
     # Load cached jobs
     cached_jobs = load_jobs()
 
     with console.status("Fetching jobs status..."):
-        jobs_status, clusters_job_stats = await get_job_infos(cached_jobs, clusters)
+        jobs_status, clusters_job_stats = await get_job_infos(
+            cached_jobs, clusters, disabled_clusters
+        )
 
     if table in ("clusters", "all"):
         # Query clusters in parallel
         with console.status("Fetching clusters status..."):
             clusters_status: list[ClusterStatus] = [
-                d for d in await asyncio.gather(*(get_cluster_status(c) for c in clusters))
+                d
+                for d in await asyncio.gather(
+                    *(get_cluster_status(c, disabled_clusters) for c in clusters)
+                )
             ]
 
         # Show a tip message if all clusters are offline.
@@ -559,7 +589,7 @@ async def status(table: str) -> None:
                 )
             )
 
-        console.print(_build_cluster_table(clusters_status, clusters_job_stats))
+        console.print(_build_cluster_table(clusters_status, clusters_job_stats, disabled_clusters))
         console.print(_build_legend())
         console.print()
 

@@ -45,9 +45,6 @@ class PartialClusterConfig:
     project_dir: str | None = None
     """Path where the project should be cloned on this cluster."""
 
-    ignore: bool = False
-    """Whether to ignore this cluster when running commands on all clusters."""
-
 
 @dataclass(frozen=True)
 class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
@@ -80,9 +77,6 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
 
     project_dir: PathType | None
     """Path where the project should be cloned on this cluster."""
-
-    ignore: bool
-    """Whether to ignore this cluster when running commands on all clusters."""
 
 
 @dataclass(frozen=True)
@@ -151,7 +145,7 @@ class CluvConfig(BaseModel):
 
     @property
     def clusters_names(self) -> list[str]:
-        return [name for name, config in self.clusters.items() if not config.ignore]
+        return list(self.clusters.keys())
 
     def get_cluster_config(self, cluster: str) -> ClusterConfig:
         """Returns the cluster config for a specific cluster.
@@ -174,7 +168,6 @@ class CluvConfig(BaseModel):
             datasets_path=PurePosixPath(datasets_path) if datasets_path else None,
             job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
             project_dir=PurePosixPath(project_dir) if project_dir else None,
-            ignore=cluster_config.ignore,
         )
 
 

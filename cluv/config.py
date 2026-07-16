@@ -200,13 +200,11 @@ def set_local_env_vars(env_vars: dict[str, str]) -> None:
             value = new_value
         if key in os.environ:
             logger.warning(
-                "Overwriting local env var %s=%s with value from [tool.cluv.local.env] %s",
-                key,
-                os.environ[key],
-                value,
+                f"Overwriting local env var {key}={os.environ[key]} "
+                rf"with value from \[tool.cluv.local.env] {value}"
             )
         else:
-            logger.info("Setting local env var %s=%s from [tool.cluv.local.env]", key, value)
+            logger.info(rf"Setting local env var {key}={value} from \[tool.cluv.local.env]")
         os.environ[key] = value
 
 

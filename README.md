@@ -74,4 +74,3 @@ Add a `[tool.cluv]` section to the `pyproject.toml` of your project to manage th
 The command `cluv init` will add a default config if it doesn't already exists in the `.toml`.
 
 See the config at the project root for an example, or refer to the [docs](https://mila-iqia.github.io/cluv/).
-

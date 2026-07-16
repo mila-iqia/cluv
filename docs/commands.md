@@ -11,7 +11,7 @@ cluv <command> [options]
 
 **Commands**
 
-[`cluv init`](#cluv-init) 
+[`cluv init`](#cluv-init)
 
 Initialize a project.
 {: .indent }
@@ -75,7 +75,7 @@ Increase logging verbosity. Can be repeated: `-v` shows info-level logs, `-vv` (
 Disable command output. Has no effect on `cluv status`.
 {: .indent }
 
-## [`cluv init`](#cluv-init) 
+## [`cluv init`](#cluv-init)
 
 Initialize a cluv project.
 
@@ -240,10 +240,10 @@ Show what would be deleted, without deleting anything.
 Show the status of clusters and jobs.
 
 The `clusters` table shows each cluster's live GPU availability and storage usage, along with
-counts of your running/pending/failed/completed cluv jobs on that cluster. 
+counts of your running/pending/failed/completed cluv jobs on that cluster.
 
 The `jobs` table shows jobs submitted with `cluv submit` (from the local job cache), enriched with live Slurm
-status, wait time, and elapsed time. 
+status, wait time, and elapsed time.
 
 Requires an active connection (see [`cluv login`](#cluv-login)) to fetch live data for a cluster; otherwise it is shown as disconnected.
 

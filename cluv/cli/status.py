@@ -400,7 +400,7 @@ def _build_cluster_table(
 def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobInfo]) -> Table:
     """Build the jobs overview table with one row per cached job, enriched with live status info."""
     table = Table(
-        title="Jobs Overview",
+        title="Cluv Jobs Overview",
         box=box.SIMPLE_HEAVY,
         header_style="bold white on #1a1a2e",
         title_style="bold cyan",

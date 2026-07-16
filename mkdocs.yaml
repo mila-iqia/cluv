@@ -1,4 +1,4 @@
-site_name: cluv Documentation
+site_name: Cluv Documentation
 repo_name: mila-iqia/cluv
 repo_url: https://github.com/mila-iqia/cluv
 docs_dir: docs
@@ -31,6 +31,8 @@ theme:
     - navigation.expand
     - content.code.copy
     - content.code.annotate
+    - navigation.sections
+    - navigation.path
 extra_css:
   - stylesheets/extra.css
 markdown_extensions:

@@ -368,9 +368,8 @@ def _build_cluster_table(
         cluster_name = Text(c.name, style="bold magenta" if c.online else "bold bright_black")
         cluster_status = status + cluster_name + "\n"
 
-        if c.name in disabled_clusters:
-            disabled_clusters_info = disabled_clusters.get(c.name)
-            if disabled_clusters_info and disabled_clusters_info.disabled_until:
+        if disabled_clusters_info := disabled_clusters.get(c.name):
+            if disabled_clusters_info.disabled_until:
                 cluster_status += Text(
                     f"Disabled\n({format_remaining(disabled_clusters_info.disabled_until)})"
                 )

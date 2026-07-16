@@ -49,7 +49,7 @@ cluv submit mila job.sh
 
 ## Documentation
 
-* Cluv is documented at [https://mila-iqia.github.io/cluv/](https://mila-iqia.github.io/cluv/).
+* Cluv is documented at https://mila-iqia.github.io/cluv/.
 * **Command line help** : Use `cluv --help` or `cluv <command> --help`.
 * **Examples** : See the [examples](examples) folder for sample projects using cluv. Each example includes a README with instructions specific to that project.
 

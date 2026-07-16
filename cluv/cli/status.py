@@ -120,9 +120,15 @@ disk-quota 2>/dev/null; echo {_SEP}
 _MILA_CLUSTERS = {"mila"}
 
 
-async def fetch_live_job_info(cluster: str, job_ids: list[int]) -> dict[int, LiveJobInfo]:
+async def fetch_live_job_info(
+    cluster: str, job_ids: list[int], disabled_clusters: list[str]
+) -> dict[int, LiveJobInfo]:
     """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
     start_time = datetime.now()
+
+    if cluster in disabled_clusters:
+        logger.info(f"[bold]{cluster}[/bold] is disabled; skipping jobs")
+        return {}
 
     remote = await get_remote_without_2fa_prompt(cluster)
     if remote is None and cluster != current_cluster():
@@ -204,7 +210,7 @@ async def get_cluster_status(cluster: str, disabled_clusters: list[str]) -> Clus
     start_time = datetime.now()
 
     if cluster in disabled_clusters:
-        logger.info(f"Skipping [bold]{cluster}[/bold]; returning empty status")
+        logger.info(f"[bold]{cluster}[/bold] is disabled; returning empty status")
         return get_default_cluster_status(cluster)
 
     # Use get_remote_without_2fa_prompt directly so we never filter out the
@@ -366,10 +372,10 @@ def _build_cluster_table(
             disabled_clusters_info = disabled_clusters.get(c.name)
             if disabled_clusters_info and disabled_clusters_info.disabled_until:
                 cluster_status += Text(
-                    f"Disabled ({format_remaining(disabled_clusters_info.disabled_until)} remaining)"
+                    f"Disabled\n({format_remaining(disabled_clusters_info.disabled_until)})"
                 )
             else:
-                cluster_status += Text("Disabled (indefinitely)")
+                cluster_status += Text("Disabled")
 
         job_stats = clusters_job_stats.get(
             c.name, ClusterJobStats(running=0, cancelled=0, completed=0, pending=0)
@@ -480,8 +486,7 @@ def _build_legend() -> Panel:
 
 
 async def get_job_infos(
-    cached_jobs: list[Job],
-    clusters: list[str],  # , disabled_clusters: list[str]
+    cached_jobs: list[Job], clusters: list[str], disabled_clusters: list[str]
 ) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
     # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
@@ -495,7 +500,7 @@ async def get_job_infos(
 
     # Fetch live job info for all cached jobs
     results = await asyncio.gather(
-        *(fetch_live_job_info(c, ids) for c, ids in cluster_jobs.items())
+        *(fetch_live_job_info(c, ids, disabled_clusters) for c, ids in cluster_jobs.items())
     )
     live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
 
@@ -550,12 +555,13 @@ async def status(table: str) -> None:
 
     clusters = get_cluv_config().clusters_names
     disabled_clusters = get_disabled_clusters()
+    disabled_keys = list(disabled_clusters.keys())
 
     # Load cached jobs
     cached_jobs = load_jobs()
 
     with console.status("Fetching jobs status..."):
-        jobs_status, clusters_job_stats = await get_job_infos(cached_jobs, clusters)
+        jobs_status, clusters_job_stats = await get_job_infos(cached_jobs, clusters, disabled_keys)
 
     if table in ("clusters", "all"):
         # Query clusters in parallel
@@ -563,7 +569,7 @@ async def status(table: str) -> None:
             clusters_status: list[ClusterStatus] = [
                 d
                 for d in await asyncio.gather(
-                    *(get_cluster_status(c, disabled_clusters.keys()) for c in clusters)
+                    *(get_cluster_status(c, disabled_keys) for c in clusters)
                 )
             ]
 

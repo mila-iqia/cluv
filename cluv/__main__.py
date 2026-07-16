@@ -20,6 +20,7 @@ import rich.logging
 import rich_argparse
 import simple_parsing
 
+from .cli.clean import clean
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run
@@ -70,6 +71,9 @@ def main(argv: list[str] | None = None) -> None:
 
     sync_parser = add_sync_args(subparsers)
     _add_v_arg(sync_parser)
+
+    clean_parser = add_clean_args(subparsers)
+    _add_v_arg(clean_parser)
 
     submit_parser = add_submit_args(subparsers)
     _add_v_arg(submit_parser)
@@ -225,6 +229,37 @@ def add_sync_args(subparsers: Subparsers):
     # )
     sync_parser.set_defaults(func=sync)
     return sync_parser
+
+
+def add_clean_args(subparsers: Subparsers):
+    clean_parser = subparsers.add_parser(
+        "clean",
+        help="Remove run results from clusters that have been deleted from the local results dir.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    clean_parser.add_argument(
+        "clusters",
+        nargs="*",
+        default=None,
+        metavar="<cluster>",
+        help=(
+            "The cluster(s) to clean. Leave empty to clean every currently logged in cluster "
+            "that has been synced before."
+        ),
+    )
+    clean_parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Skip the confirmation prompt.",
+    )
+    clean_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deleted, without deleting anything.",
+    )
+    clean_parser.set_defaults(func=clean)
+    return clean_parser
 
 
 def add_login_args(subparsers: Subparsers):

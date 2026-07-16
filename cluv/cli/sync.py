@@ -28,7 +28,7 @@ from cluv.cli.disable import print_disabled_clusters
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config, load_cluv_config
 from cluv.job import get_datasets_path
-from cluv.remote import Remote, get_ssh_options_for_host, run
+from cluv.remote import Remote, get_ssh_options_for_host, list_remote_run_dirs, run
 from cluv.utils import console, console_lock, current_cluster
 
 milatools.cli.console = console
@@ -197,11 +197,17 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
 
     num_tasks = 5 if config.data_source else 4
 
-    cache = read_cache()
-    project_state = cache.project_states.setdefault(cluster, ProjectStateOnCluster())
+    project_state = read_cache().project_states.get(cluster) or ProjectStateOnCluster()
 
     def _save():
-        assert cache.project_states[cluster] is project_state
+        # Re-read the cache right before writing, instead of reusing the snapshot read at the
+        # top of this function: multiple clusters' sync_task_function calls run concurrently in
+        # the same event loop, each starting from its own initial read, so writing back a stale
+        # full snapshot would clobber other clusters' updates. read_cache/write_cache are
+        # synchronous (no `await` in between), so this merge-and-write is atomic with respect to
+        # the other concurrently-running cluster tasks.
+        cache = read_cache()
+        cache.project_states[cluster] = project_state
         write_cache(cache)
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
@@ -217,7 +223,8 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     _save()
 
     _update_progress(3, "Fetching results", num_tasks)
-    new_runs = await fetch_results(remote, config)
+    new_runs = await fetch_results(remote, config, project_state)
+    _save()
 
     if config.data_source:
         _update_progress(4, "Syncing datasets", num_tasks)
@@ -579,11 +586,13 @@ async def _push_datasets_to_remote(
     project_state.last_pushed_datasets = last_push_datetime
 
 
-async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
+async def fetch_results(
+    remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
+) -> list[Path]:
     """Fetches results from a remote cluster to local using rsync via the results symlink.
 
     Returns the list of newly-synced run directories (those that did not exist locally before
-    the rsync ran).
+    the rsync ran). Also updates `project_state.last_fetch_watermark` (see `cluv clean`).
     """
     results_path_here = Path(os.path.expandvars(config.results_path))
     results_path_here.mkdir(parents=True, exist_ok=True)
@@ -629,6 +638,10 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
         warn=True,
         hide=False,
     )
+
+    remote_runs = await list_remote_run_dirs(remote, results_path_on_cluster)
+    if remote_runs:
+        project_state.last_fetch_watermark = max(mtime for _, mtime in remote_runs)
 
     if not results_path_here.exists():
         return []

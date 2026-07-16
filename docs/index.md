@@ -5,12 +5,22 @@ This is a quick overview. For more information, check out the [introduction](gui
 
 ## Installation
 
-1. (optional) Install UV: https://docs.astral.sh/uv/getting-started/installation/
+Add the package to your project with `uv add` or `pip install`:
 
-2. Install this package:
+```console
+uv add cluster-uv
+```
+
+Install as a command-line tool in an isolated environment:
 
 ```console
 uv tool install cluster-uv
+```
+
+If you want the bleeding edge version from GitHub, use:
+
+```console
+uv add git+https://github.com/mila-iqia/cluv
 ```
 
 ## Usage

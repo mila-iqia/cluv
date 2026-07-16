@@ -24,11 +24,9 @@ What it adds on top of Submitit:
 
 Add the `hydra` extra when installing cluv:
 
-```console
-uv add git+https://github.com/mila-iqia/cluv --extra hydra
+```bash
+uv add cluster-uv[hydra]
 ```
-
-Cluv isn't published on PyPI yet. Once it is, you will be able to just `uv add cluv[hydra]`.
 
 
 ## Configure your project

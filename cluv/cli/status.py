@@ -121,7 +121,9 @@ _MILA_CLUSTERS = {"mila"}
 
 
 async def fetch_live_job_info(
-    cluster: str, job_ids: list[int], disabled_clusters: list[str]
+    cluster: str,
+    job_ids: list[int],
+    disabled_clusters: dict[str, DisabledCluster],
 ) -> dict[int, LiveJobInfo]:
     """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
     start_time = datetime.now()
@@ -201,7 +203,10 @@ async def fetch_live_job_info(
     return jobs
 
 
-async def get_cluster_status(cluster: str, disabled_clusters: list[str]) -> ClusterStatus:
+async def get_cluster_status(
+    cluster: str,
+    disabled_clusters: dict[str, DisabledCluster],
+) -> ClusterStatus:
     """Fetch live Slurm data from a remote cluster and return a ClusterStatus.
 
     Uses a single SSH round-trip. Falls back gracefully when commands are
@@ -485,7 +490,9 @@ def _build_legend() -> Panel:
 
 
 async def get_job_infos(
-    cached_jobs: list[Job], clusters: list[str], disabled_clusters: list[str]
+    cached_jobs: list[Job],
+    clusters: list[str],
+    disabled_clusters: dict[str, DisabledCluster],
 ) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
     # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
@@ -554,13 +561,14 @@ async def status(table: str) -> None:
 
     clusters = get_cluv_config().clusters_names
     disabled_clusters = get_disabled_clusters()
-    disabled_keys = list(disabled_clusters.keys())
 
     # Load cached jobs
     cached_jobs = load_jobs()
 
     with console.status("Fetching jobs status..."):
-        jobs_status, clusters_job_stats = await get_job_infos(cached_jobs, clusters, disabled_keys)
+        jobs_status, clusters_job_stats = await get_job_infos(
+            cached_jobs, clusters, disabled_clusters
+        )
 
     if table in ("clusters", "all"):
         # Query clusters in parallel
@@ -568,7 +576,7 @@ async def status(table: str) -> None:
             clusters_status: list[ClusterStatus] = [
                 d
                 for d in await asyncio.gather(
-                    *(get_cluster_status(c, disabled_keys) for c in clusters)
+                    *(get_cluster_status(c, disabled_clusters) for c in clusters)
                 )
             ]
 

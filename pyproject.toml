@@ -112,10 +112,10 @@ results_symlink = "logs"
 # project_dir = "$HOME/<project_name>"
 
 ## Where to read the data from when synchronizing data to all clusters.
-#data_source = "<cluster>:<dataset_path_on_the_cluster>"
+# data_source = "<cluster>:<dataset_path_on_the_cluster>"
 
 ## Where the dataset should be replicated on all clusters.
-#datasets_path = "<path_to_copy_datasets_on_all_clusters>"
+# datasets_path = "<path_to_copy_datasets_on_all_clusters>"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
@@ -124,7 +124,7 @@ UV_OFFLINE = "1"
 WANDB_MODE = "offline"
 
 [tool.cluv.local]
-## Settings (environment variables) applied when using cluv on a local machine (not on a Slurm cluster).
+# Settings (environment variables) applied when using cluv on a local machine (not on a Slurm cluster).
 # Fake "$SCRATCH" directory to use when not on a Slurm cluster.
 # (this makes the examples runnable either from a laptop or from a Slurm cluster.
 env = { SCRATCH = "$HOME/scratch" }

@@ -17,7 +17,7 @@ In early development. Commands are functional, but expect bugs or missing featur
 
 To add `cluv` to your project, use `uv add` or `pip install`:
 ```bash
-uv tool install cluster-uv
+uv add cluster-uv
 ```
 
 To also include the Cluv Hydra launcher:

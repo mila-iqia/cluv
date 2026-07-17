@@ -25,6 +25,7 @@ def init(path: Path | None = None) -> None:
     * Runs `uv init --package --build-backend hatch --python 3.13` to initialize a new uv project
       in the current directory (if there isn't one already).
     * Adds a default configuration for Cluv in the `[tool.cluv]` section of pyproject.toml.
+    * Adds job script templates in the `scripts/` directory of the project.
     """
     console.print()
     console.rule("[bold cyan]cluv init[/bold cyan]")
@@ -86,7 +87,7 @@ def init(path: Path | None = None) -> None:
 
 def check_home_dir() -> None:
     """
-    Check if the current directory is under the home directory. If not, raise an error and exit.
+    Check if the current directory is under the home directory. If not, raise an error.
     """
     if Path.cwd().is_relative_to(Path.home()):
         console.print("✅ Current directory is under home directory.", style="green")
@@ -169,10 +170,12 @@ def check_git() -> None:
         raise RuntimeError("Error when checking git remote: ", git_remote.stderr)
 
 
-def check_symlink_to_scratch(project_root: Path, results_path: str, results_symlink: str) -> None:
+def check_symlink_to_scratch(project_path: Path, results_path: str, results_symlink: str) -> None:
     """
-    Check if a symlink from the results_path in the project in $HOME to the corresponding path in $SCRATCH already exists. If not, create it.
-    The symlink should be like : $HOME/<project>/<results_symlink> -> $SCRATCH/<results_path>/<project_name>
+    Check if a symlink from the results_path in the project in $HOME to the corresponding path in
+    $SCRATCH already exists. If not, create it.
+
+    The symlink should be : <project_path>/<results_symlink> -> <results_path>
     """
     if "SCRATCH" not in os.environ:
         console.print(
@@ -182,7 +185,7 @@ def check_symlink_to_scratch(project_root: Path, results_path: str, results_syml
 
     # Generate the expected scratch and symlink path
     scratch_path = Path(os.path.expandvars(results_path))
-    symlink_path = project_root / results_symlink
+    symlink_path = project_path / results_symlink
 
     if symlink_path.is_symlink():
         if symlink_path.resolve() == scratch_path.resolve():
@@ -205,7 +208,8 @@ def check_symlink_to_scratch(project_root: Path, results_path: str, results_syml
 
 def check_ssh_hostnames(clusters: list[str]) -> None:
     """
-    Check if the names of the clusters in the cluv config are present in the SSH config file. If not, print a warning.
+    Check if the names of the clusters in the cluv config are present in the SSH config file.
+    If not, print a warning.
     """
     ssh_hostnames = get_ssh_hostnames()
     missing_clusters = set(clusters).difference(ssh_hostnames)
@@ -282,7 +286,7 @@ def check_job_script(project_root: Path, results_path: str) -> None:
         console.print(f"Adding job template script at '{script_path}'.")
 
 
-def _load_cluv_config_template(project_name: str) -> str:
+def _load_cluv_config_template() -> str:
     pyproject_template_path = _get_pyproject_template_path()
     pyproject_lines = pyproject_template_path.read_text().splitlines()
     start = next(
@@ -305,7 +309,6 @@ def _load_cluv_config_template(project_name: str) -> str:
 
 
 def _update_clug_config_template(template_config: str, project_name: str) -> str:
-    # Replace the results_path
     return template_config.replace(DEFAULT_RESULTS_PATH, f"$SCRATCH/logs/{project_name}")
 
 

@@ -89,10 +89,10 @@ def check_home_dir() -> None:
     Check if the current directory is under the home directory. If not, raise an error and exit.
     """
     if Path.cwd().is_relative_to(Path.home()):
-        console.print("[green]✅ Current directory is under home directory.[/green]")
+        console.print("✅ Current directory is under home directory.", style="green")
     else:
         console.print(
-            "[red]❌ cluv init should be run in a directory under your home directory.[/red]"
+            "❌ cluv init should be run in a directory under your home directory.", style="red"
         )
         raise RuntimeError("cluv init should be run in a directory under your home directory.")
 
@@ -126,7 +126,7 @@ def check_cluv_config(pyproject_path: Path) -> None:
     If not, add a default config section with the default clusters and settings.
     """
     if has_cluv_config(pyproject_path):
-        console.print("[green]✅ Project already have a cluv config in pyproject.toml.[/green]")
+        console.print("✅ Project already have a cluv config in pyproject.toml.", style="green")
         return
 
     console.print(
@@ -155,14 +155,16 @@ def check_git() -> None:
     if git_remote.returncode == 0:
         if git_remote.stdout.strip() == "":
             console.print(
-                "[yellow]⚠️  Warning: No git remote found. You won't be able to use some features (like syncing or submitting jobs). Consider adding a remote repository to your git config.[/yellow]"
+                "⚠️  Warning: No git remote found. You won't be able to use some features "
+                "(like syncing or submitting jobs). Consider adding a remote repository to your git config.",
+                style="yellow",
             )
         else:
             console.print(
-                f"[green]✅ Git remote repository found: {git_remote.stdout.strip()}[/green]"
+                f"✅ Git remote repository found: {git_remote.stdout.strip()}", style="green"
             )
     else:
-        console.print("[red]❌ Invalid git repository found.[/red]")
+        console.print("❌ Invalid git repository found.", style="red")
         raise RuntimeError("Error when checking git remote: ", git_remote.stderr)
 
 
@@ -173,7 +175,7 @@ def check_symlink_to_scratch(project_root: Path, results_path: str, results_syml
     """
     if "SCRATCH" not in os.environ:
         console.print(
-            "[yellow]⚠️  Warning: $SCRATCH variable not set. Skipping symlink creation.[/yellow]"
+            "⚠️  Warning: $SCRATCH variable not set. Skipping symlink creation.", style="yellow"
         )
         return
 
@@ -184,12 +186,14 @@ def check_symlink_to_scratch(project_root: Path, results_path: str, results_syml
     if symlink_path.is_symlink():
         if symlink_path.resolve() == scratch_path.resolve():
             console.print(
-                "[green]✅ Symlink from $HOME results_path to $SCRATCH already exists.[/green]"
+                "✅ Symlink from $HOME results_path to $SCRATCH already exists.", style="green"
             )
             return
         else:
             console.print(
-                f"[yellow]⚠️  Warning: Symlink from {symlink_path} points to an other path ({symlink_path.resolve()}) than the expected scratch path.[/yellow]"
+                f"⚠️  Warning: Symlink from {symlink_path} points to an other path "
+                f"({symlink_path.resolve()}) than the expected scratch path.",
+                style="yellow",
             )
             return
     else:
@@ -207,13 +211,15 @@ def check_ssh_hostnames(clusters: list[str]) -> None:
 
     if len(missing_clusters) > 0:
         console.print(
-            f"[yellow]⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. Try to run [bold]mila init[/bold] to add all available clusters.[/yellow]"
+            f"⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. "
+            "Try to run [bold]mila init[/bold] to add all available clusters.",
+            style="yellow",
         )
         for cluster in missing_clusters:
-            console.print(f"[yellow]    - {cluster}[/yellow]")
+            console.print(f"    - {cluster}", style="yellow")
     else:
         console.print(
-            "[green]✅ All clusters in the cluv config are present in your SSH config.[/green]"
+            "✅ All clusters in the cluv config are present in your SSH config.", style="green"
         )
 
 
@@ -232,7 +238,7 @@ def check_job_script(project_root: Path, results_path: str) -> None:
     script_templates = sorted(script_templates_path.glob("*.sh"))
 
     if not script_templates:
-        console.print("[yellow]⚠️  Warning: No script templates found.[/yellow]")
+        console.print("⚠️  Warning: No script templates found.", style="yellow")
         return
 
     scripts_dir.mkdir(parents=True, exist_ok=True)
@@ -240,7 +246,7 @@ def check_job_script(project_root: Path, results_path: str) -> None:
         script_path = scripts_dir / script_template.name
         if script_path.exists():
             console.print(
-                f"[green]✅ Job template script already exists at '{script_path}'.[/green]"
+                f"✅ Job template script already exists at '{script_path}'.", style="green"
             )
             continue
         script_content = script_template.read_text()

@@ -131,6 +131,21 @@ class TestSymlinkCheck:
         assert expected_results_symlink.resolve() == (tmp_path / "some_other_folder").resolve()
         assert not expected_results_scratch_path.exists()
 
+    def test_keep_existing_results_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """check_symlink_to_scratch() should not replace an existing results directory."""
+        scratch_path = tmp_path / "scratch"
+        monkeypatch.setenv("SCRATCH", str(scratch_path))
+        results_directory = tmp_path / DEFAULT_RESULTS_LINKNAME
+        results_directory.mkdir()
+
+        check_symlink_to_scratch(tmp_path, DEFAULT_RESULTS_PATH, DEFAULT_RESULTS_LINKNAME)
+
+        assert results_directory.is_dir()
+        assert not results_directory.is_symlink()
+        assert not Path(os.path.expandvars(DEFAULT_RESULTS_PATH)).exists()
+
 
 class TestJobScriptCheck:
     def test_keep_existing_job_script(self, tmp_path: Path) -> None:

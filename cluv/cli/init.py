@@ -134,7 +134,7 @@ def check_cluv_config(pyproject_path: Path) -> None:
     )
     console.print("Adding config for cluv tool :")
 
-    cluv_config = _load_cluv_config_template()
+    cluv_config = _load_cluv_config_template(pyproject_path.parent.name)
     add_cluv_config_section(pyproject_path, cluv_config)
 
 
@@ -281,7 +281,7 @@ def check_job_script(project_root: Path, results_path: str) -> None:
         console.print(f"Adding job template script at '{script_path}'.")
 
 
-def _load_cluv_config_template() -> str:
+def _load_cluv_config_template(project_name: str) -> str:
     pyproject_template_path = _get_pyproject_template_path()
     pyproject_lines = pyproject_template_path.read_text().splitlines()
     start = next(
@@ -300,7 +300,11 @@ def _load_cluv_config_template() -> str:
         ),
         len(pyproject_lines),
     )
-    return "\n".join(pyproject_lines[start:end]).strip() + "\n"
+    template = "\n".join(pyproject_lines[start:end]).strip() + "\n"
+    return template.replace(
+        f'results_path = "{DEFAULT_RESULTS_PATH}"',
+        f'results_path = "$SCRATCH/logs/{project_name}"',
+    )
 
 
 def _get_script_templates_path() -> Path:

@@ -40,7 +40,6 @@ def init(path: Path | None = None) -> None:
     # Try to run "uv init" to create a new project
     console.print()
     console.print("Initializing uv project: running [bold]uv init[/bold]...")
-    console.log("uv init --package --build-backend hatch --python 3.13")
     run_uv_init()
 
     # Check status of the git repository
@@ -99,22 +98,26 @@ def check_home_dir() -> None:
 
 
 def run_uv_init() -> None:
-    uv_init = subprocess.run(
-        ["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"],
-        capture_output=True,
-        text=True,
-    )
+    """
+    Try to run the uv init command. If the command fails because a pyproject.toml file
+    already exists,continue. Otherwise, raise an error.
+    """
+    command = ["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"]
+    console.log(" ".join(command))
+
+    uv_init = subprocess.run(command, capture_output=True, text=True)
 
     # An expected error is that uv fails if a pyproject.toml file already exists
     if uv_init.returncode == 2:
         if uv_init.stderr.endswith("(`pyproject.toml` file exists)\n"):
             console.print(
-                "[green]✅ uv: a project already exists (see pyproject.toml file). Skipping initialization.[/green]"
+                "✅ uv: a project already exists (see pyproject.toml file). Skipping initialization.",
+                style="green",
             )
         else:
             raise RuntimeError("Error occurred while initializing uv project: ", uv_init.stderr)
     else:
-        console.print("[green]✅ uv: project initialized.[/green]")
+        console.print("✅ uv: project initialized.", style="green")
 
 
 def check_cluv_config(pyproject_path: Path) -> None:

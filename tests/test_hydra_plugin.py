@@ -80,7 +80,8 @@ def test_hydra_launcher_is_discoverable(
     launcher_config.write_text(
         textwrap.dedent(
             """\
-            defaults: cluv_launcher
+            defaults:
+              - cluv_launcher
             cluster: mila
             """
         )
@@ -107,7 +108,15 @@ def test_hydra_launcher_is_discoverable(
     assert "hydra_plugins.hydra_submitit_launcher.submitit_launcher" in output
     assert "hydra_plugins.cluv.cluv_launcher" in output
 
-    # output = subprocess.check_output(
-    #     "uv run python main.py -m hydra/launcher=cluv_mila", shell=True
-    # )
-    # assert False, output
+    error = subprocess.run(
+        "uv run python main.py -m hydra/launcher=cluv_mila",
+        shell=True,
+        text=True,
+        capture_output=True,
+    ).stderr
+    assert f"RuntimeError: No cluv config in {pyproject_file} file." in error
+
+    error = subprocess.run("cluv init", capture_output=True, text=True, shell=True).stderr
+    assert (
+        "RuntimeError: cluv init should be run in a directory under your home directory." in error
+    )

@@ -25,11 +25,18 @@ import pytest
     [
         pytest.param(
             "pypi",
+            # TODO: Remove this mark after the fix PR #145 is merged and a new PyPI release is made.
             marks=pytest.mark.xfail(
                 reason="The 'hydra' extra isn't available on the PyPI release yet."
             ),
         ),
-        "github",
+        pytest.param(
+            "github",
+            # TODO: Remove this mark after the fix PR #145 is merged.
+            marks=pytest.mark.xfail(
+                reason="The GitHub master branch doesn't include the fix yet."
+            ),
+        ),
         "source",
     ],
 )

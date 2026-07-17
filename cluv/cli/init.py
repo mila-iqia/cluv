@@ -200,6 +200,11 @@ def check_symlink_to_scratch(project_path: Path, results_path: str, results_syml
                 style="yellow",
             )
             return
+    elif symlink_path.exists():
+        console.print(
+            f"[yellow]⚠️  Warning: {symlink_path} already exists and is not a symlink.[/yellow]"
+        )
+        return
     else:
         console.print(f"Creating symlink from {symlink_path} to {scratch_path}")
         scratch_path.mkdir(parents=True, exist_ok=True)

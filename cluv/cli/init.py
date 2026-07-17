@@ -134,7 +134,8 @@ def check_cluv_config(pyproject_path: Path) -> None:
     )
     console.print("Adding config for cluv tool :")
 
-    cluv_config = _load_cluv_config_template(pyproject_path.parent.name)
+    cluv_config_template = _load_cluv_config_template()
+    cluv_config = _update_clug_config_template(cluv_config_template, pyproject_path.parent.name)
     add_cluv_config_section(pyproject_path, cluv_config)
 
 
@@ -300,11 +301,12 @@ def _load_cluv_config_template(project_name: str) -> str:
         ),
         len(pyproject_lines),
     )
-    template = "\n".join(pyproject_lines[start:end]).strip() + "\n"
-    return template.replace(
-        f'results_path = "{DEFAULT_RESULTS_PATH}"',
-        f'results_path = "$SCRATCH/logs/{project_name}"',
-    )
+    return "\n".join(pyproject_lines[start:end]).strip() + "\n"
+
+
+def _update_clug_config_template(template_config: str, project_name: str) -> str:
+    # Replace the results_path
+    return template_config.replace(DEFAULT_RESULTS_PATH, f"$SCRATCH/logs/{project_name}")
 
 
 def _get_script_templates_path() -> Path:

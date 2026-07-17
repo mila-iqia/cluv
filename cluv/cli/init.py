@@ -101,7 +101,7 @@ def check_home_dir() -> None:
 def run_uv_init() -> None:
     """
     Try to run the uv init command. If the command fails because a pyproject.toml file
-    already exists,continue. Otherwise, raise an error.
+    already exists, continue. Otherwise, raise an error.
     """
     command = ["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"]
     console.log(" ".join(command))
@@ -202,7 +202,7 @@ def check_symlink_to_scratch(project_path: Path, results_path: str, results_syml
             return
     elif symlink_path.exists():
         console.print(
-            f"[yellow]⚠️  Warning: {symlink_path} already exists and is not a symlink.[/yellow]"
+            f"⚠️  Warning: {symlink_path} already exists and is not a symlink.", style="yellow"
         )
         return
     else:
@@ -292,6 +292,9 @@ def check_job_script(project_root: Path, results_path: str) -> None:
 
 
 def _load_cluv_config_template() -> str:
+    """
+    Load the [tool.cluv] section from the pyproject.toml template file.
+    """
     pyproject_template_path = _get_pyproject_template_path()
     pyproject_lines = pyproject_template_path.read_text().splitlines()
     start = next(
@@ -314,10 +317,17 @@ def _load_cluv_config_template() -> str:
 
 
 def _update_clug_config_template(template_config: str, project_name: str) -> str:
+    """
+    Update the template cluv config with the project info.
+    """
     return template_config.replace(DEFAULT_RESULTS_PATH, f"$SCRATCH/logs/{project_name}")
 
 
 def _get_script_templates_path() -> Path:
+    """
+    Get the path to the folder with the job script templates for cluv init, either from the source
+    repository or from the installed package.
+    """
     checked_paths = [REPO_ROOT / "scripts", PACKAGE_ROOT / "templates" / "scripts"]
     for script_templates_path in checked_paths:
         if script_templates_path.exists():
@@ -329,6 +339,10 @@ def _get_script_templates_path() -> Path:
 
 
 def _get_pyproject_template_path() -> Path:
+    """
+    Get the path to the pyproject.toml template file for cluv init, either from the source
+    repository or from the installed package.
+    """
     checked_paths = [REPO_ROOT / "pyproject.toml", PACKAGE_ROOT / "templates" / "pyproject.toml"]
     for pyproject_template_path in checked_paths:
         if pyproject_template_path.exists():

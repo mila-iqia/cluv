@@ -57,6 +57,11 @@ def test_hydra_launcher_is_discoverable(
 
     repo_root = Path.cwd()
     monkeypatch.chdir(project_dir)
+    # Isolate from the environment cluv is being tested in: `uv run pytest` exports
+    # VIRTUAL_ENV pointing at the repo venv. `uv run`/`uv add` warn and ignore a
+    # mismatched VIRTUAL_ENV (they use the project's own .venv), but `uv pip list`
+    # silently honors it, so it would list the repo venv instead of this project's.
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
 
     pyproject_file = project_dir / "pyproject.toml"
     (project_dir / "main.py").write_text(

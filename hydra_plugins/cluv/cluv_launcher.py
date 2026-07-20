@@ -25,6 +25,7 @@ import rich
 import rich.box
 import rich.live
 import rich.table
+import submitit.core.utils
 from hydra.core.utils import JobReturn, JobStatus
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
@@ -597,8 +598,8 @@ def _jobs_to_hydra_jobreturn_format(
 ) -> list[JobReturn]:
     job_returns: list[JobReturn] = []
     for job in job_infos:
-        for _task_id, run in enumerate(job.tasks):
-            out = next(
+        for task_id, run in enumerate(job.tasks):
+            output_file = next(
                 (
                     find_pyproject().parent
                     / Path(get_cluv_config().results_symlink)
@@ -607,11 +608,11 @@ def _jobs_to_hydra_jobreturn_format(
                 run.results_path,
             )
             try:
-                out = out.relative_to(Path.cwd())
+                output_file = output_file.relative_to(Path.cwd())
             except ValueError:
                 pass
 
-            logger.info(f"Run {run.run_id} finished ({job.state}): Output: {out}")
+            logger.info(f"Run {run.run_id} finished ({job.state}): Output: {output_file}")
             job_status = JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED
             job_returns.append(
                 JobReturn(
@@ -619,8 +620,16 @@ def _jobs_to_hydra_jobreturn_format(
                     working_dir=str(run.results_path),
                     status=job_status,
                     _return_value=(
-                        RuntimeError(
-                            f"Job {run.run_id} failed, see the output file {out} for more info."
+                        # submitit.core.utils.FailedJobError(
+                        #     f"Job {run.run_id} failed, see the output file {out} for more info."
+                        # )
+                        # Mimick the output produced by the submitit launcher in case of error, which includes the error file.
+                        submitit.core.utils.FailedJobError(
+                            f"Job (task={task_id}) failed during processing with trace:\n"
+                            f"----------------------\n{output_file.read_text()}\n"
+                            "----------------------\n"
+                            f"You can check full logs with 'job.stderr({task_id})' and 'job.stdout({task_id})'"
+                            f"or at paths:\n  - {output_file}\n"
                         )
                         if job_status is JobStatus.FAILED
                         else None

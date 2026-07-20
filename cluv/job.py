@@ -86,12 +86,26 @@ class JobInfo:
 
     @property
     def state(self):
+        """Reuse the state polling logic from submitit to get the state of the job.
+
+        Note: This doesn't call sacct too often, there is a caching mechanism in submitit.
+        """
+
+        if self.cluster == current_cluster():
+            from submitit.slurm.slurm import SlurmJob
+
+            return SlurmJob(
+                # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
+                folder=self.tasks[0].results_path,
+                job_id=str(self.job_id),
+                tasks=list(range(len(self.tasks))),
+            ).state
         from remote_slurm_executor.slurm_remote import RemoteSlurmJob
 
-        # Note: This doesn't call sacct too often, there is a caching mechanism in submitit.
         return RemoteSlurmJob(
             self.cluster,
-            folder="",
+            # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
+            folder=self.tasks[0].results_path,
             job_id=str(self.job_id),
             tasks=list(range(len(self.tasks))),
             remote_dir_sync=None,  # type: ignore

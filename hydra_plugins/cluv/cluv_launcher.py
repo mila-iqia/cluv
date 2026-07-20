@@ -386,9 +386,9 @@ class CluvLauncher(Launcher):
     async def launch_jobs(
         self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
     ) -> list[JobReturn]:
-        assert self.cluv_config
-        assert self.cluster_remotes
-        assert self.task_function
+        assert self.cluv_config, "setup should have been called"
+        assert self.cluster_remotes, "setup should have been called"
+        assert self.task_function, "setup should have been called"
         cluster = self.cluster
         # NOTE: Assumes that passing "python path/to/script.py *overrides" to the job script will work.
         # (It does work for the example).
@@ -410,13 +410,20 @@ class CluvLauncher(Launcher):
                 for override in overrides
                 if not override.startswith(("hydra/launcher", "hydra.launcher", "launcher"))
             ]
-            # TODO: Perhaps setting hydra.mode=RUN explicitly would counteract this and disabling any launcher-related settings?
+            # TODO: Perhaps adding 'hydra.mode=RUN' explicitly would counteract this and disabling any launcher-related settings?
+            # Need to take a closer look and test out the combinations from https://hydra.cc/docs/1.3/tutorials/basic/running_your_app/multi-run/
             new_override = prefix + new_override  # + ["hydra.mode=RUN"]
             new_job_overrides.append(new_override)
         job_overrides = new_job_overrides
 
+        sbatch_args = convert_submitit_style_params_to_sbatch_flags(self.submitit_params)
+
         # TODO: Add job packing! :)
-        # if self.vram_gb:
+        # if self.packing:
+        #    assert self.vram_gb
+        #    requested_gpu_type = ...
+        #    gpu_vram = ...
+        #    ntasks_per_gpu = gpu_vram // self.vram_gb
         # _packing_factor = 5
         # self.params["ntasks_per_gpu"] = 5
         # pack the jobs based on their VRAM requirements and the packing factor
@@ -436,7 +443,6 @@ class CluvLauncher(Launcher):
                     f"{cluster} cluster."
                 )
 
-        sbatch_args = convert_submitit_style_params_to_sbatch_flags(self.submitit_params)
         job_infos = await run_sweep(
             job_commands=job_overrides,
             cluster=cluster,
@@ -446,11 +452,17 @@ class CluvLauncher(Launcher):
             autocommit=self.autocommit,
             sbatch_args=sbatch_args,
             chunking=self.checkpointing,
-            packing=self.vram_gb is not None,
+            packing=self.packing,
         )
-
-        job_returns = _jobs_to_hydra_jobreturn_format(job_infos, get_results_path())
-        rich.print(get_jobs_table(job_infos, get_results_path()))
+        results_path = get_results_path()
+        job_returns = _jobs_to_hydra_jobreturn_format(job_infos, results_path)
+        rich.print(
+            get_jobs_table(
+                job_infos,
+                results_path,
+                results_symlink_from_cluv_config=self.cluv_config.results_symlink,
+            )
+        )
         return job_returns
 
 
@@ -603,7 +615,9 @@ def _jobs_to_hydra_jobreturn_format(
     return job_returns
 
 
-def get_jobs_table(job_infos: list[JobInfo], local_results_dir: Path) -> rich.table.Table:
+def get_jobs_table(
+    job_infos: list[JobInfo], local_results_dir: Path, results_symlink_from_cluv_config: str
+) -> rich.table.Table:
     table = rich.table.Table(
         title="Jobs",
         box=rich.box.ROUNDED,
@@ -617,13 +631,13 @@ def get_jobs_table(job_infos: list[JobInfo], local_results_dir: Path) -> rich.ta
     table.add_column("Command", justify="right")
     table.add_column("State", justify="right")
     table.add_column("Output File", justify="right")
-    cluv_config = get_cluv_config()
+
     for job in job_infos:
         for task_id, run in enumerate(job.tasks):
             out = next(
                 (
                     find_pyproject().parent
-                    / Path(cluv_config.results_symlink)
+                    / Path(results_symlink_from_cluv_config)
                     / run.results_path.relative_to(local_results_dir)
                 ).glob("*.out"),
                 run.results_path,
@@ -701,14 +715,16 @@ async def monitor_jobs_async(
     submitit_jobs = [
         RemoteSlurmJob(
             job.cluster,
-            folder="",
+            # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
+            folder=job.tasks[0].results_path,
             job_id=str(job.job_id),
             tasks=list(range(len(job.tasks))),
             remote_dir_sync=None,  # type: ignore
         )
         if job.cluster != here
         else SlurmJob(
-            folder="",
+            # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
+            folder=job.tasks[0].results_path,
             job_id=str(job.job_id),
             tasks=list(range(len(job.tasks))),
         )
@@ -722,7 +738,15 @@ async def monitor_jobs_async(
     ) as live:
         while True:
             if not test_mode:
-                submitit_jobs[0].get_info(mode="force")  # Force update once to sync the state
+                # Call [Remote]SlurmJob.get_info(mode="force") once for each cluster.
+                # For RemoteSlurmJob, this calls sacct over ssh. For SlurmJob, it uses
+                # sacct locally.
+                for cluster, job in {
+                    (job.cluster if isinstance(job, RemoteSlurmJob) else None): job
+                    for job in submitit_jobs
+                }.items():
+                    logger.debug(f"Calling sacct for cluster {cluster} to update job info.")
+                    job.get_info(mode="force")  # Force update once to sync the state
             state_jobs = collections.defaultdict(set)
             for i, job in enumerate(submitit_jobs):
                 state_jobs[job.state.upper()].add(i)

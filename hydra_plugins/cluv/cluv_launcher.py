@@ -22,6 +22,7 @@ from omegaconf import DictConfig, OmegaConf
 from remote_slurm_executor.slurm_remote import RemoteSlurmJob
 from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
+from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.submit import display_commands, submit
 from cluv.cli.sync import expandvars, fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
@@ -371,13 +372,21 @@ async def run_sweep(
 
     # Creates a rich.Live table and updates it as the status of the jobs change.
     await monitor_jobs_async(job_infos, poll_interval_seconds=30)
+    project_states = {
+        cluster: read_cache().project_states.get(cluster) or ProjectStateOnCluster()
+        for cluster in cluster_remotes.keys()
+    }
 
     await asyncio.gather(
         *(
-            fetch_results(cluster_remote, cluv_config)
-            for cluster_remote in cluster_remotes.values()
+            fetch_results(cluster_remote, cluv_config, project_states[cluster])
+            for cluster, cluster_remote in cluster_remotes.items()
         )
     )
+    cache = read_cache()
+    for cluster, updated_project_state in project_states.items():
+        cache.project_states[cluster] = updated_project_state
+    write_cache(cache)
 
     return job_infos
 

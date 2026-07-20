@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+import cluv.cli.clean
+import cluv.cli.submit
 import cluv.config
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars
@@ -41,7 +43,7 @@ def reset_cluv_config():
 
 @pytest.fixture(autouse=IN_SELF_HOSTED_GITHUB_CI)
 def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
-    monkeypatch: pytest.MonkeyPatch, reset_cluv_config: None
+    monkeypatch: pytest.MonkeyPatch, reset_cluv_config: None, request: pytest.FixtureRequest
 ):
     """The self-hosted runner is running from ~/action-runners/.../_work/cluv/cluv.
 
@@ -52,6 +54,10 @@ def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
     As a consequence of this, the ~/repos/cluv path on the clusters might be changed by the test runners.
     This is kind-of to be expected though, and is not different than doing a `cluv sync` ourselves.
     """
+
+    # Only do this mocking if the test that is going to be run is marked with @pytest.mark.integration.
+    if request.node.get_closest_marker("integration") is None:
+        return  # don't patch get_cluv_config to not interfere with unit tests.
 
     def mock_get_cluv_config() -> cluv.config.CluvConfig:
         config = get_cluv_config()
@@ -67,6 +73,8 @@ def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
         return config
 
     monkeypatch.setattr(cluv.config, get_cluv_config.__name__, mock_get_cluv_config)
+    monkeypatch.setattr(cluv.cli.submit, get_cluv_config.__name__, mock_get_cluv_config)
+    monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, mock_get_cluv_config)
 
 
 @pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)

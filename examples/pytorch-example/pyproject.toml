@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "cluv",
+    "cluster-uv",
     "numpy>=2.4.4",
     "torch>=2.7.0,<2.11.0",
     "torchvision>=0.25.0",
@@ -17,7 +17,7 @@ dependencies = [
 # build-backend = "hatchling.build"
 
 [tool.uv.sources]
-cluv = { workspace = true }
+cluster-uv = { workspace = true }
 
 
 ###  --------------   CLUV CONFIG   --------------  ###

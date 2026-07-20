@@ -15,10 +15,28 @@ In early development. Commands are functional, but expect bugs or missing featur
 
 ## Installation
 
-Install as a UV tool:
+To add `cluv` to your project, use `uv add` or `pip install`:
 
 ```bash
-uv tool install git+https://github.com/mila-iqia/cluv
+uv add cluster-uv
+```
+
+To also include the Cluv Hydra launcher:
+
+```bash
+uv add cluster-uv[hydra]
+```
+
+Install as a command-line tool in an isolated environment:
+
+```bash
+uv tool install cluster-uv
+```
+
+If you want the bleeding edge version from GitHub, use:
+
+```bash
+uv add git+https://github.com/mila-iqia/cluv
 ```
 
 Then you can run `cluv` directly as a command:

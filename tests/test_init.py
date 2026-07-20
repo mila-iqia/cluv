@@ -58,8 +58,9 @@ class TestCheckCluvConfig:
         check_cluv_config(p)
         config = load_cluv_config(p)
         expected_config = load_cluv_config(REPO_ROOT / "pyproject.toml")
+        expected_results_path = f"$SCRATCH/logs/{tmp_path.name}"
 
-        assert config.results_path == expected_config.results_path
+        assert config.results_path == expected_results_path
         assert config.env == expected_config.env
         assert config.clusters_names == expected_config.clusters_names
         assert config.clusters == expected_config.clusters
@@ -103,7 +104,7 @@ class TestSymlinkCheck:
         expected_results_scratch_path = Path(os.path.expandvars(DEFAULT_RESULTS_PATH))
 
         check_symlink_to_scratch(
-            project_root=fake_project_root,
+            project_path=fake_project_root,
             results_path=DEFAULT_RESULTS_PATH,
             results_symlink=DEFAULT_RESULTS_LINKNAME,
         )
@@ -130,6 +131,21 @@ class TestSymlinkCheck:
         assert expected_results_symlink.is_symlink()
         assert expected_results_symlink.resolve() == (tmp_path / "some_other_folder").resolve()
         assert not expected_results_scratch_path.exists()
+
+    def test_keep_existing_results_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """check_symlink_to_scratch() should not replace an existing results directory."""
+        scratch_path = tmp_path / "scratch"
+        monkeypatch.setenv("SCRATCH", str(scratch_path))
+        results_directory = tmp_path / DEFAULT_RESULTS_LINKNAME
+        results_directory.mkdir()
+
+        check_symlink_to_scratch(tmp_path, DEFAULT_RESULTS_PATH, DEFAULT_RESULTS_LINKNAME)
+
+        assert results_directory.is_dir()
+        assert not results_directory.is_symlink()
+        assert not Path(os.path.expandvars(DEFAULT_RESULTS_PATH)).exists()
 
 
 class TestJobScriptCheck:

@@ -374,7 +374,7 @@ def build_submit_command(
 ) -> str:
     """Build the local `cluv submit` command line used to launch the job."""
     command_parts = ["cluv", "submit"]
-    command_parts.extend([cluster, str(job_script or ""), *sbatch_args])
+    command_parts.extend([cluster, str(job_script), *sbatch_args])
     if program_args:
         command_parts.extend(["--", *program_args])
     return shlex.join(command_parts)
@@ -419,7 +419,8 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
             create_submit_commit(submit_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
             console.print(
-                "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
+                "Working directory is dirty. Please commit your changes before submitting.",
+                style="red",
             )
             sys.exit(1)
 
@@ -440,7 +441,8 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
             if remote_head_result.returncode == 0:
                 return remote_head_result.stdout.strip()
             console.log(
-                f"[yellow]Could not resolve {remote_head_ref}. Falling back to local HEAD commit.[/yellow]"
+                f"Could not resolve {remote_head_ref}. Falling back to local HEAD commit.",
+                style="yellow",
             )
 
     # Capture current commit hash.
@@ -553,7 +555,6 @@ def get_sbatch_command(
         )
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-
     sbatch_args_str = shlex.join(sbatch_args)
     program_args_str = shlex.join(program_args)
 

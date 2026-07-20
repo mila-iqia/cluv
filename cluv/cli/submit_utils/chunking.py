@@ -16,17 +16,12 @@ def chunking_update_sbatch_args(
     n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
     logger.info(f"Chunking job into {n_chunks} smaller jobs of {CHUNK_SIZE} hours each.")
     sbatch_args = sbatch_args.copy()
-    sbatch_args.append(f"--array=0-{n_chunks - 1}%1")
 
-    # Update the time limit (add --time=3:00:00 to sbatch args if not already set,
-    # or update the existing time limit to be at most 3h)
-    if not any(arg.startswith(("--time", "-t")) for arg in sbatch_args):
-        sbatch_args.append(f"--time={CHUNK_SIZE}:00:00")
-    else:
-        for i, arg in enumerate(sbatch_args):
-            if arg.startswith(("--time", "-t")):
-                sbatch_args[i] = f"--time={CHUNK_SIZE}:00:00"
-                break
+    # Remove any existing --time or -t args, and add the new one at the end.
+    # TODO : --time-min case
+    sbatch_args = [arg for arg in sbatch_args if not arg.startswith(("--time", "-t"))]
+    sbatch_args.append(f"--time={CHUNK_SIZE}:00:00")
+    sbatch_args.append(f"--array=0-{n_chunks - 1}%1")
 
     return sbatch_args
 
@@ -59,7 +54,8 @@ def get_n_chunks(sbatch_args: list[str], env_vars: dict[str, str], job_script: P
 
 def get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
     """Return the SLURM time limit from the sbatch args if it exists."""
-    for arg in sbatch_args:
+    # Last occurrence of --time or -t takes precedence, so we iterate in reverse.
+    for arg in reversed(sbatch_args):
         if arg.startswith(("--time", "-t")):
             # Like "--time=00:10:00" or "-t=1-02:00:00"
             return arg.split("=")[1]

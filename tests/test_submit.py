@@ -57,7 +57,6 @@ def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     monkeypatch.chdir(project_dir)  # Set current working dir
 
     cluv.cli.init()
-    # mock.assert_called_once()
     return project_dir
 
 
@@ -161,9 +160,7 @@ class TestGetSbatchCommand:
             "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh '"
         )
 
-    def test_config_sbatch_args_prepended_to_cli_args(
-        self, project_dir: Path, fake_home: Path
-    ) -> None:
+    def test_config_sbatch_args_prepended_to_cli_args(self, project_dir: Path) -> None:
         """Config-derived sbatch flags are prepended; CLI flags come last and can override."""
         p = project_dir / "pyproject.toml"
         results_path = "results"

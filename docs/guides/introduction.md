@@ -17,6 +17,7 @@ Cluv is for you if you:
 These are the main goals of Cluv:
 
 ### Make it simple to synchronize a project across clusters
+- `cluv init`: Generate a config for cluv in the project I want to synchronize and run (only once).
 - `cluv login`: Create a connection to all the cluster I care about (only once).
 - `cluv sync`: Sync my project to the clusters where I run jobs, and optionally rsync results back.
 

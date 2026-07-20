@@ -6,7 +6,7 @@
 
 Add `data_source` and `datasets_path` under `[tool.cluv]`:
 
-```toml
+```toml title="pyproject.toml"
 [tool.cluv]
 # Source cluster and source path (`hostname:/path`).
 data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
@@ -20,7 +20,7 @@ datasets_path = "$SCRATCH/datasets/cifar10"
 
 You can override `datasets_path` per cluster:
 
-```toml
+```toml title="pyproject.toml"
 [tool.cluv.clusters.killarney]
 datasets_path = "$HOME/datasets/cifar10"
 ```

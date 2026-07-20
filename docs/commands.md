@@ -75,6 +75,8 @@ Increase logging verbosity. Can be repeated: `-v` shows info-level logs, `-vv` (
 Disable command output. Has no effect on `cluv status`.
 {: .indent }
 
+---
+
 ## [`cluv init`](#cluv-init)
 
 Initialize a cluv project.
@@ -109,6 +111,7 @@ cluv init [path]
 The path to use for the project. Defaults to the current working directory.
 {: .indent }
 
+---
 
 ## [`cluv login`](#cluv-login)
 
@@ -131,6 +134,7 @@ cluv login [clusters]
 The clusters to connect to. If not specified, will connect to all clusters in the config. Unreachable clusters will be skipped.
 {: .indent }
 
+---
 
 ## [`cluv sync`](#cluv-sync)
 
@@ -138,8 +142,9 @@ Synchronize the current project across clusters.
 
 This pushes local git commits, then on each remote cluster: clones the project (if needed),
 fetches and checks out the current commit, runs `uv sync`, and fetches back any new results
-via `rsync`. Optionally also pushes/pulls datasets, see the
-[dataset sync guide](guides/syncing-datasets.md).
+via `rsync`. 
+
+Optionally also pushes/pulls datasets, see the ["Syncing datasets across clusters"](guides/syncing-datasets.md) guide.
 
 **Usage**
 ```console
@@ -160,18 +165,20 @@ One or more cluster hostnames to synchronize with (space-separated). If omitted,
 Push/pull datasets from `data_source` to each cluster as part of the sync. Requires `data_source` to be set in the config. Enabled by default.
 {: .indent }
 
+---
+
 ## [`cluv submit`](#cluv-submit)
 
 Submit a Slurm job on a remote cluster.
 
-Enforces a clean git working tree (untracked files are fine), syncs the project to the target
-cluster (equivalent to running [`cluv sync`](#cluv-sync)), then runs `sbatch` on the remote,
-merging the global and per-cluster `SBATCH_*` environment variables from the config and
-injecting a `GIT_COMMIT` variable.
+Enforces a clean git working tree, syncs the project to the target cluster (equivalent to running
+[`cluv sync`](#cluv-sync)), then runs `sbatch` on the remote, merging the global and per-cluster arguments from the config.
+
+See the ["Configuring job submission"](guides/submit-config.md) guide for more information.
 
 **Usage**
 ```console
-cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]
+cluv submit [options] <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]
 ```
 
 **Arguments**
@@ -198,18 +205,19 @@ Any arguments before `--` are forwarded as flags to `sbatch`. Arguments after `-
 Automatically create a local commit with the tracked changes before submitting, instead of failing when the working tree is dirty.
 {: .indent }
 
+---
+
 ## [`cluv clean`](#cluv-clean)
 
 Remove run result directories from remote clusters that have been deleted from the local
 results dir.
 
-Only considers clusters that have been synced at least once: it compares each remote's run
-directories against the local results dir, using the watermark recorded by the last successful
-[`cluv sync`](#cluv-sync) to tell "pruned locally" apart from "not fetched yet". A remote run
+Only considers clusters that have been synced at least once. A remote run
 directory is only deleted if it has no local counterpart *and* it already existed at the time of
 that last sync; brand-new remote runs that were never fetched locally are left alone. Clusters
-that have never been synced are skipped with a warning. Prompts for confirmation before deleting,
-unless `--force` or `--dry-run` is used.
+that have never been synced are skipped with a warning.
+
+See the ["Cleaning up run results on the clusters"](guides/cleaning-runs.md) guide for more information.
 
 **Usage**
 ```console
@@ -235,6 +243,8 @@ Skip the confirmation prompt.
 Show what would be deleted, without deleting anything.
 {: .indent }
 
+---
+
 ## [`cluv status`](#cluv-status)
 
 Show the status of clusters and jobs.
@@ -258,6 +268,8 @@ cluv status [table]
 
 Which table to display in the status output. Can be one of `jobs`, `clusters`, or `all`. Defaults to `all`.
 {: .indent }
+
+---
 
 ## [`cluv disable`](#cluv-disable)
 
@@ -285,9 +297,11 @@ The cluster hostname to disable.
 How long to disable the cluster for. Accepts an integer (days), a Slurm-style `HH:MM:SS` / `D-HH:MM:SS` string, or suffixed values like `2h`, `1d 6h`. Omit to disable indefinitely, until [`cluv enable`](#cluv-enable) is run.
 {: .indent }
 
+---
+
 ## [`cluv enable`](#cluv-enable)
 
-Re-enable a previously disabled cluster.
+Re-enable a previously disabled cluster with [`cluv disable`](#cluv-disable).
 
 **Usage**
 ```console
@@ -300,6 +314,8 @@ cluv enable <cluster>
 
 The cluster hostname to re-enable.
 {: .indent }
+
+---
 
 ## [`cluv run`](#cluv-run)
 

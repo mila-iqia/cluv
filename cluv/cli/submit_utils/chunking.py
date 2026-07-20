@@ -48,6 +48,8 @@ def get_n_chunks(sbatch_args: list[str], env_vars: dict[str, str], job_script: P
 
     # Split the total time into chunks, and round up.
     n_chunks = int((total_hours + CHUNK_SIZE - 1) // CHUNK_SIZE)
+    # Need at least one chunk, even if the time is less than CHUNK_SIZE.
+    n_chunks = max(n_chunks, 1)
 
     return n_chunks
 

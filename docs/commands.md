@@ -142,7 +142,7 @@ Synchronize the current project across clusters.
 
 This pushes local git commits, then on each remote cluster: clones the project (if needed),
 fetches and checks out the current commit, runs `uv sync`, and fetches back any new results
-via `rsync`. 
+via `rsync`.
 
 Optionally also pushes/pulls datasets, see the ["Syncing datasets across clusters"](guides/syncing-datasets.md) guide.
 

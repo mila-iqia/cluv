@@ -364,8 +364,8 @@ class CluvLauncher(Launcher):
             f"About to launch {len(job_overrides)} jobs, with {initial_job_idx=} and {self.cluster=}."
         )
 
-        # Respects the `self.array_parallelism`.
-        async def launch_jobs(job_overrides, array_parallelism: int):
+        # Small wrapper around `self.launch_jobs` that respects the `array_parallelism` throttling.
+        async def _launch_jobs(job_overrides, array_parallelism: int):
             first_job_idx = initial_job_idx
             job_results: list[JobReturn] = []
             for batch_index, job_overrides_batch in enumerate(
@@ -380,7 +380,7 @@ class CluvLauncher(Launcher):
             return job_results
 
         return self._loop.run_until_complete(
-            launch_jobs(job_overrides, array_parallelism=self.array_parallelism)
+            _launch_jobs(job_overrides, array_parallelism=self.array_parallelism)
         )
 
     async def launch_jobs(
@@ -400,6 +400,9 @@ class CluvLauncher(Launcher):
         prefix = ["python", str(module_path)]
 
         # TODO: Remove any 'hydra/launcher'-related configs. This isn't as easy as it sounds!
+        # This will definitely not work if an "experiment" config is used, that includes the hydra.launcher settings!
+        # What we CRITICALLY don't want to happen is for the `cluv` launcher to then be used by that job.
+        # Submitit side-steps this issue probably because of the fact that it pickles something to run on the cluster.
         new_job_overrides = []
         for overrides in job_overrides:
             new_override = [
@@ -407,7 +410,8 @@ class CluvLauncher(Launcher):
                 for override in overrides
                 if not override.startswith(("hydra/launcher", "hydra.launcher", "launcher"))
             ]
-            new_override = prefix + new_override
+            # TODO: Perhaps setting hydra.mode=RUN explicitly would counteract this and disabling any launcher-related settings?
+            new_override = prefix + new_override  # + ["hydra.mode=RUN"]
             new_job_overrides.append(new_override)
         job_overrides = new_job_overrides
 

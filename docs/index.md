@@ -89,3 +89,38 @@ cluv run mila -- ls logs
 ```console
 cluv status
 ```
+
+### How the commands are used together
+
+``` mermaid
+    graph LR
+        init(<b>cluv init</b> <br> Init project)
+        sync(<b>cluv sync</b> <br> Sync project on clusters)
+        login(<b>cluv login</b> <br> Connect to clusters)
+        submit(<b>cluv submit</b> <br> Submit jobs to clusters)
+        status(<b>cluv status</b> <br> See clusters and jobs status)
+        disable(<b>cluv disable</b> <br> Disable access to clusters)
+        enable(<b>cluv enable</b> <br> Enable access to clusters)
+        clean(<b>cluv clean</b> <br> Clean old logs on clusters)
+        run(<b>cluv run</b> <br> Run commands on clusters)
+
+        init ===> login
+        init ==> disable
+        init ==> enable
+
+        login ===> sync
+        login ===> submit
+        login ===> status
+        login ===> clean
+        login ===> run
+
+        click init "../commands/#cluv-init"
+        click login "../commands/#cluv-login"
+        click sync "../commands/#cluv-sync"
+        click submit "../commands/#cluv-submit"
+        click status "../commands/#cluv-status"
+        click disable "../commands/#cluv-disable"
+        click enable "../commands/#cluv-enable"
+        click clean "../commands/#cluv-clean"
+        click run "../commands/#cluv-run"
+```

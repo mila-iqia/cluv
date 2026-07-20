@@ -66,6 +66,11 @@ markdown_extensions:
   # For annotations https://squidfunk.github.io/mkdocs-material/reference/annotations/?h=annota#annotations
   - attr_list
   - md_in_html
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 plugins:
   - search
   - mkdocstrings:

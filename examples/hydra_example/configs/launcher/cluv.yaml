@@ -6,7 +6,7 @@ hydra:
   mode: MULTIRUN
   run:
     # Output directory.
-    # We let Cluv tell us the results directory location (since it depends on the cluster being used, 
+    # We let Cluv tell us the results directory location (since it depends on the cluster being used,
     # and whether there a multiple runs per job (job packing) or if job chunking is being used).
     # This is typically resolved to "{cluster.results_path}/{cluster_name}_{job_id}".
     # See `cluv.job.current_run_info` for more details.

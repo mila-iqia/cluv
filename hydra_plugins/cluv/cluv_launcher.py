@@ -623,7 +623,7 @@ def _jobs_to_hydra_jobreturn_format(
                         # submitit.core.utils.FailedJobError(
                         #     f"Job {run.run_id} failed, see the output file {out} for more info."
                         # )
-                        # Mimick the output produced by the submitit launcher in case of error, which includes the error file.
+                        # Mimic the output produced by the submitit launcher in case of error, which includes the error file.
                         submitit.core.utils.FailedJobError(
                             f"Job (task={task_id}) failed during processing with trace:\n"
                             f"----------------------\n{output_file.read_text()}\n"

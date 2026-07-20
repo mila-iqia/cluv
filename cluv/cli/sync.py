@@ -28,7 +28,7 @@ from cluv.cli.disable import print_disabled_clusters
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config, load_cluv_config
 from cluv.job import get_datasets_path
-from cluv.remote import Remote, run
+from cluv.remote import Remote, list_remote_run_dirs, run
 from cluv.utils import console, console_lock, current_cluster
 
 milatools.cli.console = console

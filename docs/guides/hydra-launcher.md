@@ -24,7 +24,7 @@ What it adds on top of Submitit:
 
 Add the `hydra` extra when installing cluv:
 
-```bash
+```console
 uv add cluster-uv[hydra]
 ```
 

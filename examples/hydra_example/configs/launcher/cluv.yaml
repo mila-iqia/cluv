@@ -16,7 +16,7 @@ hydra:
     dir: ${cluv:results_path,/tmp}
   sweep:
     dir: ${cluv:results_path,/tmp}
-    subdir: ${hydra.job.num}
+    subdir: ${hydra.job.num}  # TODO: Is this actually used?
 
   launcher:
     ## NEW ARGUMENTS for cluv:

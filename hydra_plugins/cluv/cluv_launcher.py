@@ -1,4 +1,12 @@
-# https://github.com/facebookresearch/hydra/blob/main/examples/plugins/example_launcher_plugin/hydra_plugins/example_launcher_plugin/example_launcher.py
+"""Cluv launcher plugin for Hydra.
+
+Follows the same signature as the submitit launcher to make it easier to transition for researchers.
+
++ Allows launching jobs on remote slurm clusters.
++ Syncs back results
+
+TODO: Also allows job packing (multiple runs per GPU) and job chunking (splitting a long job into multiple shorter jobs).
+"""
 
 import asyncio
 import collections

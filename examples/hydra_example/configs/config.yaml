@@ -4,3 +4,4 @@ defaults:
   - _self_
 lr: 0.01
 job_duration_seconds: 5
+seed: 42

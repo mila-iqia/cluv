@@ -3,11 +3,13 @@
 import asyncio
 import collections
 import inspect
+import itertools
 import logging
+import os.path
 import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, ClassVar, Literal
+from typing import Any, Callable, ClassVar, Literal, NewType
 
 import hydra_zen
 import omegaconf
@@ -20,6 +22,7 @@ from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
 from remote_slurm_executor.slurm_remote import RemoteSlurmJob
+from submitit import SlurmJob
 from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
 from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
@@ -28,7 +31,7 @@ from cluv.cli.sync import expandvars, fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import JobInfo, RunInfo, current_run_info, get_results_path, get_run_id
 from cluv.remote import Remote
-from cluv.utils import set_context
+from cluv.utils import current_cluster, set_context
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,8 @@ def cluv_resolver(attr: str, default: str | None = None) -> str | None:
 
 omegaconf.OmegaConf.register_new_resolver("cluv", cluv_resolver, replace=True)
 
+ClusterHostname = NewType("ClusterHostname", str)
+
 
 # Made this a dataclass to avoid having an ugly default repr, but it causes issues with
 # hydra-auto-schema because it tries to create a schema for everything here.
@@ -59,7 +64,7 @@ omegaconf.OmegaConf.register_new_resolver("cluv", cluv_resolver, replace=True)
 class CluvLauncher(Launcher):
     _EXECUTOR: ClassVar[str] = ""
 
-    params: dict[str, Any]
+    submitit_params: dict[str, Any]
     config: DictConfig | None = None
     task_function: TaskFunction | None = None
     sweep_configs: TaskFunction | None = None
@@ -70,11 +75,9 @@ class CluvLauncher(Launcher):
     def __init__(
         self,
         ## NEW args:
-        cluster: str = "first",  # which cluster to submit to.
-        # The job script to run on the cluster.
-        # It should use "$@" to capture and pass down the arguments to the python script.
-        # When unset, will use the value from the Cluv config.
+        cluster: Literal["current", "first"] | ClusterHostname = "current",
         job_script: str | Path | None = None,
+        autocommit: bool = False,
         vram_gb: int | None = None,  # Enables job packing!
         checkpointing: bool = False,  # Enables job chunking (via job arrays!)
         ## Submitit arguments:
@@ -100,7 +103,7 @@ class CluvLauncher(Launcher):
         nodelist: str | None = None,
         nodes: int = 1,
         ntasks_per_node: int | None = None,
-        num_gpus: int | None = None,
+        num_gpus: int | None = None,  # deprecated in the submitit launcher, removed here.
         partition: str | None = None,
         qos: str | None = None,
         setup: list[str] | None = None,
@@ -108,7 +111,6 @@ class CluvLauncher(Launcher):
         srun_args: list[str] | None = None,
         stderr_to_stdout: bool = True,  # changed!
         time: str | int | None = None,  # sbatch native way of passing it.
-        # TODO: Used by submitit, needs to be translated somehow.
         timeout_min: str | int | None = None,
         use_srun: bool = True,
         wckey: str = "cluv",
@@ -117,30 +119,138 @@ class CluvLauncher(Launcher):
         mem_gb: int | None = None,
         # **kwargs,
     ) -> None:
+        """
+
+        Args:
+            cluster: Which cluster to run the job on.
+                - 'current' (default): Use the current cluster (same behaviour as the submitit launcher)
+                - 'first': Try all enabled clusters (listed in the cluv config in pyproject.toml), keep the first running job.
+                - hostname (str): Use a specific cluster (for example 'mila'/'rorqual'/'tamia'/etc.)
+            job_script: The path to the job script to run on the cluster.
+                It should use something like `srun uv run "$@"` to capture and pass down the arguments to the python script.
+                When unset, selects the job script based on the Cluv config in pyproject.toml
+            autocommit: Whether to create a commit instead of raising an error, if the git workspace is dirty.
+            vram_gb:  The required amount of GPU memory (VRAM) per run.
+                TODO: This will be used to automatically stack multiple runs per GPU in the future.
+            checkpointing: Whether the submitted job has checkpointing support.
+                TODO: This will be used to automatically chunk the jobs into shorter slices for faster execution in the future.
+            array_parallelism: Maximum number of simultaneously running jobs.
+            comment: Passed down to `sbatch` as the argument of the same name. (Same as the submitit launcher).
+            constraint:     Passed down to `sbatch`. Same as the submitit launcher.
+            cpus_per_gpu:   Passed down to `sbatch`.
+            cpus_per_task:  Passed down to `sbatch`.
+            dependency:     Passed down to `sbatch`.
+            exclude:        Passed down to `sbatch`.
+            exclusive:      Passed down to `sbatch`.
+            gpus_per_node:  Passed down to `sbatch`.
+            gpus_per_task:  Passed down to `sbatch`.
+            gres:           Passed down to `sbatch`.
+            job_name:       The job name. Will always be prepended with 'cluv-' for book-keeping/visibility purposes.
+            mail_type:      Passed down to `sbatch`.
+            mail_user:      Passed down to `sbatch`.
+            mem:            Passed down to `sbatch`.
+                            Prefer using this over `mem_gb` if possible, since this matches the `sbatch` argument of the same name.
+            mem_per_cpu:    Passed down to `sbatch`.
+            mem_per_gpu:    Passed down to `sbatch`.
+            nodelist:       Passed down to `sbatch`.
+            nodes:          Passed down to `sbatch`.
+            ntasks_per_node:    Passed down to `sbatch`.
+            num_gpus:       Copied from the submitit launcher, where it is deprecated. Consider using `gpus-per-task` and scaling `ntasks` instead.
+            partition:      Passed down to `sbatch`.
+            qos:            Passed down to `sbatch`.
+            setup:  NOT used.
+                    This argument is copied from the submitit launcher, but it is not supported.
+                    Add your setup lines directly in the job script file instead. (See `job_script`).
+
+            signal_delay_s: Argument copied from the submitit launcher. Not used at the moment.
+            srun_args:      NOT used.
+                            This argument is copied from the submitit launcher, but it is not supported.
+                            Add your setup lines directly in the job script file instead. (See `job_script`).
+            stderr_to_stdout: Argument copied from the submitit launcher. Not used at the moment.
+            use_srun:         Argument copied from the submitit launcher. Not used, since whether or not to
+                              use `srun` is simply whether you are using it in your job script or not (we
+                              recommend that you do!)
+            wckey:      Argument copied from the submitit launcher. Not used at the moment.
+            additional_parameters: Argument copied from the submitit launcher. Additional parameters to pass to `sbatch`.
+                                Will override any of the other passed parameters. Can be used to pass argument to sbatch
+                                that are not listed in the constructor arguments here.
+            tasks_per_node:  Copied from the submitit launcher. Can either use this or `ntasks_per_node`, not both.\
+                            Consider use `ntasks_per_node` instead, since it matches the sbatch argument of the same name.
+            mem_gb:         Copied from the submitit launcher. Memory request in gigabytes (GB).
+                            Consider use `mem` instead, since it matches the sbatch argument of the same name.
+        """
         super().__init__()
+
+        this_cluster = current_cluster()
+        if cluster == "current":
+            if this_cluster is None:
+                raise RuntimeError(
+                    f"The `cluster` argument passed to {CluvLauncher.__name__} was 'current', "
+                    f"but you don't appear to be on a Slurm cluster (or the current slurm cluster is unknown).\n"
+                    f"If you are on a local machine, set `cluster` to the hostname of a cluster, or use 'first' to use "
+                    f"all clusters and keep the fastest to start your job."
+                )
+            cluster = ClusterHostname(this_cluster)
         self.cluster = cluster
         self.job_script = PurePosixPath(job_script) if job_script else None
+        self.autocommit = autocommit
+
         self.vram_gb = vram_gb
         self.checkpointing = checkpointing
 
+        if setup:
+            # TODO: Check if the lines are already in the job script, and if so, just ignore the fact that it is set here.
+            if (
+                self.job_script
+                and Path(self.job_script).exists()
+                and "\n".join(setup) in Path(self.job_script).read_text()
+            ):
+                # ignore
+                pass
+            else:
+                raise RuntimeError(
+                    f"The `setup` argument usually used with the submitit launcher is not supported (or needed)!\n"
+                    f"The cluv launcher instead reuses a provided job script (pointed to by the `job_script` argument, "
+                    f"or in the `[tool.cluv]` section of your project's `pyproject.toml` file) for all jobs.\n"
+                    f"Consider adding these lines to your job script instead. Once you add them to the file, "
+                    f"you can leave them in your config, and this error will not be raised."
+                    f"({job_script=}, {setup=})"
+                )
         setup = setup or []
+
+        if srun_args:
+            logger.warning(
+                UserWarning("The cluv launcher ignores the value of the 'srun_args' argument.")
+            )
+
         additional_parameters = additional_parameters or {}
 
         if mem_gb is not None:
-            assert mem is None, "can't use both mem and mem_gb"
+            if mem is not None:
+                raise ValueError("can't use both mem and mem_gb")
             mem = f"{mem_gb}GB"
+            mem_gb = None
+
+        if timeout_min is not None:
+            if time is not None:
+                raise ValueError(f"Can't use both timeout_min ({timeout_min}) and time ({time}).")
+            # An int is interpreted as a number of minutes (See https://slurm.schedmd.com/sbatch.html#OPT_time)
+            time = str(timeout_min)
+            timeout_min = None
+
         if tasks_per_node is not None:
-            assert ntasks_per_node is None, "can't use both tasks_per_node and ntasks_per_node"
+            if ntasks_per_node is not None:
+                raise ValueError("can't use both tasks_per_node and ntasks_per_node")
             ntasks_per_node = tasks_per_node
+            tasks_per_node = None
+
         if ntasks_per_node is not None:
             additional_parameters["ntasks-per-node"] = ntasks_per_node
 
-        if timeout_min is not None:
-            assert time is None, "can't use both time and timeout_min"
-
-        params = dict(
+        self.array_parallelism = array_parallelism
+        submitit_params = dict(
             account=account,
-            array_parallelism=array_parallelism,
+            array_parallelism=self.array_parallelism,
             comment=comment,
             constraint=constraint,
             cpus_per_gpu=cpus_per_gpu,
@@ -171,20 +281,22 @@ class CluvLauncher(Launcher):
             wckey=wckey,
             additional_parameters=additional_parameters,
         )
-        self.params = {}
-        for k, v in params.items():
+        # Imitating the submitit launcher.
+        self.submitit_params = {}
+        for k, v in submitit_params.items():
             if OmegaConf.is_config(v):
                 v = OmegaConf.to_container(v, resolve=True)
-            self.params[k] = v
+            self.submitit_params[k] = v
 
-        self.synced_clusters: set[str] = set()
-        self.cluster_remotes: dict[str, Remote] = {}
+        self.cluster_remotes: dict[str, Remote | None] = {}
         self.cluv_config: CluvConfig | None = None
 
         self.chunking = self.checkpointing
         self.packing = self.vram_gb is not None
-
-        self._loop = asyncio.new_event_loop()
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = asyncio.new_event_loop()
 
     def setup(
         self,
@@ -197,17 +309,45 @@ class CluvLauncher(Launcher):
         self.task_function = task_function
         self.config = config
         logger.debug(f"{hydra_context=}, {task_function=}, {config=}")
+        # TODO: Perhaps be a bit more forgiving and allow using the launcher without a cluv config, in which case
+        # we print a warning and assume some defaults when possible?
+        # ALSO: If the user doesn't have an SSH config on the current cluster, we could probably set one up by importing
+        # the functions from `milatools`! (and display instructions for adding `AddKeysToAgent yes` in your local SSH config, so
+        # that your local DRAC keys can also be used to connect from Mila to DRAC).
         self.cluv_config = get_cluv_config()
         self._loop.run_until_complete(self.setup_async())
 
     async def setup_async(self) -> None:
-        # Perhaps we could connect to all clusters here?
-        if self.cluster == "first":
+        """Async setup. happens once before submitting any jobs. Connects to clusters if needed.
+
+        Raises:
+            RuntimeError: If unable to connect to the requested cluster, or using 'current' while not on a Slurm cluster.
+        """
+        this_cluster = current_cluster()
+
+        cluster_remotes: dict[str, Remote | None]
+        if self.cluster == "current":
+            if this_cluster is None:
+                raise RuntimeError(
+                    f"The `cluster` argument passed to the {CluvLauncher.__name__} was 'current', "
+                    f"but you don't appear to be on a Slurm cluster (or the current slurm cluster is unknown).\n"
+                    f"If you are on a local machine, set 'cluster' to the hostname of a cluster, or 'first' to use "
+                    f"all clusters and keep the fastest to start your job."
+                )
+            cluster_remotes = {this_cluster: None}
+        elif self.cluster == "first":
             remotes = await get_active_remotes()
+            cluster_remotes = {remote.hostname: remote for remote in remotes}
+            if this_cluster:
+                # Also consider the current cluster as a potential place to run jobs on.
+                cluster_remotes[this_cluster] = None
+        elif this_cluster and self.cluster == this_cluster:
+            cluster_remotes = {this_cluster: None}
         else:
-            remotes = [await Remote.connect(self.cluster)]
-        self.cluster_remotes = {remote.hostname: remote for remote in remotes}
-        await sync([self.cluster] if self.cluster != "first" else None)
+            cluster_remotes = {self.cluster: await Remote.connect(self.cluster)}
+        self.cluster_remotes = cluster_remotes
+
+        await sync([hostname for hostname, remote in self.cluster_remotes.items() if remote])
 
     def __del__(self):
         if hasattr(self, "_loop"):
@@ -216,7 +356,28 @@ class CluvLauncher(Launcher):
     def launch(
         self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
     ) -> Sequence[JobReturn]:
-        return self._loop.run_until_complete(self.launch_jobs(job_overrides, initial_job_idx))
+        logger.debug(
+            f"About to launch {len(job_overrides)} jobs, with {initial_job_idx=} and {self.cluster=}."
+        )
+
+        # Respects the `self.array_parallelism`.
+        async def launch_jobs(job_overrides, array_parallelism: int):
+            first_job_idx = initial_job_idx
+            job_results: list[JobReturn] = []
+            for batch_index, job_overrides_batch in enumerate(
+                itertools.batched(job_overrides, array_parallelism or len(job_overrides))
+            ):
+                logger.debug(f"Launching batch #{batch_index} of {len(job_overrides_batch)} jobs.")
+                job_batch_results = await self.launch_jobs(job_overrides_batch, first_job_idx)
+                job_results.extend(job_batch_results)
+
+                first_job_idx += len(job_overrides_batch)
+
+            return job_results
+
+        return self._loop.run_until_complete(
+            launch_jobs(job_overrides, array_parallelism=self.array_parallelism)
+        )
 
     async def launch_jobs(
         self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
@@ -267,13 +428,15 @@ class CluvLauncher(Launcher):
                     f"{cluster} cluster."
                 )
 
+        sbatch_args = convert_submitit_style_params_to_sbatch_flags(self.submitit_params)
         job_infos = await run_sweep(
-            job_overrides,
-            cluster,
+            job_commands=job_overrides,
+            cluster=cluster,
             cluv_config=self.cluv_config,
             cluster_remotes=self.cluster_remotes,
             job_script=job_script,
-            params=self.params,
+            autocommit=self.autocommit,
+            sbatch_args=sbatch_args,
             chunking=self.checkpointing,
             packing=self.vram_gb is not None,
         )
@@ -284,12 +447,14 @@ class CluvLauncher(Launcher):
 
 
 async def run_sweep(
+    *,
     job_commands: list[list[str]],
     cluster: str | Literal["first"],
     cluv_config: CluvConfig,
-    cluster_remotes: dict[str, Remote],
+    cluster_remotes: dict[str, Remote | None],
     job_script: PurePosixPath | None,
-    params: dict[str, Any],
+    sbatch_args: dict[str, str | None],
+    autocommit: bool,
     chunking: bool,
     packing: bool,
 ) -> list[JobInfo]:
@@ -299,7 +464,11 @@ async def run_sweep(
     else:
         _cluster_remote = cluster_remotes[cluster]
         _cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
-        _cluster_results_dir = await expandvars(_cluster_remote, _cluster_results_dir)
+        if _cluster_remote:
+            _cluster_results_dir = await expandvars(_cluster_remote, _cluster_results_dir)
+        else:
+            # no remote, we are using the current cluster
+            _cluster_results_dir = Path(os.path.expandvars(_cluster_results_dir))
         _runid_template = get_run_id(
             cluster=cluster,
             job_id="%j",
@@ -308,27 +477,30 @@ async def run_sweep(
             doing_job_packing=packing,
             doing_job_chunking=chunking,
         )
-        # TODO: If we leave the '%t' in the output file path, there are files
+        # TODO: If we leave the '%t' in the output file path, there are weid generated files?
         output_args = [f"--output={_cluster_results_dir}/{_runid_template}/%j.out"]
 
     local_results_dir = get_results_path()
-
-    sbatch_args = convert_submitit_style_params_to_sbatch_flags(params)
+    sbatch_flags = [f"{k}={v}" if v is not None else f"{k}" for k, v in sbatch_args.items()]
 
     job_infos: list[JobInfo] = []
     for job_command in job_commands:
         # Use this so the output is where it would be if we used submitit.
         # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
         # TODO: Save the command used for submission in the output folder as well, since we
-        # don't generate a job script.
+        # don't generate a job script?
         with set_context(display_commands, True):
             job = await submit(
                 cluster=cluster,
                 job_script=Path(job_script) if job_script is not None else None,
-                # TODO: Ugly. This passes all the sbatch args as flags. There might be a cleaner way
-                # to do this, but I can't see it right now.
-                sbatch_args=sbatch_args + output_args,
+                # This passes all the sbatch args as flags.
+                # TODO: Some of these flags might conflict with the header of the job script! 🤔
+                # We will have to think about this once we add job packing with --ntasks-per-gpu, which will
+                # conflict with the `--gpus-per-task` flag which might be hard-coded in the job script header.
+                # At that point, maybe we shouldn't have much in the job script header, and have cluv add almost everything via sbatch args?
+                sbatch_args=sbatch_flags + output_args,
                 program_args=job_command,
+                autocommit=autocommit,
                 _skip_sync=True,
             )
         if job is None:
@@ -381,6 +553,7 @@ async def run_sweep(
         *(
             fetch_results(cluster_remote, cluv_config, project_states[cluster])
             for cluster, cluster_remote in cluster_remotes.items()
+            if cluster_remote is not None
         )
     )
     cache = read_cache()
@@ -465,7 +638,7 @@ def get_jobs_table(job_infos: list[JobInfo], local_results_dir: Path) -> rich.ta
 
 def _build_monitoring_table(
     jobs: Sequence[JobInfo],
-    submitit_jobs: Sequence[RemoteSlurmJob],
+    submitit_jobs: Sequence[SlurmJob | RemoteSlurmJob],
     monitoring_start_time: float,
 ) -> rich.table.Table:
     elapsed_minutes = int((time.time() - monitoring_start_time) / 60)
@@ -476,12 +649,13 @@ def _build_monitoring_table(
         title_style="bold cyan",
         expand=True,
     )
+    table.add_column("Cluster", style="bold")
     table.add_column("Run id", style="bold")
     table.add_column("Command", justify="right")
     table.add_column("State", justify="right")
     for job, submitit_job in zip(jobs, submitit_jobs):
         run = job.tasks[0]
-        table.add_row(run.run_id, " ".join(run.command), submitit_job.state)
+        table.add_row(run.cluster, run.run_id, " ".join(run.command), submitit_job.state)
     return table
 
 
@@ -505,7 +679,7 @@ async def monitor_jobs_async(
     test_mode: bool
         If in test mode, we do not check the length of poll_frequency
     """
-
+    here = current_cluster()
     if not test_mode:
         assert poll_interval_seconds >= 30, (
             "You can't refresh too often (>= 30s) to avoid overloading squeue"
@@ -523,6 +697,12 @@ async def monitor_jobs_async(
             job_id=str(job.job_id),
             tasks=list(range(len(job.tasks))),
             remote_dir_sync=None,  # type: ignore
+        )
+        if job.cluster != here
+        else SlurmJob(
+            folder="",
+            job_id=str(job.job_id),
+            tasks=list(range(len(job.tasks))),
         )
         for job in jobs
     ]
@@ -581,9 +761,22 @@ class CluvLauncherConfig:
 #     hydra_convert="object",
 #     zen_exclude=["command", "folder", "map_count"],
 # )
+
+
 def convert_submitit_style_params_to_sbatch_flags(
     submitit_launcher_params: dict[str, Any],
-) -> list[str]:
+) -> dict[str, str | None]:
+    """Get the sbatch flags given the submitit-launcher-style 'params' dict.
+
+    When using the submitit launcher, there is this `params` dict with a mishmash of slurm/submitit arguments and very bad info.
+    (You have to dig down into the submitit internals (SlurmExecutor to be exact) to find all the values, their types, etc.
+    Submitit uses this dictionary to generate an sbatch script.
+
+    Here, we don't generate a new job script, so we want to get the sbatch arguments that would be equivalent.
+
+    Instead of writing something new, we instead just reuse the whole submitit thing, and extract out the arguments
+    from their generated sbatch script.
+    """
 
     # note: translate the parameters the same way they would have been through the SlurmExecutor.
     eq_dict = SlurmExecutor._equivalence_dict()
@@ -604,4 +797,11 @@ def convert_submitit_style_params_to_sbatch_flags(
             for thing in ("--output=", "--wckey", "--job-name", "{folder}", "{command}")
         )
     ]
-    return sbatch_args
+    sbatch_args_dict = {}
+    for flag in sbatch_args:
+        key, _, val = flag.partition("=")
+        if val:
+            sbatch_args_dict[key] = val
+        else:
+            sbatch_args_dict[key] = None
+    return sbatch_args_dict

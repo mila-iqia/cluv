@@ -18,8 +18,9 @@ hydra:
 
   launcher:
     ## NEW ARGUMENTS for cluv:
-    cluster: mila
+    cluster: current
     job_script: scripts/job.sh
+    autocommit: false
     # chunking: true  # (Coming soon: Automatically chunk jobs into shorter chunks)
     # vram_gb: 10  # (Coming soon: Automatically pack multiple runs per GPU)
     ## Usual submitit arguments:

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from cluv.cli.submit_utils.chunking import (
     chunking_update_sbatch_args,
     get_n_chunks,
@@ -8,14 +10,10 @@ from cluv.cli.submit_utils.chunking import (
 
 
 class TestGetTimeFromSbatchArgs:
-    def test_should_use_time_arg(self) -> None:
+    @pytest.mark.parametrize("time_arg", ["--time=01:00:00", "-t=01:00:00"])
+    def test_should_use_time_arg(self, time_arg: str) -> None:
         "Should return the value of --time arg"
-        sbatch_args = ["--abc=123", "--time=01:00:00", "--def=456"]
-        assert get_time_from_sbatch_args(sbatch_args) == "01:00:00"
-
-    def test_should_use_t_arg(self) -> None:
-        "Should return the value of --time arg"
-        sbatch_args = ["--abc=123", "-t=01:00:00", "--def=456"]
+        sbatch_args = ["--abc=123", time_arg, "--def=456"]
         assert get_time_from_sbatch_args(sbatch_args) == "01:00:00"
 
     def test_multiple_time_values(self) -> None:
@@ -25,27 +23,28 @@ class TestGetTimeFromSbatchArgs:
 
 
 class TestGetNumberOfChunks:
-    def test_should_get_correct_number_of_chunks_with_sbatch_args(self) -> None:
-        sbatch_args = ["--abc=123", "--time=12:00:00", "--def=456"]
+    @pytest.mark.parametrize("time_arg", ["--time=12:00:00", "-t=12:00:00"])
+    def test_should_get_correct_number_of_chunks_with_sbatch_args(self, time_arg: str) -> None:
+        sbatch_args = ["--abc=123", time_arg, "--def=456"]
         env_vars = {}
         job_script = Path("my_script.sh")
+        assert get_n_chunks(sbatch_args, env_vars, job_script) == 4
+
+    @pytest.mark.parametrize("time_arg", ["--time=12:00:00", "-t=12:00:00"])
+    def test_should_get_correct_number_of_chunks_with_script_header(
+        self, tmp_path: Path, time_arg: str
+    ) -> None:
+        sbatch_args = ["--abc=123", "--def=456"]
+        env_vars = {}
+        job_script = tmp_path / "my_script"
+        job_script.write_text(f"#SBATCH {time_arg}")
+
         assert get_n_chunks(sbatch_args, env_vars, job_script) == 4
 
     def test_should_get_correct_number_of_chunks_with_env_vars(self) -> None:
         sbatch_args = ["--abc=123", "--def=456"]
         env_vars = {"SBATCH_TIMELIMIT": "12:00:00"}
         job_script = Path("my_script.sh")
-        assert get_n_chunks(sbatch_args, env_vars, job_script) == 4
-
-    def test_should_get_correct_number_of_chunks_with_script_header(
-        self,
-        tmp_path: Path,
-    ) -> None:
-        sbatch_args = ["--abc=123", "--def=456"]
-        env_vars = {}
-        job_script = tmp_path / "my_script"
-        job_script.write_text("#SBATCH --time=12:00:00")
-
         assert get_n_chunks(sbatch_args, env_vars, job_script) == 4
 
 

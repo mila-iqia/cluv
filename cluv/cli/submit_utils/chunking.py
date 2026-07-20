@@ -18,8 +18,7 @@ def chunking_update_sbatch_args(
     sbatch_args = sbatch_args.copy()
 
     # Remove any existing --time or -t args, and add the new one at the end.
-    # TODO : --time-min case
-    sbatch_args = [arg for arg in sbatch_args if not arg.startswith(("--time", "-t"))]
+    sbatch_args = [arg for arg in sbatch_args if not arg.startswith(("--time=", "-t="))]
     sbatch_args.append(f"--time={CHUNK_SIZE}:00:00")
     sbatch_args.append(f"--array=0-{n_chunks - 1}%1")
 
@@ -37,6 +36,7 @@ def get_n_chunks(sbatch_args: list[str], env_vars: dict[str, str], job_script: P
         or env_vars.get("SBATCH_TIMELIMIT")
         or get_time_from_job_script_header(job_script)
     )
+    logger.info("Found SLURM time limit: %s", slurm_time)
 
     if not slurm_time:
         raise ValueError(
@@ -58,7 +58,7 @@ def get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
     """Return the SLURM time limit from the sbatch args if it exists."""
     # Last occurrence of --time or -t takes precedence, so we iterate in reverse.
     for arg in reversed(sbatch_args):
-        if arg.startswith(("--time", "-t")):
+        if arg.startswith(("--time=", "-t=")):
             # Like "--time=00:10:00" or "-t=1-02:00:00"
             return arg.split("=")[1]
 
@@ -68,9 +68,12 @@ def get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
 def get_time_from_job_script_header(job_script: Path) -> str | None:
     """Return the SLURM time limit from the job script header if it exists."""
     for line in job_script.read_text().splitlines():
-        if line.startswith("#SBATCH") and "--time=" in line:
-            # Like "#SBATCH --time=1:00:00"
-            return line[line.index("--time=") + len("--time=") :].split()[0]
+        # For case like "#SBATCH --time=1:00:00" or "#SBATCH -t=1:00:00"
+        if line.startswith("#SBATCH"):
+            if "--time=" in line:
+                return line[line.index("--time=") + len("--time=") :].split()[0]
+            elif "-t=" in line:
+                return line[line.index("-t=") + len("-t=") :].split()[0]
 
         if not line.strip().startswith("#"):
             # Stop parsing once we leave the header.

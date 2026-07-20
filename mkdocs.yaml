@@ -45,6 +45,9 @@ theme:
     - content.code.annotate
     - navigation.sections
     - navigation.path
+    - search.share
+    - search.suggest
+    - search.highlight
   icon:
     repo: fontawesome/brands/github
 extra_css:

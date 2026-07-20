@@ -58,8 +58,9 @@ class TestCheckCluvConfig:
         check_cluv_config(p)
         config = load_cluv_config(p)
         expected_config = load_cluv_config(REPO_ROOT / "pyproject.toml")
+        expected_results_path = f"$SCRATCH/logs/{tmp_path.name}"
 
-        assert config.results_path == expected_config.results_path
+        assert config.results_path == expected_results_path
         assert config.env == expected_config.env
         assert config.clusters_names == expected_config.clusters_names
         assert config.clusters == expected_config.clusters
@@ -103,7 +104,7 @@ class TestSymlinkCheck:
         expected_results_scratch_path = Path(os.path.expandvars(DEFAULT_RESULTS_PATH))
 
         check_symlink_to_scratch(
-            project_root=fake_project_root,
+            project_path=fake_project_root,
             results_path=DEFAULT_RESULTS_PATH,
             results_symlink=DEFAULT_RESULTS_LINKNAME,
         )

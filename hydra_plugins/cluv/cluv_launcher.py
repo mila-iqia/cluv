@@ -347,7 +347,11 @@ class CluvLauncher(Launcher):
             cluster_remotes = {self.cluster: await Remote.connect(self.cluster)}
         self.cluster_remotes = cluster_remotes
 
-        await sync([hostname for hostname, remote in self.cluster_remotes.items() if remote])
+        clusters_to_sync_with = [
+            hostname for hostname, remote in self.cluster_remotes.items() if remote
+        ]
+        if clusters_to_sync_with:
+            await sync(clusters_to_sync_with)
 
     def __del__(self):
         if hasattr(self, "_loop"):

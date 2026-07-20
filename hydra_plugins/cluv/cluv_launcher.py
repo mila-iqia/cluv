@@ -610,6 +610,13 @@ def _jobs_to_hydra_jobreturn_format(
                     overrides=run.command,
                     working_dir=str(run.results_path),
                     status=job_status,
+                    _return_value=(
+                        RuntimeError(
+                            f"Job {run.run_id} failed, see the output file {out} for more info."
+                        )
+                        if job_status is JobStatus.FAILED
+                        else None
+                    ),
                 )
             )
     return job_returns

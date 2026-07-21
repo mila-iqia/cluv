@@ -11,69 +11,47 @@ cluv <command> [options]
 
 **Commands**
 
-[`cluv init`](#cluv-init)
+**[`cluv init`](#cluv-init)**
+:   Initialize a project.
 
-Initialize a project.
-{: .indent }
+**[`cluv login`](#cluv-login)**
+:   Establish SSH connections to clusters.
 
-[`cluv login`](#cluv-login)
+**[`cluv sync`](#cluv-sync)**
+:   Sync your project on clusters.
 
-Establish SSH connections to clusters.
-{: .indent }
+**[`cluv submit`](#cluv-submit)**
+:   Submit a job to clusters.
 
-[`cluv sync`](#cluv-sync)
+**[`cluv clean`](#cluv-clean)**
+:   Remove run results from clusters once they're gone locally.
 
-Sync your project on clusters.
-{: .indent }
+**[`cluv status`](#cluv-status)**
+:   Show the status of clusters and jobs.
 
-[`cluv submit`](#cluv-submit)
+**[`cluv disable`](#cluv-disable)**
+:   Temporarily skip a cluster in other commands.
 
-Submit a job to clusters.
-{: .indent }
+**[`cluv enable`](#cluv-enable)**
+:   Re-enable a previously disabled cluster.
 
-[`cluv clean`](#cluv-clean)
-
-Remove run results from clusters once they're gone locally.
-{: .indent }
-
-[`cluv status`](#cluv-status)
-
-Show the status of clusters and jobs.
-{: .indent }
-
-[`cluv disable`](#cluv-disable)
-
-Temporarily skip a cluster in other commands.
-{: .indent }
-
-[`cluv enable`](#cluv-enable)
-
-Re-enable a previously disabled cluster.
-{: .indent }
-
-[`cluv run`](#cluv-run)
-
-Run a command on a specific cluster.
-{: .indent }
+**[`cluv run`](#cluv-run)**
+:   Run a command on a specific cluster.
 
 **Options**
 
 Available for all commands.
 
 `-h`, `--help`
+:   Show the help message for the command and exit.
 
-Show the help message for the command and exit.
-{: .indent }
 
 `-v`, `--verbose`
-
-Increase logging verbosity. Can be repeated: `-v` shows info-level logs, `-vv` (or more) shows debug-level logs. Defaults to warning-level logs only.
-{: .indent }
+:   Increase logging verbosity. Can be repeated: `-v` shows info-level logs, `-vv` (or more) shows debug-level logs. Defaults to warning-level logs only.
 
 `-q`, `--quiet`
+:   Disable command output. Has no effect on `cluv status`.
 
-Disable command output. Has no effect on `cluv status`.
-{: .indent }
 
 ---
 
@@ -107,9 +85,7 @@ cluv init [path]
 **Arguments**
 
 `path`
-
-The path to use for the project. Defaults to the current working directory.
-{: .indent }
+:   The path to use for the project. Defaults to the current working directory.
 
 ---
 
@@ -130,9 +106,7 @@ cluv login [clusters]
 **Arguments**
 
 `clusters`
-
-The clusters to connect to. If not specified, will connect to all clusters in the config. Unreachable clusters will be skipped.
-{: .indent }
+:   The clusters to connect to. If not specified, will connect to all clusters in the config. Unreachable clusters will be skipped.
 
 ---
 
@@ -154,16 +128,14 @@ cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
 **Arguments**
 
 `clusters`
-
-One or more cluster hostnames to synchronize with (space-separated). If omitted, synchronizes with every cluster you currently have an active SSH connection to (see [`cluv login`](#cluv-login)).
-{: .indent }
+:   One or more cluster hostnames to synchronize with (space-separated). 
+    If omitted, synchronizes with every cluster you currently have an active SSH connection to (see [`cluv login`](#cluv-login)).
 
 **Options**
 
 `--sync-datasets`, `--no-sync-datasets`
-
-Push/pull datasets from `data_source` to each cluster as part of the sync. Requires `data_source` to be set in the config. Enabled by default.
-{: .indent }
+:   Push/pull datasets from `data_source` to each cluster as part of the sync.
+    Requires `data_source` to be set in the config. Enabled by default.
 
 ---
 
@@ -184,26 +156,20 @@ cluv submit [options] <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]
 **Arguments**
 
 `cluster`
-
-The cluster to submit the job on. Can be set to `first` to submit the job to every cluster and wait until one of them starts; once one starts, the others are automatically cancelled.
-{: .indent }
+:   The cluster to submit the job on. Can be set to `first` to submit the job to every cluster and
+    wait until one of them starts; once one starts, the others are automatically cancelled.
 
 `job.sh`
-
-Path to the sbatch job script, relative to the project root. Defaults to the job script configured at `job_script_path` for the target cluster.
-{: .indent }
+:   Path to the sbatch job script, relative to the project root. Defaults to the job script
+    configured at `job_script_path` for the target cluster.
 
 `sbatch-args` / `program-args`
-
-Any arguments before `--` are forwarded as flags to `sbatch`. Arguments after `--` are passed to the job script itself.
-{: .indent }
+:   Any arguments before `--` are forwarded as flags to `sbatch`. Arguments after `--` are passed to the job script itself.
 
 **Options**
 
 `--autocommit`
-
-Automatically create a local commit with the tracked changes before submitting, instead of failing when the working tree is dirty.
-{: .indent }
+:   Automatically create a local commit with the tracked changes before submitting, instead of failing when the working tree is dirty.
 
 ---
 
@@ -227,21 +193,15 @@ cluv clean [clusters] [-f | --force] [--dry-run]
 **Arguments**
 
 `clusters`
-
-One or more cluster hostnames to clean. If omitted, cleans every cluster you currently have an active SSH connection to and that has been synced before.
-{: .indent }
+:   One or more cluster hostnames to clean. If omitted, cleans every cluster you currently have an active SSH connection to and that has been synced before.
 
 **Options**
 
 `-f`, `--force`
-
-Skip the confirmation prompt.
-{: .indent }
+:   Skip the confirmation prompt.
 
 `--dry-run`
-
-Show what would be deleted, without deleting anything.
-{: .indent }
+:   Show what would be deleted, without deleting anything.
 
 ---
 
@@ -265,9 +225,7 @@ cluv status [table]
 **Arguments**
 
 `table`
-
-Which table to display in the status output. Can be one of `jobs`, `clusters`, or `all`. Defaults to `all`.
-{: .indent }
+:   Which table to display in the status output. Can be one of `jobs`, `clusters`, or `all`. Defaults to `all`.
 
 ---
 
@@ -288,14 +246,11 @@ cluv disable <cluster> [period]
 **Arguments**
 
 `cluster`
-
-The cluster hostname to disable.
-{: .indent }
+:   The cluster hostname to disable.
 
 `period`
-
-How long to disable the cluster for. Accepts an integer (days), a Slurm-style `HH:MM:SS` / `D-HH:MM:SS` string, or suffixed values like `2h`, `1d 6h`. Omit to disable indefinitely, until [`cluv enable`](#cluv-enable) is run.
-{: .indent }
+:   How long to disable the cluster for. Accepts an integer (days), a Slurm-style `HH:MM:SS` / `D-HH:MM:SS` string, 
+    or suffixed values like `2h`, `1d 6h`. Omit to disable indefinitely, until [`cluv enable`](#cluv-enable) is run.
 
 ---
 
@@ -311,9 +266,7 @@ cluv enable <cluster>
 **Arguments**
 
 `cluster`
-
-The cluster hostname to re-enable.
-{: .indent }
+:   The cluster hostname to re-enable.
 
 ---
 
@@ -332,11 +285,7 @@ cluv run <cluster> <command>
 **Arguments**
 
 `cluster`
-
-The cluster to run the command on.
-{: .indent }
+:   The cluster to run the command on.
 
 `command`
-
-The command to run, along with any of its arguments.
-{: .indent }
+:   The command to run, along with any of its arguments.

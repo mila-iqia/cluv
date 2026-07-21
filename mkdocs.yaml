@@ -50,8 +50,6 @@ theme:
     - search.highlight
   icon:
     repo: fontawesome/brands/github
-extra_css:
-  - stylesheets/extra.css
 markdown_extensions:
   - pymdownx.highlight: # https://squidfunk.github.io/mkdocs-material/reference/code-blocks/#configuration
       anchor_linenums: true
@@ -65,6 +63,7 @@ markdown_extensions:
   - pymdownx.details
   # For annotations https://squidfunk.github.io/mkdocs-material/reference/annotations/?h=annota#annotations
   - attr_list
+  - def_list
   - md_in_html
   - pymdownx.superfences:
       custom_fences:

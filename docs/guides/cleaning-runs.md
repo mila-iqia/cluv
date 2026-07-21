@@ -1,8 +1,6 @@
 # Cleaning up run results on the clusters
 
-## The problem
-
-`cluv sync` copies run results (logs, checkpoints, anything under your
+[`cluv sync`](../commands.md#cluv-sync) copies run results (logs, checkpoints, anything under your
 `results_path`) from each cluster back to your machine. It's a one-way copy: it
 never deletes anything, on either side. Two things follow from that:
 
@@ -12,7 +10,7 @@ never deletes anything, on either side. Two things follow from that:
   under `$SCRATCH`) on every cluster, forever. Nothing ever gets removed from
   there on its own.
 
-`cluv clean` is the other half of that workflow: once you're happy with a run and
+[`cluv clean`](../commands.md#cluv-clean) is the other half of that workflow: once you're happy with a run and
 have deleted its local folder, `clean` removes the matching folder from the
 cluster(s) it came from.
 

@@ -1,6 +1,6 @@
 # Syncing datasets across clusters
 
-`cluv sync` can also replicate datasets to every cluster listed in your Cluv config.
+[`cluv sync`](../commands.md#cluv-sync) can also replicate datasets to every cluster listed in your Cluv config.
 
 ## Configure dataset sync in `pyproject.toml`
 
@@ -48,6 +48,7 @@ With dataset sync enabled (default), Cluv will:
 
 ## Optional: skip dataset replication for one run
 
+If you need to skip the dataset replication step, specify:
 ```console
 cluv sync --no-sync-datasets
 ```

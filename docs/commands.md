@@ -144,7 +144,7 @@ cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
 Submit a Slurm job on a remote cluster.
 
 Enforces a clean git working tree, syncs the project to the target cluster (equivalent to running
-[`cluv sync`](#cluv-sync)), then runs `sbatch` on the remote, merging the global and per-cluster arguments from the config.
+[`cluv sync`](#cluv-sync)), then runs `sbatch` on the remote, merging the global and per-cluster arguments from the config with the args from the command line.
 
 See the ["Configuring job submission"](guides/submit-config.md) guide for more information.
 

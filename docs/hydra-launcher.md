@@ -40,7 +40,7 @@ Take a look at the pyproject.toml file of this example:
 --8<-- "examples/hydra_example/pyproject.toml:26"
 ```
 
-See [config reference](../reference/config.md) for all available fields.
+See [config reference](reference/config.md) for all available fields.
 
 
 ## Add a job script

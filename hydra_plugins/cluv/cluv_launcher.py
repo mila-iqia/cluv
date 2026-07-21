@@ -17,7 +17,7 @@ import os.path
 import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, ClassVar, Literal, NewType
+from typing import Any, Callable, ClassVar, Literal
 
 import hydra_zen
 import omegaconf
@@ -64,8 +64,6 @@ def cluv_resolver(attr: str, default: str | None = None) -> str | None:
 
 omegaconf.OmegaConf.register_new_resolver("cluv", cluv_resolver, replace=True)
 
-ClusterHostname = NewType("ClusterHostname", str)
-
 
 # Made this a dataclass to avoid having an ugly default repr, but it causes issues with
 # hydra-auto-schema because it tries to create a schema for everything here.
@@ -84,7 +82,7 @@ class CluvLauncher(Launcher):
     def __init__(
         self,
         ## NEW args:
-        cluster: Literal["current", "first"] | ClusterHostname = "current",
+        cluster: Literal["current", "first"] | str = "current",
         job_script: str | Path | None = None,
         autocommit: bool = False,
         vram_gb: int | None = None,  # Enables job packing!
@@ -199,7 +197,7 @@ class CluvLauncher(Launcher):
                     f"If you are on a local machine, set `cluster` to the hostname of a cluster, or use 'first' to use "
                     f"all clusters and keep the fastest to start your job."
                 )
-            cluster = ClusterHostname(this_cluster)
+            cluster = this_cluster
         self.cluster = cluster
         self.job_script = PurePosixPath(job_script) if job_script else None
         self.autocommit = autocommit

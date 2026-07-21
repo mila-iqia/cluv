@@ -81,11 +81,31 @@ jobs:
           name: coverage-reports-unit-tests-${{ matrix.platform }}-${{
             matrix.python-version }}
           path: ./coverage.xml
-  integration_tests:
+  # Launches a Slurm job on the Mila cluster that registers a fresh, ephemeral self-hosted
+  # GitHub Actions runner (labeled "self-hosted" and "mila"). This runs on the pre-existing
+  # persistent self-hosted runner (a dev machine with active SSH connections to the clusters),
+  # so it doesn't need to prompt for 2FA.
+  launch-slurm-actions-runner:
     needs: [ unit_tests ]
     runs-on: self-hosted
-    # TODO: remove this once we have a decently solid setup, not too reliant on the dev machine
-    # having active SSH connections to the Slurm clusters.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Copy job script to the cluster
+        # The script will be overwritten by different CI runs, but it shouldn't really
+        # change, so not a big deal.
+        run: "scp .github/launch_actions_runner.sh mila:launch_actions_runner.sh"
+
+      - name: Launch Slurm Actions Runner
+        run: ssh mila 'cd $SCRATCH && sbatch --parsable $HOME/launch_actions_runner.sh'
+
+  # This step runs in a self-hosted Github Actions runner inside a SLURM job on a compute node of the cluster.
+  slurm_integration_tests:
+    name: Run integration tests on the Mila cluster in a SLURM job
+    needs: [ launch-slurm-actions-runner ]
+    runs-on: [ "self-hosted", "mila" ]
+    timeout-minutes: 30
+    # TODO: remove this once we have validated that this new, Slurm-job-hosted runner setup is stable.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v6
@@ -113,7 +133,7 @@ jobs:
 
   # https://about.codecov.io/blog/uploading-code-coverage-in-a-separate-job-on-github-actions/
   upload-coverage-codecov:
-    needs: [ unit_tests, integration_tests ]
+    needs: [ unit_tests, slurm_integration_tests ]
     runs-on: ubuntu-latest
     name: Upload coverage reports to Codecov
     timeout-minutes: 5

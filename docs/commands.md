@@ -128,7 +128,7 @@ cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
 **Arguments**
 
 `clusters`
-:   One or more cluster hostnames to synchronize with (space-separated). 
+:   One or more cluster hostnames to synchronize with (space-separated).
     If omitted, synchronizes with every cluster you currently have an active SSH connection to (see [`cluv login`](#cluv-login)).
 
 **Options**
@@ -249,7 +249,7 @@ cluv disable <cluster> [period]
 :   The cluster hostname to disable.
 
 `period`
-:   How long to disable the cluster for. Accepts an integer (days), a Slurm-style `HH:MM:SS` / `D-HH:MM:SS` string, 
+:   How long to disable the cluster for. Accepts an integer (days), a Slurm-style `HH:MM:SS` / `D-HH:MM:SS` string,
     or suffixed values like `2h`, `1d 6h`. Omit to disable indefinitely, until [`cluv enable`](#cluv-enable) is run.
 
 ---

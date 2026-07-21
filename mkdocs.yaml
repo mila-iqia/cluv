@@ -6,13 +6,13 @@ edit_uri: edit/master/docs/
 
 nav:
   - Home: index.md
+  - Hydra launcher: hydra-launcher.md
   - Commands: commands.md
   - Guides:
       - Introduction: guides/introduction.md
       - Syncing datasets: guides/syncing-datasets.md
       - Configuring job submission: guides/submit-config.md
       - Cleaning runs: guides/cleaning-runs.md
-      - Hydra launcher: guides/hydra-launcher.md
   - Reference:
       - CLI:
           - init: reference/cli/init.md

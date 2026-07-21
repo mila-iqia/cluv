@@ -75,7 +75,7 @@ Create a Hydra config file that selects the Cluv launcher. This is typically pla
 If you already have a `configs/launcher/submitit.yaml`, switching to Cluv only requires two
 changes:
 
-```yaml
+```yaml title="configs/launcher/submitit.yaml"
 # Before:
 defaults:
   - override /hydra/launcher: submitit_slurm

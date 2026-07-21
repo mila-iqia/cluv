@@ -51,7 +51,7 @@ cluv sync
 ```
 
 Need to set up dataset replication with `cluv sync`? See the
-[dataset sync guide](guides/syncing-datasets.md).
+["Syncing datasets"](guides/syncing-datasets.md) guide.
 
 
 ### Launch a Hydra sweep on a remote cluster
@@ -60,7 +60,7 @@ Need to set up dataset replication with `cluv sync`? See the
 python main.py -m launcher=cluv lr=0.01,0.001 +seed=1,2,3
 ```
 
-See the [Hydra launcher guide](guides/hydra-launcher.md) for setup and usage.
+See the [Hydra launcher](hydra-launcher.md) page for setup and usage.
 
 
 ### Sync your project on a specific cluster
@@ -73,12 +73,14 @@ cluv sync rorqual
 cluv clean
 ```
 
-See the [cleaning up runs guide](guides/cleaning-runs.md) for details on how this decides what's safe to delete.
+See the ["Cleaning runs"](guides/cleaning-runs.md) guide for details on how this decides what's safe to delete.
 
 ### Submit a job to a specific cluster
 ```console
 cluv submit rorqual scripts/job.sh --time=00:10:00 -- python main.py
 ```
+
+See the ["Configuring job submission"](guides/submit-config.md) guide for details on how to use the config to submit jobs.
 
 ### Run a command in the synced project a specific cluster
 ```console

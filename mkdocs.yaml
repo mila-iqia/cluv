@@ -1,4 +1,4 @@
-site_name: cluv Documentation
+site_name: Cluv Documentation
 repo_name: mila-iqia/cluv
 repo_url: https://github.com/mila-iqia/cluv
 docs_dir: docs
@@ -6,10 +6,13 @@ edit_uri: edit/master/docs/
 
 nav:
   - Home: index.md
+  - Hydra launcher: hydra-launcher.md
+  - Commands: commands.md
   - Guides:
       - Introduction: guides/introduction.md
       - Syncing datasets: guides/syncing-datasets.md
-      - Hydra launcher: guides/hydra-launcher.md
+      - Configuring job submission: guides/submit-config.md
+      - Cleaning runs: guides/cleaning-runs.md
   - Reference:
       - CLI:
           - init: reference/cli/init.md
@@ -22,12 +25,31 @@ nav:
 
 theme:
   name: material
+  palette:
+    # Palette toggle for light mode
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
   features:
     - content.action.edit
     - content.action.view
     - navigation.expand
     - content.code.copy
     - content.code.annotate
+    - navigation.sections
+    - navigation.path
+    - search.share
+    - search.suggest
+    - search.highlight
+  icon:
+    repo: fontawesome/brands/github
 markdown_extensions:
   - pymdownx.highlight: # https://squidfunk.github.io/mkdocs-material/reference/code-blocks/#configuration
       anchor_linenums: true
@@ -41,7 +63,13 @@ markdown_extensions:
   - pymdownx.details
   # For annotations https://squidfunk.github.io/mkdocs-material/reference/annotations/?h=annota#annotations
   - attr_list
+  - def_list
   - md_in_html
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 plugins:
   - search
   - mkdocstrings:

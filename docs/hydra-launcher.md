@@ -20,18 +20,16 @@ What it adds on top of Submitit:
 1.   This is similar in spirit to the [`JobEnvironment`](https://github.com/facebookincubator/submitit/blob/ca51a66b6da2400468f338133eabdfb4c9a2936c/submitit/core/job_environment.py#L22) class of submitit.
 
 
-## 1. Installation
+## Installation
 
 Add the `hydra` extra when installing cluv:
 
 ```console
-uv add git+https://github.com/mila-iqia/cluv --extra hydra
+uv add cluster-uv[hydra]
 ```
 
-Cluv isn't published on PyPI yet. Once it is, you will be able to just `uv add cluv[hydra]`.
 
-
-## 2. Configure your project
+## Configure your project
 
 Your `pyproject.toml` needs a `[tool.cluv]` section with at least a `results_path` and
 the clusters you want to target. A minimal setup can be obtained by running `cluv init`.
@@ -42,10 +40,10 @@ Take a look at the pyproject.toml file of this example:
 --8<-- "examples/hydra_example/pyproject.toml:26"
 ```
 
-See [config reference](../reference/config.md) for all available fields.
+See [config reference](reference/config.md) for all available fields.
 
 
-## 3. Add a job script
+## Add a job script
 
 The launcher submits jobs using a shell script (just like `cluv submit`). The script receives
 the Python command as positional arguments via `$@`:
@@ -58,7 +56,7 @@ the Python command as positional arguments via `$@`:
     The `--output` flag is injected by the launcher, so you don't need it in the script.
 
 
-## 4. Add the launcher config
+## Add the launcher config
 
 Create a Hydra config file that selects the Cluv launcher. This is typically placed in
 `configs/launcher/cluv.yaml` so it can be activated with `+launcher=cluv` on the command line:
@@ -77,7 +75,7 @@ Create a Hydra config file that selects the Cluv launcher. This is typically pla
 If you already have a `configs/launcher/submitit.yaml`, switching to Cluv only requires two
 changes:
 
-```yaml
+```yaml title="configs/launcher/submitit.yaml"
 # Before:
 defaults:
   - override /hydra/launcher: submitit_slurm
@@ -93,7 +91,7 @@ hydra:
 ```
 
 
-## 5. Run a sweep
+## Run a sweep
 
 First, make sure you have active SSH connections:
 
@@ -115,7 +113,7 @@ The launcher will:
 4. Rsync results back to your local `results_symlink` directory.
 
 
-## 6. The `${cluv:...}` resolver
+## The `${cluv:...}` resolver
 
 The launcher registers a custom OmegaConf resolver so Hydra configs can read live cluv job info:
 
@@ -142,7 +140,7 @@ The second argument (after the comma) is the default value, used when the job is
 inside Slurm — for example, during a local dry-run.
 
 
-## 7. Reading cluster info inside your script
+## Reading cluster info inside your script
 
 Use `cluv.job.current_run_info()` to access cluster-specific settings at runtime:
 

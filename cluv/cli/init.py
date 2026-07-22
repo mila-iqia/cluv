@@ -74,7 +74,7 @@ def init(path: Path | None = None) -> None:
     console.print()
     console.print("Next steps :")
     console.print(
-        "=>  Learn more how to use cluv with user guides : https://mila-iqia.github.io/cluv/"
+        "=>  Learn more on how to use cluv with the [bold]documentation[/bold] : https://mila-iqia.github.io/cluv/"
     )
     console.print(
         "=> [bold] cluv login [/bold] : open a SSH connections to all configured clusters."

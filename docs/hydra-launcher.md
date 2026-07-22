@@ -37,7 +37,7 @@ the clusters you want to target. A minimal setup can be obtained by running `clu
 Take a look at the pyproject.toml file of this example:
 
 ```toml title="pyproject.toml"
---8<-- "examples/hydra_example/pyproject.toml:26"
+--8<-- "examples/hydra_example/pyproject.toml:23"
 ```
 
 See [config reference](reference/config.md) for all available fields.

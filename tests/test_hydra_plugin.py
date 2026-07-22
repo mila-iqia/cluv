@@ -1,9 +1,13 @@
 import subprocess
 import textwrap
+import unittest.mock
 from pathlib import Path
 from typing import Literal
 
 import pytest
+
+from cluv.cache import Job
+from cluv.config import CluvConfig, PartialClusterConfig
 
 
 @pytest.mark.parametrize(
@@ -125,3 +129,79 @@ def test_hydra_launcher_is_discoverable(
     assert (
         "RuntimeError: cluv init should be run in a directory under your home directory." in error
     )
+
+
+@pytest.fixture
+def fake_cache_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    import cluv.cache
+
+    monkeypatch.setattr(cluv.cache, cluv.cache._get_cache_dir.__name__, lambda: cache_dir)
+    return cache_dir
+
+
+async def test_run_sweep_races_every_job_independently_on_first(
+    tmp_path: Path, fake_cache_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression test for a bug found while making `run_sweep` submit concurrently: it used to
+    feed the cluster that won job 1's "first" race back into the `cluster` argument for jobs 2,
+    3, ..., silently skipping their own multi-cluster race. Every job in a sweep must always
+    race independently on the originally requested cluster.
+    """
+    # `hydra_plugins.cluv.cluv_launcher` needs the optional "hydra" extra (hydra-core etc.),
+    # which isn't part of the default dev environment — skip gracefully when it's absent, same
+    # as the rest of this file relies on an isolated subprocess venv for it.
+    cluv_launcher = pytest.importorskip("hydra_plugins.cluv.cluv_launcher")
+
+    submitted_clusters: list[str] = []
+    resolved_clusters = iter(["cluster_a", "cluster_b", "cluster_c"])
+
+    async def fake_submit(
+        cluster: str,
+        job_script,
+        sbatch_args,
+        program_args,
+        _skip_sync: bool = False,
+    ) -> Job:
+        submitted_clusters.append(cluster)
+        return Job(
+            job_id=len(submitted_clusters),
+            cluster=next(resolved_clusters),
+            job_script=str(job_script),
+            git_commit="dummy",
+            submitted_at="2026-01-01T00:00:00",
+            sbatch_args=sbatch_args,
+            program_args=program_args,
+        )
+
+    monkeypatch.setattr(cluv_launcher, "submit", unittest.mock.AsyncMock(wraps=fake_submit))
+    monkeypatch.setattr(cluv_launcher, "monitor_jobs_async", unittest.mock.AsyncMock())
+    monkeypatch.setattr(cluv_launcher, "fetch_results", unittest.mock.AsyncMock(return_value=[]))
+    monkeypatch.setattr(cluv_launcher, "get_results_path", lambda: tmp_path / "results")
+
+    config = CluvConfig(
+        results_path=str(tmp_path / "results"),
+        clusters={"cluster_a": PartialClusterConfig(project_dir="/home/user/proj")},
+    )
+
+    job_infos = await cluv_launcher.run_sweep(
+        job_commands=[
+            ["python", "main.py", "lr=0.1"],
+            ["python", "main.py", "lr=0.2"],
+            ["python", "main.py", "lr=0.3"],
+        ],
+        cluster="first",
+        cluv_config=config,
+        cluster_remotes={},
+        job_script=None,
+        params={},
+        chunking=False,
+        packing=False,
+    )
+
+    # Every job must have been submitted against the *original* "first" target, never against a
+    # previously-resolved concrete hostname from another job in the same sweep.
+    assert submitted_clusters == ["first", "first", "first"]
+    # Each job's own resolved (winning) cluster must still be tracked correctly, though.
+    assert {job.cluster for job in job_infos} == {"cluster_a", "cluster_b", "cluster_c"}

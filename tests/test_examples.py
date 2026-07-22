@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from cluv.cli.sync import get_active_remotes
 from cluv.remote import control_socket_is_running
 
 # TODO: Also run this test on the Mila cluster using the same self-hosted runner setup as in
@@ -45,7 +46,6 @@ async def test_hydra_example(
     """
     if cluster != "first" and not (await control_socket_is_running(cluster)):
         pytest.xfail(f"Need an active connection to {cluster} for this test to run.")
-    from cluv.cli.sync import get_active_remotes
 
     if cluster == "first" and not (await get_active_remotes()):
         pytest.fail(

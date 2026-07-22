@@ -116,13 +116,13 @@ cluv status
         login ===> clean
         login ===> run
 
-        click init "../commands/#cluv-init"
-        click login "../commands/#cluv-login"
-        click sync "../commands/#cluv-sync"
-        click submit "../commands/#cluv-submit"
-        click status "../commands/#cluv-status"
-        click disable "../commands/#cluv-disable"
-        click enable "../commands/#cluv-enable"
-        click clean "../commands/#cluv-clean"
-        click run "../commands/#cluv-run"
+        click init "commands/#cluv-init"
+        click login "commands/#cluv-login"
+        click sync "commands/#cluv-sync"
+        click submit "commands/#cluv-submit"
+        click status "commands/#cluv-status"
+        click disable "commands/#cluv-disable"
+        click enable "commands/#cluv-enable"
+        click clean "commands/#cluv-clean"
+        click run "commands/#cluv-run"
 ```

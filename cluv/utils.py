@@ -18,6 +18,7 @@ console_lock: contextvars.ContextVar[asyncio.Lock | None] = contextvars.ContextV
 
 
 def current_cluster() -> str | None:
+    """Returns the name of the current cluster (Mila,DRAC), or `None` if not on a cluster (or on an unknown cluster)."""
     if socket.gethostname().endswith(".server.mila.quebec"):
         return "mila"
     if "CC_CLUSTER" in os.environ:

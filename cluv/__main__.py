@@ -20,6 +20,7 @@ import rich.logging
 import rich_argparse
 import simple_parsing
 
+from . import __version__
 from .cli.clean import clean
 from .cli.init import init
 from .cli.login import login
@@ -56,6 +57,11 @@ def main(argv: list[str] | None = None) -> None:
         epilog="For more information, see the documentation. You rock.",
     )
     _add_v_arg(parser, _root=True)  # add -v/--verbose on the top-level parser.
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"cluv {__version__}",
+    )
 
     subparsers = parser.add_subparsers(dest="<command>", required=True)
 

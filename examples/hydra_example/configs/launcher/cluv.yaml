@@ -20,7 +20,7 @@ hydra:
 
   launcher:
     ## NEW ARGUMENTS for cluv:
-    cluster: first
+    cluster: mila
     job_script: scripts/job.sh
     autocommit: false
     # chunking: true  # (Coming soon: Automatically chunk jobs into shorter chunks)

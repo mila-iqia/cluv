@@ -14,13 +14,14 @@ from pathlib import Path, PurePosixPath
 import rich.syntax
 import rich.table
 import rich.text
-from rich.live import Live
 
+from cluv import tui
 from cluv.cache import Job, save_job
 from cluv.cli.sync import get_active_remotes, sync
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
+from cluv.tui import JobWaitProgress
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
@@ -203,6 +204,10 @@ async def submit_first(
         for cluster in cluster_to_remote
     }
 
+    # Identifies this call among any other `submit_first()` calls running concurrently (e.g. a
+    # Hydra sweep submitting many jobs at once). Only shown when more than one call is active.
+    label = shlex.join(program_args) if program_args else str(job_script or "job")
+
     # Submit the job on all the clusters (and possibly locally).
     sbatch_commands = {
         cluster: get_sbatch_command(
@@ -229,7 +234,9 @@ async def submit_first(
     cluster_to_sbatch_result = dict(zip(cluster_to_remote.keys(), sbatch_results))
 
     cluster_to_jobid: dict[str, int] = {}
-    table = rich.table.Table("Cluster", "Result", title="Jobs submitted on the clusters")
+    table = rich.table.Table(
+        "Cluster", "Result", title=f"Jobs submitted on the clusters — {label}"
+    )
     for cluster, sbatch_result in cluster_to_sbatch_result.items():
         sbatch_command = sbatch_commands[cluster]
         if isinstance(sbatch_result, BaseException) or sbatch_result.returncode != 0:
@@ -269,36 +276,23 @@ async def submit_first(
     }
     cancelling = False
 
-    def make_table() -> rich.table.Table:
-        table = rich.table.Table(
-            "Cluster",
-            "Job ID",
-            "Status",
-            title="Waiting for a job to start..."
-            if not cancelling
-            else "Waiting for jobs to cancel...",
+    def make_progress() -> JobWaitProgress:
+        return JobWaitProgress(
+            label=label,
+            cancelling=cancelling,
+            rows=[
+                (cluster, job_id, job_state)
+                for (cluster, job_id), job_state in cluster_and_jobid_to_jobstate.items()
+            ],
         )
-        for (cluster, job_id), job_state in cluster_and_jobid_to_jobstate.items():
-            table.add_row(
-                cluster,
-                str(job_id),
-                rich.text.Text(
-                    job_state,
-                    style="green"
-                    if job_state.startswith(("RUNNING", "COMPLETED", "CANCELLED"))
-                    else "yellow"
-                    if job_state.startswith(("PENDING", "UNKNOWN"))
-                    else "red",
-                ),
-            )
-        return table
 
     try:
-        with Live(get_renderable=make_table, console=console, refresh_per_second=1) as live:
+        async with tui.registry.section(make_progress()) as live:
             first_running_job = await wait_for_running_job(
                 cluster_and_jobid_to_jobstate, cluster_to_remote, max_wait_time_seconds
             )
-            live.update(make_table(), refresh=True)  # probably not entirely necessary.
+            live.update(make_progress())
+            live.refresh()  # probably not entirely necessary.
             if not first_running_job:
                 console.log("All submitted jobs have failed! Exiting.")
                 return None
@@ -314,7 +308,8 @@ async def submit_first(
                 cluster_to_remote,
                 max_wait_time_seconds,
             )
-            live.update(make_table(), refresh=True)  # probably not entirely necessary.
+            live.update(make_progress())
+            live.refresh()  # probably not entirely necessary.
 
         console.print(
             f"Successfully cancelled all other jobs except for job {first_running_job.job_id} "

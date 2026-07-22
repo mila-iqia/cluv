@@ -504,7 +504,7 @@ async def run_sweep(
             doing_job_packing=packing,
             doing_job_chunking=chunking,
         )
-        # TODO: If we leave the '%t' in the output file path, there are weid generated files?
+        # TODO: If we leave the '%t' in the output file path, there are weird generated files?
         output_args = [f"--output={_cluster_results_dir}/{_runid_template}/%j.out"]
 
     local_results_dir = get_results_path()

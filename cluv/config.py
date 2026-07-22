@@ -117,7 +117,13 @@ class CluvConfig(BaseModel):
     """Name of the symlink created in the project directory pointing to `results_path`."""
 
     data_source: str | None = None
-    """`hostname:/path` of where to get the data from."""
+    """`hostname:/path` or `/local/path` of where to get the data from.
+
+    When set to `hostname:/path`, Cluv pulls the dataset from the given remote cluster before
+    pushing it to all target clusters.
+    When set to a plain path (no `hostname:` prefix), the data is read directly from that local
+    path and pushed to each target cluster without a prior pull step.
+    """
 
     datasets_path: str | None = None
     """Path to a dataset directory, for example, `'$SCRATCH/my_dataset'`

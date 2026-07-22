@@ -19,6 +19,7 @@ nav:
           - login: reference/cli/login.md
           - run: reference/cli/run.md
           - submit: reference/cli/submit.md
+          - status: reference/cli/status.md
           - sync: reference/cli/sync.md
       - Config: reference/config.md
       - Remote: reference/remote.md

@@ -195,7 +195,7 @@ def current_run_id():
     if cluster is None:
         raise RuntimeError(
             "Could not determine the current cluster. Are you running this on a Slurm cluster?\n"
-            "(This can also happen if you are running the Hydra example forgot to pass the "
+            "(This can also happen if you are running the Hydra example and forgot to pass the "
             "`-m` / `--multirun` flag to Hydra to enable the launcher.)"
         )
     doing_job_packing = "SLURM_NTASKS_PER_GPU" in os.environ

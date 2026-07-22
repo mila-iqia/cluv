@@ -5,6 +5,7 @@ import logging
 import shlex
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from rich import box
 from rich.panel import Panel
@@ -540,7 +541,7 @@ async def get_job_infos(
     return live_info, clusters_job_stats
 
 
-async def status(table: str) -> None:
+async def status(table: Literal["clusters", "jobs", "all"]) -> None:
     """Show status of clusters and jobs.
 
     Parameters:

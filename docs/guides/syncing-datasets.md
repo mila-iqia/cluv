@@ -1,12 +1,12 @@
 # Syncing datasets across clusters
 
-`cluv sync` can also replicate datasets to every cluster listed in your Cluv config.
+[`cluv sync`](../commands.md#cluv-sync) can also replicate datasets to every cluster listed in your Cluv config.
 
-## 1) Configure dataset sync in `pyproject.toml`
+## Configure dataset sync in `pyproject.toml`
 
 Add `data_source` and `datasets_path` under `[tool.cluv]`:
 
-```toml
+```toml title="pyproject.toml"
 [tool.cluv]
 # Source cluster and source path (`hostname:/path`).
 data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
@@ -20,7 +20,7 @@ datasets_path = "$SCRATCH/datasets/cifar10"
 
 You can override `datasets_path` per cluster:
 
-```toml
+```toml title="pyproject.toml"
 [tool.cluv.clusters.killarney]
 datasets_path = "$HOME/datasets/cifar10"
 ```
@@ -42,7 +42,8 @@ datasets_path = "$SCRATCH/datasets/cifar10"
 Cluv will skip the remote-pull step and push the local directory straight to every
 configured cluster.
 
-## 2) Login to clusters (including the source)
+
+## Login to clusters (including the source)
 
 Before syncing, create reusable SSH connections:
 
@@ -52,7 +53,7 @@ cluv login
 
 If your source is `mila:...`, make sure the `mila` connection exists (for example `cluv login mila`).
 
-## 3) Run sync
+## Run sync
 
 ```console
 cluv sync
@@ -65,6 +66,7 @@ With dataset sync enabled (default), Cluv will:
 
 ## Optional: skip dataset replication for one run
 
+If you need to skip the dataset replication step, specify:
 ```console
 cluv sync --no-sync-datasets
 ```

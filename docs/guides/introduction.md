@@ -1,4 +1,3 @@
-
 # Introduction
 
 `cluv` aims to be a simple tool to make it easier to work with `uv` and to dispatch jobs across
@@ -6,34 +5,31 @@ multiple Slurm clusters.
 
 ## Who is this for?
 
-Cluv is for you if you:
+Cluv is for you if:
 
-- You use [uv](https://docs.astral.sh/uv/) (or would like to start using uv) to manage your Python projects and dependencies;
-- You have access to one or more HPC clusters running Slurm, and;
+- You have access to one or more HPC clusters running Slurm.
 - You want to easily synchronize and dispatch jobs on all the clusters you have access to.
-
+- You use [uv](https://docs.astral.sh/uv/) to manage your Python projects and dependencies.
 
 ## Goals
 
 These are the main goals of Cluv:
 
 ### Make it simple to synchronize a project across clusters
-- `cluv login`: Create a connection to all the cluster I care about (only once).
-- `cluv sync`: Sync my project to the clusters where I run jobs, and optionally rsync results back.
+- [`cluv init`](../commands.md#cluv-init): Generate a config for cluv in the project I want to synchronize and run.
+- [`cluv login`](../commands.md#cluv-login): Create a connection to all the cluster I care about.
+- [`cluv sync`](../commands.md#cluv-sync): Sync my project to the clusters where I run jobs, and optionally rsync results back.
 
 ### Easily dispatch jobs to different Slurm clusters
-- `cluv submit rorqual job.sh`: Synchronize the project and submit a job on the rorqual cluster.
+- [`cluv submit`](../commands.md#cluv-submit)` rorqual job.sh`: Synchronize the project and submit a job on the rorqual cluster.
 - `cluv submit first job.sh`: Submit the job on every configured cluster at once, keep whichever
   one starts running first, and cancel the rest.
 - `cluv sync`: Fetch the results from the clusters where I ran jobs previously.
-- `cluv run mila -- ls logs`: Sync the project and run a command in the project dir on a cluster.
-- `cluv clean`: Once I've deleted a run's results locally, remove the matching results from the cluster(s) it ran on. See the [cleaning up runs guide](cleaning-runs.md).
+- [`cluv run`](../commands.md#cluv-run)` mila -- ls logs`: Sync the project and run a command in the project dir on a cluster.
+- [`cluv clean`](../commands.md#cluv-clean): Once I've deleted a run's results locally, remove the matching results from the cluster(s) it ran on. See the ["Cleaning up run results on the clusters"](cleaning-runs.md).
 
 ### Intuitive monitoring of jobs and cluster health across clusters
-
-- Provide a simple, intuitive interface to monitor job status and cluster health across clusters
-  - `cluv status`: Show me an overview of all my clusters, including GPU availability, queue status, and job progress.
-
+- [`cluv status`](../commands.md#cluv-status): Show me an overview of all my clusters, including GPU availability, queue status, and job progress.
 
 ## Non-goals
 

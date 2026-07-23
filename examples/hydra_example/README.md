@@ -42,7 +42,7 @@ Activate the launcher config in `configs/launcher/cluv.yaml` with `launcher=cluv
 
 ```console
 cluv login
-uv run python main.py -m launcher=cluv lr=0.01,0.001 +seed=1,2,3
+uv run python main.py -m launcher=cluv lr=0.01,0.001 seed=1,2,3
 ```
 
 This syncs the project to the target cluster (set via `cluster:` in

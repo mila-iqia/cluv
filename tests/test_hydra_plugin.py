@@ -162,6 +162,7 @@ async def test_run_sweep_races_every_job_independently_on_first(
         job_script,
         sbatch_args,
         program_args,
+        autocommit: bool = False,
         _skip_sync: bool = False,
     ) -> Job:
         submitted_clusters.append(cluster)
@@ -195,7 +196,8 @@ async def test_run_sweep_races_every_job_independently_on_first(
         cluv_config=config,
         cluster_remotes={},
         job_script=None,
-        params={},
+        sbatch_args={},
+        autocommit=False,
         chunking=False,
         packing=False,
     )

@@ -12,13 +12,8 @@ dependencies = [
     "wandb>=0.27.0",
 ]
 
-# [build-system]
-# requires = ["hatchling"]
-# build-backend = "hatchling.build"
-
 [tool.uv.sources]
 cluster-uv = { workspace = true }
-
 
 ###  --------------   CLUV CONFIG   --------------  ###
 
@@ -31,8 +26,6 @@ results_symlink = "logs"
 # Where to read the data from when synchronizing data to all clusters.
 data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
 # Where the dataset should be replicated on all clusters.
-# TODO?: On the source cluster (ex Mila), the folder will only contain symlinks, to avoid
-# duplicating the data.
 datasets_path = "$SCRATCH/datasets/cifar10"
 
 [tool.cluv.env]
@@ -48,9 +41,9 @@ requeue = true
 mem = "16G"
 
 [tool.cluv.local]
-## Settings (environment variables) applied when using cluv on a local machine (not on a Slurm cluster).
+# Settings (environment variables) applied when using cluv on a local machine (not on a Slurm cluster).
 # Fake "$SCRATCH" directory to use when not on a Slurm cluster.
-# (this makes the examples runnable either from a laptop or from a Slurm cluster.
+# This makes the examples runnable either from a laptop or from a Slurm cluster.
 env = { SCRATCH = "$HOME/scratch" }
 
 

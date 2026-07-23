@@ -14,6 +14,7 @@ import cluv.cli.init
 import cluv.cli.submit
 import cluv.remote
 import cluv.slurm
+import cluv.tui
 import cluv.utils
 from cluv.cli.submit import (
     build_submit_command,
@@ -665,3 +666,79 @@ async def test_submit_first_considers_current_cluster(
         assert returned_job.job_id == this_cluster_jobid
     else:
         assert returned_job.job_id == other_cluster_jobid
+
+
+async def test_concurrent_submit_first_calls_share_one_live_display(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_current_cluster: str,
+    cluv_project_dir: Path,
+) -> None:
+    """Two concurrent `submit_first()` calls (e.g. a Hydra sweep submitting several jobs at
+    once) must not conflict over the terminal's live region, and each must resolve to its own
+    submitted job."""
+    import itertools
+
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda x: real_sleep(0.01 * x))
+
+    job_id_counter = itertools.count(1000)
+    job_query_counts: dict[int, int] = {}
+
+    def _result(stdout: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess((), returncode=0, stdout=stdout, stderr="")
+
+    async def fake_run(
+        program_and_args: tuple[str, ...],
+        input: str | None = None,
+        warn: bool = False,
+        hide: cluv.remote.Hide = False,
+        **other_kwargs,
+    ) -> subprocess.CompletedProcess[str]:
+        full_command = shlex.join(program_and_args)
+        if full_command.startswith("bash --login -c '") and "sbatch --parsable" in full_command:
+            job_id = next(job_id_counter)
+            job_query_counts[job_id] = 0
+            return _result(str(job_id))
+        for job_id in job_query_counts:
+            if full_command.startswith(f"sacct -j {job_id} --format=State"):
+                job_query_counts[job_id] += 1
+                return _result("RUNNING")
+        pytest.fail(f"Unexpected command: {full_command}")
+
+    monkeypatch.setattr(
+        cluv.remote, cluv.remote.run.__name__, unittest.mock.AsyncMock(wraps=fake_run)
+    )
+    monkeypatch.setattr(
+        cluv.slurm, cluv.slurm.run.__name__, unittest.mock.AsyncMock(wraps=fake_run)
+    )
+    monkeypatch.setattr(
+        cluv.cli.submit, cluv.cli.submit.run.__name__, unittest.mock.AsyncMock(wraps=fake_run)
+    )
+    monkeypatch.setattr(cluv.cli.submit, sync.__name__, unittest.mock.AsyncMock(return_value=[]))
+
+    job_script = cluv_project_dir / "my_script.sh"
+    job_script.parent.mkdir(exist_ok=True)
+    job_script.write_text("#!/bin/bash\necho Hello World\n")
+    job_script.touch(0o755)
+
+    results = await asyncio.gather(
+        submit_first(
+            job_script=job_script,
+            sbatch_args=[],
+            program_args=["task", "A"],
+            git_commit="dummy_git_commit",
+        ),
+        submit_first(
+            job_script=job_script,
+            sbatch_args=[],
+            program_args=["task", "B"],
+            git_commit="dummy_git_commit",
+        ),
+    )
+
+    assert all(results)
+    assert len({job.job_id for job in results}) == 2  # each call resolved its own distinct job
+
+    # The shared Live must be fully torn down once both concurrent calls have finished.
+    assert cluv.tui.registry._entries == {}
+    assert cluv.tui.registry._live is None

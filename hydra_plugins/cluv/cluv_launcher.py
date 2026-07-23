@@ -14,6 +14,7 @@ import inspect
 import itertools
 import logging
 import os.path
+import shlex
 import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
@@ -510,14 +511,16 @@ async def run_sweep(
     local_results_dir = get_results_path()
     sbatch_flags = [f"{k}={v}" if v is not None else f"{k}" for k, v in sbatch_args.items()]
 
-    job_infos: list[JobInfo] = []
-    for job_command in job_commands:
+    async def _submit_one(job_command: list[str]) -> JobInfo:
         # Use this so the output is where it would be if we used submitit.
         # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
         # TODO: Save the command used for submission in the output folder as well, since we
         # don't generate a job script?
         with set_context(display_commands, True):
             job = await submit(
+                # NOTE: Always the originally requested cluster (e.g. "first") for every job in
+                # the sweep. Each job independently races across clusters; the cluster that one
+                # job happens to land on must never be reused for another job's submission.
                 cluster=cluster,
                 job_script=Path(job_script) if job_script is not None else None,
                 # This passes all the sbatch args as flags.
@@ -532,14 +535,14 @@ async def run_sweep(
             )
         if job is None:
             raise RuntimeError("Unable to submit jobs! See the error traces above for details.")
-        # In the case where `cluster` was 'first', it now gets updated to the cluster that was actually
-        # selected to run the job. This avoids later calls doing things like `ssh first`.
-        cluster = job.cluster
+        # The concrete hostname this job actually landed on (e.g. when `cluster` is "first"),
+        # needed so we know where to later query this job's state. Scoped to this job only.
+        resolved_cluster = job.cluster
         job_id = job.job_id
 
         assert not chunking and not packing  # jobid is the "run id" for now.
         run_id = get_run_id(
-            cluster=cluster,
+            cluster=resolved_cluster,
             job_id=job_id,
             task_index=0,
             # TODO: unsure about this one:
@@ -554,20 +557,28 @@ async def run_sweep(
         # _cluster_job_results_path = cluster_results_dir / run_id
 
         # TODO: Unclear if we should just reuse Job or if we actually need something like JobInfo.
-        job = JobInfo(
-            cluster=cluster,
+        return JobInfo(
+            cluster=resolved_cluster,
             job_id=job_id,
             array_job_id=None,
             tasks=[
                 RunInfo(
-                    cluster=cluster,
+                    cluster=resolved_cluster,
                     run_id=run_id,
                     results_path=local_job_results_path,
                     command=job_command,
                 )
             ],
         )
-        job_infos.append(job)
+
+    # Submit every job in the sweep concurrently instead of waiting for each one before starting
+    # the next. Each submission is its own named Task so concurrent `submit_first()` calls can be
+    # told apart (see `cluv.tui`, which fuses their live "waiting for a job to start" tables).
+    submit_tasks = [
+        asyncio.create_task(_submit_one(job_command), name=shlex.join(job_command))
+        for job_command in job_commands
+    ]
+    job_infos: list[JobInfo] = list(await asyncio.gather(*submit_tasks))
 
     # Creates a rich.Live table and updates it as the status of the jobs change.
     await monitor_jobs_async(job_infos, poll_interval_seconds=30)

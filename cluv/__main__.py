@@ -21,13 +21,13 @@ import rich_argparse
 import simple_parsing
 
 from .cli.clean import clean
+from .cli.disable import disable, enable
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run
 from .cli.status import status
 from .cli.submit import submit
 from .cli.sync import sync
-from .cli.disable import disable, enable
 from .utils import console
 
 logger = logging.getLogger("cluv")
@@ -105,10 +105,20 @@ def main(argv: list[str] | None = None) -> None:
             args_dict["sbatch_args"] = [str(job_script), *args_dict["sbatch_args"]]
             job_script = None
             args_dict["job_script"] = None
+
+        # `--autocommit` / `--chunking` can end up swallowed into the `sbatch_args` REMAINDER instead of
+        # being recognized as its own flag, since REMAINDER consumes all remaining tokens
+        # (including ones that look like other known options) once positional parsing starts.
+        for flag in args_dict.keys():
+            if f"--{flag}" in args_dict["sbatch_args"]:
+                args_dict["sbatch_args"] = [
+                    a for a in args_dict["sbatch_args"] if a != f"--{flag}"
+                ]
+                args_dict[flag] = True
         args_dict["program_args"] = submit_program_args
 
     if subcommand == "status" and quiet:
-        console.print("[yellow]Warning: --quiet has no effect with the 'status' command.[/yellow]")
+        console.print("Warning: --quiet has no effect with the 'status' command.", style="yellow")
         quiet = False
     console.quiet = quiet
 
@@ -138,11 +148,6 @@ def add_submit_args(subparsers: Subparsers):
         usage="cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]",
     )
     submit_parser.add_argument(
-        "--autocommit",
-        action="store_true",
-        help="Create a local commit with tracked changes before submitting the job.",
-    )
-    submit_parser.add_argument(
         "cluster",
         metavar="<cluster>",
         help=(
@@ -158,6 +163,16 @@ def add_submit_args(subparsers: Subparsers):
         default=None,
         type=Path,
         help="Path to the sbatch job script (relative to project root). Defaults to the job script specified in the config at 'job_script_path'.",
+    )
+    submit_parser.add_argument(
+        "--autocommit",
+        action="store_true",
+        help="Create a local commit with tracked changes before submitting the job.",
+    )
+    submit_parser.add_argument(
+        "--chunking",
+        action="store_true",
+        help="Whether to split the job up into multiple consecutive short jobs.",
     )
     submit_parser.add_argument(
         "sbatch_args",
@@ -303,7 +318,6 @@ def add_run_args(subparsers: Subparsers):
     )
     run_parser.add_argument(
         "cluster",
-        # default=,
         metavar="<cluster>",
         help="The cluster to run the command on",
     )

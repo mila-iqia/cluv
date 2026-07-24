@@ -86,7 +86,7 @@ class CluvLauncher(Launcher):
         job_script: str | Path | None = None,
         autocommit: bool = False,
         vram_gb: int | None = None,  # Enables job packing!
-        checkpointing: bool = False,  # Enables job chunking (via job arrays!)
+        chunking: bool = False,  # Enables job chunking (via job arrays!)
         ## Submitit arguments:
         account: str | None = None,
         array_parallelism: int = 256,
@@ -139,7 +139,7 @@ class CluvLauncher(Launcher):
             autocommit: Whether to create a commit instead of raising an error, if the git workspace is dirty.
             vram_gb:  The required amount of GPU memory (VRAM) per run.
                 TODO: This will be used to automatically stack multiple runs per GPU in the future.
-            checkpointing: Whether the submitted job has checkpointing support.
+            chunking: Whether the submitted job has checkpointing support with chunking.
                 TODO: This will be used to automatically chunk the jobs into shorter slices for faster execution in the future.
             array_parallelism: Maximum number of simultaneously running jobs.
             comment: Passed down to `sbatch` as the argument of the same name. (Same as the submitit launcher).
@@ -203,7 +203,7 @@ class CluvLauncher(Launcher):
         self.autocommit = autocommit
 
         self.vram_gb = vram_gb
-        self.checkpointing = checkpointing
+        self.chunking = chunking
 
         if setup:
             # TODO: Check if the lines are already in the job script, and if so, just ignore the fact that it is set here.
@@ -298,7 +298,6 @@ class CluvLauncher(Launcher):
         self.cluster_remotes: dict[str, Remote | None] = {}
         self.cluv_config: CluvConfig | None = None
 
-        self.chunking = self.checkpointing
         self.packing = self.vram_gb is not None
         try:
             self._loop = asyncio.get_running_loop()
@@ -458,7 +457,7 @@ class CluvLauncher(Launcher):
             job_script=job_script,
             autocommit=self.autocommit,
             sbatch_args=sbatch_args,
-            chunking=self.checkpointing,
+            chunking=self.chunking,
             packing=self.packing,
         )
         results_path = get_results_path()
@@ -792,19 +791,7 @@ async def monitor_jobs_async(
 @hydra_zen.hydrated_dataclass(
     target=CluvLauncher, populate_full_signature=True, hydra_convert="object"
 )
-class CluvLauncherConfig:
-    ...
-
-    # cluster: str
-
-
-# CluvLauncherConfig = hydra_zen.builds(
-#     CluvLauncher,
-#     populate_full_signature=True,
-#     # zen_partial=True,
-#     hydra_convert="object",
-#     zen_dataclass={"cls_name": "CluvLauncherConfig"},
-# )
+class CluvLauncherConfig: ...
 
 
 # # Interesting idea: Create the config based on the signature of that function directly.

@@ -8,21 +8,23 @@ nav:
   - Home: index.md
   - Hydra launcher: hydra-launcher.md
   - Commands: commands.md
+  - Configuration: configuration.md
   - Guides:
       - Introduction: guides/introduction.md
       - Syncing datasets: guides/syncing-datasets.md
       - Configuring job submission: guides/submit-config.md
       - Cleaning runs: guides/cleaning-runs.md
   - Reference:
-      - CLI:
-          - init: reference/cli/init.md
-          - login: reference/cli/login.md
-          - run: reference/cli/run.md
-          - submit: reference/cli/submit.md
-          - status: reference/cli/status.md
-          - sync: reference/cli/sync.md
-      - Config: reference/config.md
-      - Remote: reference/remote.md
+    - Environment variables: env-vars.md
+    - CLI:
+        - init: reference/cli/init.md
+        - login: reference/cli/login.md
+        - run: reference/cli/run.md
+        - submit: reference/cli/submit.md
+        - status: reference/cli/status.md
+        - sync: reference/cli/sync.md
+    - Config: reference/config.md
+    - Remote: reference/remote.md
 
 theme:
   name: material

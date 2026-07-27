@@ -10,10 +10,10 @@ TODO: Also allows job packing (multiple runs per GPU) and job chunking (splittin
 
 import asyncio
 import collections
-import inspect
 import itertools
 import logging
 import os.path
+import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
@@ -396,15 +396,13 @@ class CluvLauncher(Launcher):
         assert self.cluv_config, "setup should have been called"
         assert self.cluster_remotes, "setup should have been called"
         assert self.task_function, "setup should have been called"
+
         cluster = self.cluster
         # NOTE: Assumes that passing "python path/to/script.py *overrides" to the job script will work.
-        # (It does work for the example).
-        # TODO: Couldn't we use `sys.argv` or some info about the run command from the Hydra context to help?
-        assert inspect.isfunction(self.task_function)
-        module_path = inspect.getsourcefile(self.task_function)
-        assert module_path
-        module_path = Path(module_path).relative_to(find_pyproject().parent)
-        prefix = ["python", str(module_path)]
+        # (It does work for the example since it has the `srun uv run "$@"` as the main step.)
+        original_script = sys.argv[0]
+        assert original_script
+        prefix = ["python", original_script]
 
         # TODO: Remove any 'hydra/launcher'-related configs. This isn't as easy as it sounds!
         # This will definitely not work if an "experiment" config is used, that includes the hydra.launcher settings!

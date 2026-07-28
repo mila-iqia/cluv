@@ -9,6 +9,7 @@ import os
 import tomllib
 from dataclasses import field
 from pathlib import Path, PurePath, PurePosixPath
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
@@ -46,8 +47,11 @@ class PartialClusterConfig:
     """Path where the project should be cloned on this cluster."""
 
 
+PathType = TypeVar("PathType", Path, PurePosixPath)
+
+
 @dataclass(frozen=True)
-class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
+class ClusterConfig(Generic[PathType]):
     """Per-cluster configuration options.
 
     The path fields in this class are by default 'pure' posix paths, to make it explicit that they

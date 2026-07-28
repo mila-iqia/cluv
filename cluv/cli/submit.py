@@ -10,6 +10,7 @@ import subprocess
 import sys
 from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
+from typing import TypeVar
 
 import rich.syntax
 import rich.table
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["submit"]
 display_commands = ContextVar("display_commands", default=True)
 raise_on_command_error = ContextVar("raise_on_command_error", default=False)
+PathT = TypeVar("PathT", Path, PurePosixPath)
 
 
 def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:
@@ -560,7 +562,7 @@ def get_job_script_path_from_config(cluster: str) -> Path | PurePosixPath | None
     return job_script_path
 
 
-def _check_job_script_not_none[P: Path | PurePosixPath](job_script: P | None, cluster: str) -> P:
+def _check_job_script_not_none(job_script: PathT | None, cluster: str) -> PathT:
     if job_script is None:
         raise ValueError(
             f"No job script was provided and no [tool.cluv] job_script_path is configured for {cluster}."

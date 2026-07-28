@@ -36,25 +36,55 @@ def parse_timestamp(timestamp: str) -> datetime:
 
 
 def parse_slurm_time(time: str) -> timedelta:
-    """Parse a time value from the sbatch format to a timedelta object."""
-    # The SLURM time format (https://slurm.schedmd.com/sbatch.html#OPT_time) can be:
-    # 1. days-hours:minutes:seconds
-    # 2. days-hours:minutes
-    # 3. days-hours
-    # 4. hours:minutes:seconds
-    # 5. minutes:seconds
-    # 6. minutes
+    """Parse a time value from the sbatch format to a timedelta object.
 
-    match = re.match(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", time.strip())
-    if not match:
+    The SLURM time format (https://slurm.schedmd.com/sbatch.html#OPT_time) can be:
+        1. days-hours:minutes:seconds
+        2. days-hours:minutes
+        3. days-hours
+        4. hours:minutes:seconds
+        5. minutes:seconds
+        6. minutes
+    """
+    value = time.strip()
+    if not value:
         raise ValueError(f"Could not parse time value: {time}")
 
-    return timedelta(
-        days=int(match.group(1) or 0),
-        hours=int(match.group(2)),
-        minutes=int(match.group(3)),
-        seconds=int(match.group(4)),
-    )
+    days, hours, minutes, seconds = 0, 0, 0, 0
+    has_days = "-" in value
+    if has_days:
+        day_part, value = value.split("-", 1)
+        if not day_part.isdigit():
+            raise ValueError(f"Could not parse time value: {time}")
+        days = int(day_part)
+
+    parts = value.split(":")
+    if len(parts) == 1:
+        if not parts[0].isdigit():
+            raise ValueError(f"Could not parse time value: {time}")
+        if has_days:
+            hours = int(parts[0])
+        else:
+            minutes = int(parts[0])
+    elif len(parts) == 2:
+        if not all(part.isdigit() for part in parts):
+            raise ValueError(f"Could not parse time value: {time}")
+        if has_days:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+        else:
+            minutes = int(parts[0])
+            seconds = int(parts[1])
+    elif len(parts) == 3:
+        if not all(part.isdigit() for part in parts):
+            raise ValueError(f"Could not parse time value: {time}")
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = int(parts[2])
+    else:
+        raise ValueError(f"Could not parse time value: {time}")
+
+    return timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
 
 
 async def run_sacct(

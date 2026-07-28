@@ -13,7 +13,6 @@ import collections
 import inspect
 import itertools
 import logging
-import os.path
 import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
@@ -36,7 +35,7 @@ from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
 from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.submit import display_commands, submit
-from cluv.cli.sync import expandvars, fetch_results, get_active_remotes, sync
+from cluv.cli.sync import fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import JobInfo, RunInfo, current_run_info, get_results_path, get_run_id
 from cluv.remote import Remote
@@ -140,7 +139,7 @@ class CluvLauncher(Launcher):
             vram_gb:  The required amount of GPU memory (VRAM) per run.
                 TODO: This will be used to automatically stack multiple runs per GPU in the future.
             chunking: Whether the submitted job has checkpointing support with chunking.
-                TODO: This will be used to automatically chunk the jobs into shorter slices for faster execution in the future.
+                This will be used to automatically chunk the jobs into shorter slices for faster execution.
             array_parallelism: Maximum number of simultaneously running jobs.
             comment: Passed down to `sbatch` as the argument of the same name. (Same as the submitit launcher).
             constraint:     Passed down to `sbatch`. Same as the submitit launcher.
@@ -243,7 +242,6 @@ class CluvLauncher(Launcher):
                 raise ValueError(f"Can't use both timeout_min ({timeout_min}) and time ({time}).")
             # An int is interpreted as a number of minutes (See https://slurm.schedmd.com/sbatch.html#OPT_time)
             time = str(timeout_min)
-            timeout_min = None
 
         if tasks_per_node is not None:
             if ntasks_per_node is not None:
@@ -484,27 +482,6 @@ async def run_sweep(
     chunking: bool,
     packing: bool,
 ) -> list[JobInfo]:
-    if cluster == "first":
-        # submit_first adds the `SBATCH_OUTPUT` env var that should work as expected.
-        output_args = []
-    else:
-        _cluster_remote = cluster_remotes[cluster]
-        _cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
-        if _cluster_remote:
-            _cluster_results_dir = await expandvars(_cluster_remote, _cluster_results_dir)
-        else:
-            # no remote, we are using the current cluster
-            _cluster_results_dir = Path(os.path.expandvars(_cluster_results_dir))
-        _runid_template = get_run_id(
-            cluster=cluster,
-            job_id="%j",
-            task_index="%t",
-            array_job_id="%A" if chunking else None,
-            doing_job_packing=packing,
-            doing_job_chunking=chunking,
-        )
-        # TODO: If we leave the '%t' in the output file path, there are weird generated files?
-        output_args = [f"--output={_cluster_results_dir}/{_runid_template}/%j.out"]
 
     local_results_dir = get_results_path()
     sbatch_flags = [f"{k}={v}" if v is not None else f"{k}" for k, v in sbatch_args.items()]
@@ -524,9 +501,10 @@ async def run_sweep(
                 # We will have to think about this once we add job packing with --ntasks-per-gpu, which will
                 # conflict with the `--gpus-per-task` flag which might be hard-coded in the job script header.
                 # At that point, maybe we shouldn't have much in the job script header, and have cluv add almost everything via sbatch args?
-                sbatch_args=sbatch_flags + output_args,
+                sbatch_args=sbatch_flags,
                 program_args=job_command,
                 autocommit=autocommit,
+                chunking=chunking,
                 _skip_sync=True,
             )
         if job is None:
@@ -536,7 +514,7 @@ async def run_sweep(
         cluster = job.cluster
         job_id = job.job_id
 
-        assert not chunking and not packing  # jobid is the "run id" for now.
+        assert not packing  # jobid is the "run id" for now.
         run_id = get_run_id(
             cluster=cluster,
             job_id=job_id,
@@ -556,7 +534,6 @@ async def run_sweep(
         job = JobInfo(
             cluster=cluster,
             job_id=job_id,
-            array_job_id=None,
             tasks=[
                 RunInfo(
                     cluster=cluster,
@@ -617,9 +594,6 @@ def _jobs_to_hydra_jobreturn_format(
                     working_dir=str(run.results_path),
                     status=job_status,
                     _return_value=(
-                        # submitit.core.utils.FailedJobError(
-                        #     f"Job {run.run_id} failed, see the output file {out} for more info."
-                        # )
                         # Mimic the output produced by the submitit launcher in case of error, which includes the error file.
                         submitit.core.utils.FailedJobError(
                             f"Job (task={task_id}) failed during processing with trace:\n"
@@ -649,9 +623,9 @@ def get_jobs_table(
     )
 
     table.add_column("Run id", style="bold")
-    table.add_column("Command", justify="right")
-    table.add_column("State", justify="right")
-    table.add_column("Output File", justify="right")
+    table.add_column("Command")
+    table.add_column("State")
+    table.add_column("Output File")
 
     for job in job_infos:
         for task_id, run in enumerate(job.tasks):
@@ -694,8 +668,8 @@ def _build_monitoring_table(
     )
     table.add_column("Cluster", style="bold")
     table.add_column("Run id", style="bold")
-    table.add_column("Command", justify="right")
-    table.add_column("State", justify="right")
+    table.add_column("Command")
+    table.add_column("State")
     for job, submitit_job in zip(jobs, submitit_jobs):
         run = job.tasks[0]
         table.add_row(run.cluster, run.run_id, " ".join(run.command), submitit_job.state)

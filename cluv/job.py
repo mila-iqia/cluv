@@ -82,7 +82,6 @@ class JobInfo:
 
     cluster: str
     job_id: int
-    array_job_id: int | None
     tasks: list[RunInfo]
 
     @property
@@ -228,7 +227,7 @@ def get_run_id(
     cluster: str,
     job_id: int | str,
     task_index: int | str = 0,
-    array_job_id: str | None = None,
+    array_job_id: int | str | None = None,
     doing_job_packing: bool = False,
     doing_job_chunking: bool = False,
 ) -> str:

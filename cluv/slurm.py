@@ -37,7 +37,14 @@ def parse_timestamp(timestamp: str) -> datetime:
 
 def parse_slurm_time(time: str) -> timedelta:
     """Parse a time value from the sbatch format to a timedelta object."""
-    # The SLURM time format is days-hours:minutes:seconds, with the days part optional.
+    # The SLURM time format (https://slurm.schedmd.com/sbatch.html#OPT_time) can be:
+    # 1. days-hours:minutes:seconds
+    # 2. days-hours:minutes
+    # 3. days-hours
+    # 4. hours:minutes:seconds
+    # 5. minutes:seconds
+    # 6. minutes
+
     match = re.match(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", time.strip())
     if not match:
         raise ValueError(f"Could not parse time value: {time}")

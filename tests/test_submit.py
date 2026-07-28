@@ -320,7 +320,9 @@ class TestEnsureCleanGitState:
             raise AssertionError(f"Unexpected subprocess.run call: {command}")
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
-        monkeypatch.setattr(cluv.cli.submit.console, "print", lambda message: messages.append(message))
+        monkeypatch.setattr(
+            cluv.cli.submit.console, "print", lambda message: messages.append(message)
+        )
 
         with pytest.raises(SystemExit):
             ensure_clean_git_state()

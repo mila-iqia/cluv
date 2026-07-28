@@ -503,77 +503,31 @@ async def run_sweep(
             doing_job_packing=packing,
             doing_job_chunking=chunking,
         )
+
         # TODO: If we leave the '%t' in the output file path, there are weird generated files?
         output_args = [f"--output={_cluster_results_dir}/{_runid_template}/%j.out"]
 
     local_results_dir = get_results_path()
     sbatch_flags = [f"{k}={v}" if v is not None else f"{k}" for k, v in sbatch_args.items()]
 
-    async def _submit_one(job_command: list[str]) -> JobInfo:
-        # Use this so the output is where it would be if we used submitit.
-        # It seems hard to configure the folder otherwise (Paths.stdout is a read-only property)
-        # TODO: Save the command used for submission in the output folder as well, since we
-        # don't generate a job script?
-        with set_context(display_commands, True):
-            job = await submit(
-                # NOTE: Always the originally requested cluster (e.g. "first") for every job in
-                # the sweep. Each job independently races across clusters; the cluster that one
-                # job happens to land on must never be reused for another job's submission.
-                cluster=cluster,
-                job_script=Path(job_script) if job_script is not None else None,
-                # This passes all the sbatch args as flags.
-                # TODO: Some of these flags might conflict with the header of the job script! 🤔
-                # We will have to think about this once we add job packing with --ntasks-per-gpu, which will
-                # conflict with the `--gpus-per-task` flag which might be hard-coded in the job script header.
-                # At that point, maybe we shouldn't have much in the job script header, and have cluv add almost everything via sbatch args?
-                sbatch_args=sbatch_flags + output_args,
-                program_args=job_command,
-                autocommit=autocommit,
-                _skip_sync=True,
-            )
-        if job is None:
-            raise RuntimeError("Unable to submit jobs! See the error traces above for details.")
-        # The concrete hostname this job actually landed on (e.g. when `cluster` is "first"),
-        # needed so we know where to later query this job's state. Scoped to this job only.
-        resolved_cluster = job.cluster
-        job_id = job.job_id
-
-        assert not chunking and not packing  # jobid is the "run id" for now.
-        run_id = get_run_id(
-            cluster=resolved_cluster,
-            job_id=job_id,
-            task_index=0,
-            # TODO: unsure about this one:
-            array_job_id=job_id if chunking else None,
-            doing_job_packing=packing,
-            doing_job_chunking=chunking,
-        )
-
-        # The path where the remote results will be synced locally.
-        local_job_results_path = local_results_dir / run_id
-        # where they came from on the remote.
-        # _cluster_job_results_path = cluster_results_dir / run_id
-
-        # TODO: Unclear if we should just reuse Job or if we actually need something like JobInfo.
-        return JobInfo(
-            cluster=resolved_cluster,
-            job_id=job_id,
-            array_job_id=None,
-            tasks=[
-                RunInfo(
-                    cluster=resolved_cluster,
-                    run_id=run_id,
-                    results_path=local_job_results_path,
-                    command=job_command,
-                )
-            ],
-        )
-
     # Submit every job in the sweep concurrently instead of waiting for each one before starting
     # the next. Each submission is its own named Task so concurrent `submit_first()` calls can be
     # told apart (see `cluv.tui`, which fuses their live "waiting for a job to start" tables).
     submit_tasks = [
-        asyncio.create_task(_submit_one(job_command), name=shlex.join(job_command))
+        asyncio.create_task(
+            _submit_one(
+                job_command,
+                cluster=cluster,
+                job_script=job_script,
+                sbatch_flags=sbatch_flags,
+                output_args=output_args,
+                autocommit=autocommit,
+                chunking=chunking,
+                packing=packing,
+                local_results_dir=local_results_dir,
+            ),
+            name=shlex.join(job_command),
+        )
         for job_command in job_commands
     ]
     job_infos: list[JobInfo] = list(await asyncio.gather(*submit_tasks))
@@ -598,6 +552,72 @@ async def run_sweep(
     write_cache(cache)
 
     return job_infos
+
+
+async def _submit_one(
+    job_command: list[str],
+    cluster: str,
+    job_script: PurePosixPath | None,
+    sbatch_flags: list[str],
+    output_args: list[str],
+    chunking: bool,
+    packing: bool,
+    autocommit: bool,
+    local_results_dir: Path,
+) -> JobInfo:
+    # TODO: Save the command used for submission in the output folder as well, since we
+    # don't generate a job script?
+    with set_context(display_commands, False):
+        job = await submit(
+            # NOTE: Always the originally requested cluster (e.g. "first") for every job in
+            # the sweep. Each job independently races across clusters; the cluster that one
+            # job happens to land on must never be reused for another job's submission.
+            cluster=cluster,
+            job_script=Path(job_script) if job_script is not None else None,
+            # This passes all the sbatch args as flags.
+            # TODO: Some of these flags might conflict with the header of the job script! 🤔
+            # We will have to think about this once we add job packing with --ntasks-per-gpu, which will
+            # conflict with the `--gpus-per-task` flag which might be hard-coded in the job script header.
+            # At that point, maybe we shouldn't have much in the job script header, and have cluv add almost everything via sbatch args?
+            sbatch_args=sbatch_flags + output_args,
+            program_args=job_command,
+            autocommit=autocommit,
+            _skip_sync=True,
+        )
+    if job is None:
+        raise RuntimeError("Unable to submit jobs! See the error traces above for details.")
+    # The concrete hostname this job actually landed on (e.g. when `cluster` is "first"),
+    # needed so we know where to later query this job's state. Scoped to this job only.
+    resolved_cluster = job.cluster
+    job_id = job.job_id
+
+    assert not chunking and not packing  # jobid is the "run id" for now.
+    run_id = get_run_id(
+        cluster=resolved_cluster,
+        job_id=job_id,
+        task_index=0,
+        array_job_id=job_id if chunking else None,
+        doing_job_packing=packing,
+        doing_job_chunking=chunking,
+    )
+
+    # The path where the remote results will be synced locally.
+    local_job_results_path = local_results_dir / run_id
+
+    # TODO: Unclear if we should just reuse Job or if we actually need something like JobInfo.
+    return JobInfo(
+        cluster=resolved_cluster,
+        job_id=job_id,
+        array_job_id=None,
+        tasks=[
+            RunInfo(
+                cluster=resolved_cluster,
+                run_id=run_id,
+                results_path=local_job_results_path,
+                command=job_command,
+            )
+        ],
+    )
 
 
 def _jobs_to_hydra_jobreturn_format(

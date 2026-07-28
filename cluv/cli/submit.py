@@ -523,7 +523,8 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
             create_submit_commit(submit_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
             console.print(
-                "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
+                "[red]Working directory is dirty. Please commit your changes before submitting, "
+                "or use `--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).[/red]",
             )
             sys.exit(1)
 

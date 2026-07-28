@@ -112,7 +112,8 @@ async def sync(
     token = console_lock.set(asyncio.Lock())
     if (
         sync_datasets
-        and config.data_source  # cluster:path
+        and config.data_source
+        and ":" in config.data_source  # remote source: cluster:path (POSIX-only tool)
         and (source_cluster := config.data_source.split(":", 1)[0]) != here
     ):
         _source_host, _, source_path = config.data_source.partition(":")
@@ -132,6 +133,7 @@ async def sync(
                 "sync datasets between clusters."
             )
         await _pull_datasets(source_remote, source_path, local_datasets_path)
+    # else: data_source is a local path; data is already available locally, no pull needed
 
     per_cluster_new_runs: list[list[Path]] = await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
@@ -229,10 +231,18 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     if config.data_source:
         _update_progress(4, "Syncing datasets", num_tasks)
         here = current_cluster()
-        local_dataset_path = (config.get_cluster_config(here) if here else config).datasets_path
-        if not local_dataset_path:
-            raise RuntimeError("data_source is set, so dataset_path should also be set!")
-        local_dataset_path = Path(os.path.expandvars(local_dataset_path))
+        if ":" not in config.data_source:
+            # data_source is a local path; use it directly as the source.
+            # Note: this tool targets POSIX (Linux/macOS) systems only; Windows drive-letter
+            # paths (e.g. C:\...) are not supported.
+            local_dataset_path = Path(os.path.expandvars(config.data_source))
+        else:
+            local_dataset_path = (
+                config.get_cluster_config(here) if here else config
+            ).datasets_path
+            if not local_dataset_path:
+                raise RuntimeError("data_source is set, so datasets_path should also be set!")
+            local_dataset_path = Path(os.path.expandvars(local_dataset_path))
         await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
         _save()
 

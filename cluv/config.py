@@ -47,7 +47,7 @@ class PartialClusterConfig:
     """Path where the project should be cloned on this cluster."""
 
 
-PathType = TypeVar("PathType", Path, PurePosixPath)
+PathType = TypeVar("PathType", Path, PurePosixPath, default=PurePosixPath)
 
 
 @dataclass(frozen=True)

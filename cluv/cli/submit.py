@@ -10,12 +10,12 @@ import subprocess
 import sys
 from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
-from typing import TypeVar
 
 import rich.syntax
 import rich.table
 import rich.text
 from rich.live import Live
+from typing_extensions import TypeVar
 
 from cluv.cache import Job, save_job
 from cluv.cli.sync import get_active_remotes, sync
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["submit"]
 display_commands = ContextVar("display_commands", default=True)
 raise_on_command_error = ContextVar("raise_on_command_error", default=False)
-PathT = TypeVar("PathT", Path, PurePosixPath)
+PathT = TypeVar("PathT", Path, PurePosixPath, default=PurePosixPath)
 
 
 def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:

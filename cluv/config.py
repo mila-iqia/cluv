@@ -9,10 +9,11 @@ import os
 import tomllib
 from dataclasses import field
 from pathlib import Path, PurePath, PurePosixPath
-from typing import Generic, TypeVar
+from typing import Generic
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
+from typing_extensions import TypeVar
 
 from cluv.utils import current_cluster, find_pyproject
 

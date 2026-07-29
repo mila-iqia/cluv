@@ -3,15 +3,18 @@
 Follows the same signature as the submitit launcher to make it easier to transition for researchers.
 
 + Allows launching jobs on remote slurm clusters.
+    + Job chunking (splitting a long job into multiple shorter jobs)
 + Syncs back results
 
-TODO: Also allows job packing (multiple runs per GPU) and job chunking (splitting a long job into multiple shorter jobs).
+
+TODO: Also allows job packing (multiple runs per GPU).
 """
 
 import asyncio
 import collections
 import itertools
 import logging
+import sys
 import time
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath

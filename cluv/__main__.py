@@ -22,13 +22,13 @@ import simple_parsing
 
 from . import __version__
 from .cli.clean import clean
+from .cli.disable import disable, enable
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run
 from .cli.status import status
 from .cli.submit import submit
 from .cli.sync import sync
-from .cli.disable import disable, enable
 from .utils import console
 
 logger = logging.getLogger("cluv")
@@ -188,6 +188,12 @@ def add_status_args(subparsers: Subparsers):
         default="all",
         metavar="<table>",
         help="Which table to display: cluster overview, jobs overview, or both (default: all).",
+    )
+    status_parser.add_argument(
+        "--show_n_jobs",
+        default=10,
+        type=int,
+        help="How many jobs to display.",
     )
     status_parser.set_defaults(func=status)
     return status_parser

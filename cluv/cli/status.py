@@ -408,7 +408,9 @@ def _build_cluster_table(
     return table
 
 
-def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobInfo]) -> Table:
+def _build_cluv_jobs_table(
+    cached_jobs: list[Job], live_info: dict[int, LiveJobInfo], show_n_jobs: int
+) -> Table:
     """Build the jobs overview table with one row per cached job, enriched with live status info."""
     table = Table(
         title="Cluv Jobs Overview",
@@ -426,7 +428,8 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
     table.add_column("Waiting time")
     table.add_column("Elapsed time")
 
-    for job in cached_jobs:
+    # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
+    for job in list(reversed(cached_jobs))[:show_n_jobs]:
         info = live_info.get(job.job_id)
 
         try:
@@ -496,9 +499,6 @@ async def get_job_infos(
     disabled_clusters: dict[str, DisabledCluster],
 ) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
-    # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
-    cached_jobs = list(reversed(cached_jobs))
-
     # Regroup jobs by cluster
     cluster_jobs: dict[str, list[int]] = {}
     for job in cached_jobs:
@@ -541,7 +541,7 @@ async def get_job_infos(
     return live_info, clusters_job_stats
 
 
-async def status(table: Literal["clusters", "jobs", "all"]) -> None:
+async def status(table: Literal["clusters", "jobs", "all"], show_n_jobs: int) -> None:
     """Show status of clusters and jobs.
 
     Parameters:
@@ -595,5 +595,11 @@ async def status(table: Literal["clusters", "jobs", "all"]) -> None:
         console.print()
 
     if table in ("jobs", "all"):
-        console.print(_build_cluv_jobs_table(cached_jobs, jobs_status))
+        console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, show_n_jobs))
+        console.print(
+            Panel(
+                f"Showing the last {show_n_jobs} jobs on {len(cached_jobs)} cluv jobs",
+                border_style="dim",
+            )
+        )
         console.print()

@@ -23,6 +23,13 @@ If you want the bleeding edge version from GitHub, use:
 uv add git+https://github.com/mila-iqia/cluv
 ```
 
+### Update
+Run this once in a while to get the latest features and bugfixes
+
+```console
+uv tool update cluv
+```
+
 ## Usage
 
 To view all available commands, use the `--help` flag:

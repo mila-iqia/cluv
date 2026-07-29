@@ -17,9 +17,9 @@ Per-cluster values are set under `[tool.cluv.clusters.<name>]`.
 
 ## How global and per-cluster settings merge
 
-For both `env` and `sbatch_args`, per-cluster values are merged on top of the global defaults.
-A per-cluster key **overrides** the same global key; keys present only in the global config are
-kept as-is.
+For both [`env`](../configuration.md/#env-1) and [`sbatch_args`](../configuration.md/#sbatch_args-1),
+per-cluster values are merged on top of the global defaults. A per-cluster key **overrides** the same
+global key; keys present only in the global config are kept as-is.
 
 For example, the following config:
 
@@ -50,7 +50,8 @@ When submitting to any other cluster, the global values apply.
 
 ## What cluv injects automatically
 
-Regardless of your config, `cluv submit` always sets these variables before calling `sbatch`:
+Regardless of your config, [`cluv submit`](../commands.md/#cluv-submit) always sets these variables
+before calling `sbatch`:
 
 | Variable | Value |
 |---|---|
@@ -103,5 +104,5 @@ cluv submit narval              # uses scripts/job_narval.sh
 cluv submit narval new_job.sh   # uses new_job.sh, ignoring config
 ```
 
-If neither a CLI script nor a configured `job_script_path` exists for the target cluster, `cluv
-submit` exits with an error.
+If neither a CLI script nor a configured `job_script_path` exists for the target cluster,
+[`cluv submit`](../commands.md/#cluv-submit) exits with an error.

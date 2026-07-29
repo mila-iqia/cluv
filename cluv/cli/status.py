@@ -482,7 +482,7 @@ def _count_states(tasks: list[ArrayTaskInfo]) -> Text:
     return total
 
 
-def _build_legend() -> Panel:
+def _build_cluster_table_legend() -> Panel:
     legend = (
         "[green]●[/green] connected  "
         "[red]⚠[/red] disconnected  "
@@ -491,6 +491,15 @@ def _build_legend() -> Panel:
         "[green]▰[/green]/[yellow]▰[/yellow]/[red]▰[/red] disk usage (low/med/high)"
     )
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
+
+
+def _build_job_table_legend(show_jobs: int, total_jobs: int) -> Panel:
+    shown_jobs = min(show_jobs, total_jobs)
+
+    return Panel(
+        f"Showing {shown_jobs} / {total_jobs} cluv jobs",
+        border_style="dim",
+    )
 
 
 async def get_job_infos(
@@ -585,21 +594,17 @@ async def status(table: Literal["clusters", "jobs", "all"], show_n_jobs: int) ->
         if clusters_status and all(not c.online for c in clusters_status):
             console.print(
                 (
-                    "[yellow]No active connections to any clusters found. "
-                    "Run [bold]cluv login[/bold] first.[/yellow]"
-                )
+                    "No active connections to any clusters found. "
+                    "Run [bold]cluv login[/bold] first."
+                ),
+                style="yellow",
             )
 
         console.print(_build_cluster_table(clusters_status, clusters_job_stats, disabled_clusters))
-        console.print(_build_legend())
+        console.print(_build_cluster_table_legend())
         console.print()
 
     if table in ("jobs", "all"):
         console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, show_n_jobs))
-        console.print(
-            Panel(
-                f"Showing the last {show_n_jobs} jobs on {len(cached_jobs)} cluv jobs",
-                border_style="dim",
-            )
-        )
+        console.print(_build_job_table_legend(show_n_jobs, len(cached_jobs)))
         console.print()

@@ -219,13 +219,18 @@ Requires an active connection (see [`cluv login`](#cluv-login)) to fetch live da
 
 **Usage**
 ```console
-cluv status [table]
+cluv status [table] [options]
 ```
 
 **Arguments**
 
 `table`
 :   Which table to display in the status output. Can be one of `jobs`, `clusters`, or `all`. Defaults to `all`.
+
+**Options**
+
+`--show_n_jobs`
+:   Number of jobs to show in the `jobs` table. Default to 10.
 
 ---
 

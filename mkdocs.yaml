@@ -43,14 +43,15 @@ theme:
   features:
     - content.action.edit
     - content.action.view
-    - navigation.expand
     - content.code.copy
     - content.code.annotate
-    - navigation.sections
+    - navigation.expand
+    - navigation.footer
     - navigation.path
+    - navigation.sections
+    - search.highlight
     - search.share
     - search.suggest
-    - search.highlight
   icon:
     repo: fontawesome/brands/github
 markdown_extensions:

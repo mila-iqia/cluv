@@ -4,7 +4,8 @@
 
 ## Configure dataset sync in `pyproject.toml`
 
-Add `data_source` and `datasets_path` under `[tool.cluv]`:
+Add [`data_source`](../configuration.md/#data_source) and [`datasets_path`](../configuration.md/#datasets_path_1)
+under `[tool.cluv]`:
 
 ```toml title="pyproject.toml"
 [tool.cluv]
@@ -15,10 +16,10 @@ data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
 datasets_path = "$SCRATCH/datasets/cifar10"
 ```
 
-- `data_source` is where Cluv pulls the dataset from.
-- `datasets_path` is where Cluv stores it on each cluster.
+- [`data_source`](../configuration.md/#data_source) : where Cluv pulls the dataset from.
+- [`datasets_path`](../configuration.md/#datasets_path_1) : where Cluv stores it on each cluster.
 
-You can override `datasets_path` per cluster:
+You can override [`datasets_path`](../configuration.md/#datasets_path) per cluster:
 
 ```toml title="pyproject.toml"
 [tool.cluv.clusters.killarney]
@@ -43,8 +44,8 @@ cluv sync
 
 With dataset sync enabled (default), Cluv will:
 
-1. Pull data from `data_source` to your local/current cluster `datasets_path`.
-2. Push that dataset to each target cluster at its configured `datasets_path`.
+1. Pull data from [`data_source`](../configuration.md/#data_source) to your local/current cluster [`datasets_path`](../configuration.md/#datasets_path_1).
+2. Push that dataset to each target cluster at its configured [`datasets_path`](../configuration.md/#datasets_path) .
 
 ## Optional: skip dataset replication for one run
 

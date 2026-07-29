@@ -22,22 +22,22 @@ See the "Configuring job submission" guide for more information on how the field
 used when submitting a job.
 
 #### [`datasets_path`](#datasets_path)
-TODO : Overrides the global [`datasets_path`](#datasets_path-1) for this cluster.
+Overrides the global [`datasets_path`](#datasets_path_1) for this cluster.
 
 #### [`env`](#env)
-TODO : Merge on top of [`env`](#env-1).
+TODO : Merge on top of [`env`](#env_1).
 
 #### [`job_script_path`](#job_script_path)
-TODO : Overrides the global [`job_script_path`](#job_script_path-1) for this cluster.
+Overrides the global [`job_script_path`](#job_script_path_1) for this cluster.
 
 #### [`project_dir`](#project_dir)
-TODO : Overrides the global [`project_dir`](#project_dir-1) for this cluster.
+Overrides the global [`project_dir`](#project_dir_1) for this cluster.
 
 #### [`results_path`](#results_path)
-TODO : Overrides the global [`results_path`](#results_path-1) for this cluster.
+Overrides the global [`results_path`](#results_path_1) for this cluster.
 
 #### [`sbatch_args`](#sbatch_args)
-TODO : Merge on top of [`sbatch_args`](#sbatch_args-1).
+TODO : Merge on top of [`sbatch_args`](#sbatch_args_1).
 
 ---
 
@@ -45,9 +45,17 @@ TODO : Merge on top of [`sbatch_args`](#sbatch_args-1).
 TODO. Used together with [`datasets_path`](#datasets_path) when syncing datasets across clusters.
 See the ["Syncing datasets across clusters"](guides/syncing-datasets.md) guide.
 
-**Default**: `None`
+**Default:** `None`
 
-**Type**: `str`
+**Type:** `str`
+
+**Example:**
+```toml 
+[tool.cluv]
+data_source = "mila:<path_to_the_dataset_on_the_mila_cluster>"
+# OR
+data_source = "<path_to_the_dataset_on_my_local_machine>"
+```
 
 ---
 
@@ -86,7 +94,7 @@ is passed explicitly on the command line.
 Settings applied when using cluv on a local machine (not on a Slurm cluster).
 
 #### [`env`](#env-2)
-Environnement variables set when running Slurm command.
+Environnement variables set when running a command.
 By default, set a fake `$SCRATCH` directory to run the examples.
 
 **Default**: `{ SCRATCH = "$HOME/scratch" }`
@@ -118,7 +126,7 @@ Name of the symlink created in the project directory pointing to [`results_path`
 TODO: Global sbatch flags applied on all clusters. These are passed directly to `sbatch` when using 
 [`cluv submit`](./commands.md#cluv-submit).
 
-TODO: By default, set the duration of a job to 3h and enable automatic requeue.
+By default, set the duration of a job to 3h and enable automatic requeue.
 
 **Default**: `{ time = "3:00:00", requeue = true }`
 

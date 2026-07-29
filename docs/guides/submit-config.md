@@ -10,14 +10,14 @@ This guide explains which config fields are used, how global and per-cluster val
 | `job_script_path` | global / per-cluster | Default job script when none is passed on the CLI |
 | `project_dir` | global / per-cluster | Where the project is replicated on clusters. |
 | `results_path` | global / per-cluster | Results directory to sync back to the current cluster. |
-| `env` | global / per-cluster | Extra environment variables exported before `sbatch` |
-| `sbatch_args` | global / per-cluster | Extra `sbatch` flags (e.g. `--time`, `--gpus`) |
+| [`env`](../configuration.md/#env_1) | global / per-cluster | Extra environment variables exported before `sbatch` |
+| [`sbatch_args`](../configuration.md/#sbatch_args_1) | global / per-cluster | Extra `sbatch` flags (e.g. `--time`, `--gpus`) |
 
 Per-cluster values are set under `[tool.cluv.clusters.<name>]`.
 
 ## How global and per-cluster settings merge
 
-For both [`env`](../configuration.md/#env-1) and [`sbatch_args`](../configuration.md/#sbatch_args-1),
+For both [`env`](../configuration.md/#env_1) and [`sbatch_args`](../configuration.md/#sbatch_args_1),
 per-cluster values are merged on top of the global defaults. A per-cluster key **overrides** the same
 global key; keys present only in the global config are kept as-is.
 

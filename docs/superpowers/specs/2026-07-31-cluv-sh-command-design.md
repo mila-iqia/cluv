@@ -90,8 +90,12 @@ fail), via the same `sys.exit(returncode)` mechanism described below.
 1. Write the connected hostnames to a `tempfile.NamedTemporaryFile`, one per line.
 2. Run:
    ```
-   uvx --from=clustershell clush --hostfile <tmpfile> <command...>
+   uvx --from=clustershell clush -S --hostfile <tmpfile> <command...>
    ```
+   `-S`/`--maxrc` is required for `clush` to exit with the largest of the per-host
+   command return codes — discovered during manual smoke testing that without it,
+   `clush` always exits `0` regardless of remote command failures, silently defeating
+   the exit-code propagation described below.
    via `asyncio.create_subprocess_exec`, with stdout/stderr **inherited** from the
    parent process (not piped/captured). This lets `clush`'s own TTY detection and
    per-node color-coded output prefixes pass straight through to the user's terminal,

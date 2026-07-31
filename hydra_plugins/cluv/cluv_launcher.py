@@ -378,7 +378,7 @@ class CluvLauncher(Launcher):
                 itertools.batched(job_overrides, array_parallelism or len(job_overrides))
             ):
                 logger.debug(f"Launching batch #{batch_index} of {len(job_overrides_batch)} jobs.")
-                job_batch_results = await self.launch_jobs(job_overrides_batch, first_job_idx)
+                job_batch_results = await self.launch_jobs(job_overrides_batch)
                 job_results.extend(job_batch_results)
 
                 first_job_idx += len(job_overrides_batch)
@@ -389,9 +389,7 @@ class CluvLauncher(Launcher):
             _launch_jobs(job_overrides, array_parallelism=self.array_parallelism)
         )
 
-    async def launch_jobs(
-        self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
-    ) -> list[JobReturn]:
+    async def launch_jobs(self, job_overrides: Sequence[Sequence[str]]) -> list[JobReturn]:
         assert self.cluv_config, "setup should have been called"
         assert self.cluster_remotes, "setup should have been called"
         assert self.task_function, "setup should have been called"
@@ -533,7 +531,7 @@ async def run_sweep(
         # TODO: Unclear if we should just reuse Job or if we actually need something like JobInfo.
         job = JobInfo(
             cluster=cluster,
-            job_id=job_id,
+            job_id=str(job_id),
             tasks=[
                 RunInfo(
                     cluster=cluster,
@@ -702,8 +700,7 @@ async def monitor_jobs_async(
             "You can't refresh too often (>= 30s) to avoid overloading squeue"
         )
 
-    n_jobs = len(jobs)
-    if n_jobs == 0:
+    if len(jobs) == 0:
         print("There are no jobs to monitor")
         return
 

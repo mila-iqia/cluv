@@ -38,7 +38,6 @@ async def wait_for_running_job(
     max_wait_time_seconds: int = 60,
 ) -> JobHandle | None:
     """Watch the jobs with sacct until one of them starts (or completes)."""
-
     first_running_job: JobHandle | None = None
     wait_time = 1
 
@@ -58,11 +57,14 @@ async def wait_for_running_job(
                 console.print(
                     f"Job {job_id} on cluster {cluster}: {previous_state} -> {job_state}"
                 )
+
             cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
+
             if job_state.startswith(("RUNNING", "COMPLETED")):
                 return JobHandle(job_id=job_id, cluster=cluster, state=job_state)
             if job_state in FAILED_JOB_STATES:
                 to_query.remove((cluster, job_id))
+
     # If all failed, `cluster_and_jobid_to_jobstate` is empty.
     assert not to_query
     return None

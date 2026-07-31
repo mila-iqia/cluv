@@ -7,6 +7,9 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 
+from remote_slurm_executor.slurm_remote import RemoteSlurmJob
+from submitit.slurm.slurm import SlurmJob
+
 import cluv
 import cluv.config
 from cluv.utils import current_cluster
@@ -81,7 +84,7 @@ class JobInfo:
     """Information about a job, which contains one or more tasks/"runs"."""
 
     cluster: str
-    job_id: int
+    job_id: str
     tasks: list[RunInfo]
 
     @property
@@ -92,21 +95,18 @@ class JobInfo:
         """
 
         if self.cluster == current_cluster():
-            from submitit.slurm.slurm import SlurmJob
-
             return SlurmJob(
                 # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
                 folder=self.tasks[0].results_path,
-                job_id=str(self.job_id),
+                job_id=self.job_id,
                 tasks=list(range(len(self.tasks))),
             ).state
-        from remote_slurm_executor.slurm_remote import RemoteSlurmJob
 
         return RemoteSlurmJob(
             self.cluster,
             # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
             folder=self.tasks[0].results_path,
-            job_id=str(self.job_id),
+            job_id=self.job_id,
             tasks=list(range(len(self.tasks))),
             remote_dir_sync=None,  # type: ignore
         ).state

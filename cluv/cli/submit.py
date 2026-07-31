@@ -19,7 +19,7 @@ from typing_extensions import TypeVar
 
 from cluv.cache import Job, save_job
 from cluv.cli.sync import get_active_remotes, sync
-from cluv.config import find_pyproject, get_cluv_config
+from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
 from cluv.utils import console, current_cluster
@@ -32,7 +32,7 @@ raise_on_command_error = ContextVar("raise_on_command_error", default=False)
 PathT = TypeVar("PathT", Path, PurePosixPath, default=PurePosixPath)
 
 
-def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:
+def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     """Convert a dict of sbatch options to a list of command-line flags.
 
     Key-to-flag conversion:
@@ -68,6 +68,25 @@ def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:
     return flags
 
 
+@dataclasses.dataclass(frozen=True)
+class Submission:
+    """One job to submit: on which cluster, over which connection, and with which sbatch flags."""
+
+    cluster: str
+    remote: Remote | None
+    """Remote used to run `sbatch`, or `None` to run it on the current cluster."""
+
+    job_script: Path
+
+    config_sbatch_args: SbatchArgs
+    """The sbatch flags from the config to use, i.e. one of the cluster's allocations."""
+
+    @property
+    def allocation(self) -> str:
+        """The allocation of this submission, as a string, for display purposes."""
+        return shlex.join(sbatch_args_from_dict(self.config_sbatch_args)) or "(default)"
+
+
 async def submit(
     cluster: str,
     job_script: Path | None,
@@ -85,6 +104,9 @@ async def submit(
     `sbatch_args` are forwarded as flags to `sbatch`; `program_args` are passed to
     the job script.
 
+    When more than one allocation is configured for the target cluster (a list of flag sets in
+    `[tool.cluv.clusters.<name>].sbatch_args`), one job is submitted per allocation and only the
+    first one to start is kept, the others being cancelled.
 
     Parameters:
         cluster: SSH hostname of the target cluster. Can be set to "first" to launch the job on all clusters and keep only the first one to starts.
@@ -148,7 +170,28 @@ async def submit(
     else:
         # Submitting to the current cluster. The sbatch command will run locally.
         remote = None
-    result = await sbatch(remote, job_script, sbatch_args, program_args, git_commit)
+
+    allocations = get_cluv_config().get_cluster_config(cluster).sbatch_args
+    if len(allocations) > 1:
+        # More than one allocation is configured for this cluster: submit one job per allocation
+        # and keep the first one that starts.
+        job = await submit_and_keep_first(
+            [
+                Submission(cluster, remote, job_script, config_sbatch_args)
+                for config_sbatch_args in allocations
+            ],
+            sbatch_args=sbatch_args,
+            program_args=program_args,
+            git_commit=git_commit,
+        )
+        if job:
+            save_job(job)
+        return job
+
+    (config_sbatch_args,) = allocations
+    result = await sbatch(
+        remote, job_script, sbatch_args, program_args, git_commit, config_sbatch_args
+    )
     submit_time = datetime.datetime.now()
 
     if result.returncode != 0:
@@ -161,7 +204,7 @@ async def submit(
         cluster=cluster,
         job_script=str(job_script),
         git_commit=git_commit,
-        sbatch_args=sbatch_args,
+        sbatch_args=sbatch_args_from_dict(config_sbatch_args) + sbatch_args,
         program_args=program_args,
         submitted_at=submit_time.isoformat(),
     )
@@ -183,8 +226,8 @@ async def submit_first(
     git_commit: str,
     _skip_sync: bool = False,
 ) -> Job | None:
-    """Submit the job on all clusters, and wait until one of them starts.
-    Once one starts, cancel the others.
+    """Submit the job on all clusters (and on every allocation of each cluster), and wait until one
+    of them starts. Once one starts, cancel the others.
     """
     # Sync with all clusters with an existing connections.
     if not _skip_sync:
@@ -205,35 +248,71 @@ async def submit_first(
         for cluster in cluster_to_remote
     }
 
-    # Submit the job on all the clusters (and possibly locally).
-    sbatch_commands = {
-        cluster: get_sbatch_command(
-            cluster, job_scripts[cluster], sbatch_args, program_args, git_commit
+    # One submission per allocation of each cluster.
+    config = get_cluv_config()
+    submissions = [
+        Submission(cluster, remote, job_scripts[cluster], config_sbatch_args)
+        for cluster, remote in cluster_to_remote.items()
+        for config_sbatch_args in config.get_cluster_config(cluster).sbatch_args
+    ]
+    return await submit_and_keep_first(
+        submissions, sbatch_args=sbatch_args, program_args=program_args, git_commit=git_commit
+    )
+
+
+async def submit_and_keep_first(
+    submissions: list[Submission],
+    sbatch_args: list[str],
+    program_args: list[str],
+    git_commit: str,
+) -> Job | None:
+    """Submit all the given jobs, wait until one of them starts, then cancel the others.
+
+    `sbatch_args` and `program_args` are the same for all the submissions; what differs is the
+    cluster and/or the allocation (the sbatch flags from the config) of each submission.
+    """
+    sbatch_commands = [
+        get_sbatch_command(
+            submission.cluster,
+            submission.job_script,
+            sbatch_args,
+            program_args,
+            git_commit,
+            submission.config_sbatch_args,
         )
-        for cluster in cluster_to_remote
-    }
+        for submission in submissions
+    ]
     sbatch_results = await asyncio.gather(
         *[
             sbatch(
-                remote,
-                job_script=job_scripts[cluster],
+                submission.remote,
+                job_script=submission.job_script,
                 sbatch_args=sbatch_args,
                 program_args=program_args,
                 git_commit=git_commit,
+                config_sbatch_args=submission.config_sbatch_args,
             )
-            for cluster, remote in cluster_to_remote.items()
+            for submission in submissions
         ],
         return_exceptions=True,
     )
     submit_time = datetime.datetime.now()
-    # TODO: This could be a list of tuples eventually, since we could potentially try to submit
-    # multiple different jobs per cluster.
-    cluster_to_sbatch_result = dict(zip(cluster_to_remote.keys(), sbatch_results))
 
-    cluster_to_jobid: dict[str, int] = {}
-    table = rich.table.Table("Cluster", "Result", title="Jobs submitted on the clusters")
-    for cluster, sbatch_result in cluster_to_sbatch_result.items():
-        sbatch_command = sbatch_commands[cluster]
+    # `sacct` and `scancel` are run on the cluster of the job, whatever its allocation.
+    cluster_to_remote = {submission.cluster: submission.remote for submission in submissions}
+    # Only show the allocation of each job when some cluster has more than one.
+    show_allocations = len(cluster_to_remote) < len(submissions)
+
+    submitted: list[tuple[Submission, int]] = []
+    table = rich.table.Table(
+        "Cluster",
+        *(["Allocation"] if show_allocations else []),
+        "Result",
+        title="Jobs submitted on the clusters",
+    )
+    for submission, sbatch_command, sbatch_result in zip(
+        submissions, sbatch_commands, sbatch_results
+    ):
         if isinstance(sbatch_result, BaseException) or sbatch_result.returncode != 0:
             error_message = (
                 str(sbatch_result)
@@ -243,10 +322,11 @@ async def submit_first(
             output_text = rich.text.Text(f"Error: {error_message}", style="red")
         else:
             job_id = int(sbatch_result.stdout.strip())
-            cluster_to_jobid[cluster] = job_id
+            submitted.append((submission, job_id))
             output_text = rich.text.Text(f"Job ID: {job_id}", style="green")
         table.add_row(
-            cluster,
+            submission.cluster,
+            *([submission.allocation] if show_allocations else []),
             rich.console.Group(
                 rich.syntax.Syntax(sbatch_command, lexer="sh", word_wrap=True),
                 output_text,
@@ -256,7 +336,7 @@ async def submit_first(
 
     console.print(table)
 
-    if not cluster_to_jobid:
+    if not submitted:
         console.print("No job submitted on clusters. See errors above.")
         return None
 
@@ -267,7 +347,7 @@ async def submit_first(
     max_wait_time_seconds = 5
 
     cluster_and_jobid_to_jobstate: dict[tuple[str, int], str] = {
-        (cluster, job_id): "UNKNOWN" for cluster, job_id in cluster_to_jobid.items()
+        (submission.cluster, job_id): "UNKNOWN" for submission, job_id in submitted
     }
     cancelling = False
 
@@ -332,7 +412,7 @@ async def submit_first(
 
     except (KeyboardInterrupt, asyncio.CancelledError, Exception):
         console.log("Interrupted by user. Cancelling all jobs...")
-        to_cancel = list(cluster_to_jobid.items())
+        to_cancel = [(submission.cluster, job_id) for submission, job_id in submitted]
         if first_running_job:
             to_cancel.remove((first_running_job.cluster, first_running_job.job_id))
         await asyncio.gather(
@@ -345,12 +425,17 @@ async def submit_first(
 
     # TODO: Return the cluster and job id.
     assert first_running_job
+    winner = next(
+        submission
+        for submission, job_id in submitted
+        if (submission.cluster, job_id) == (first_running_job.cluster, first_running_job.job_id)
+    )
     return Job(
         job_id=first_running_job.job_id,
         cluster=first_running_job.cluster,
-        job_script=str(job_scripts[first_running_job.cluster]),
+        job_script=str(winner.job_script),
         git_commit=git_commit,
-        sbatch_args=sbatch_args,
+        sbatch_args=sbatch_args_from_dict(winner.config_sbatch_args) + sbatch_args,
         program_args=program_args,
         submitted_at=submit_time.isoformat(),
     )
@@ -592,9 +677,13 @@ def get_sbatch_command(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    config_sbatch_args: SbatchArgs | None = None,
 ) -> str:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
+
+    `config_sbatch_args` selects which of the cluster's allocations to use. Defaults to the first
+    one when not passed.
     """
     # Resolve remote job script path.
     local_job_script = job_script
@@ -656,8 +745,9 @@ def get_sbatch_command(
         )
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    config_sbatch_args = sbatch_args_from_dict(cluster_config.sbatch_args)
-    all_sbatch_args = config_sbatch_args + sbatch_args
+    if config_sbatch_args is None:
+        config_sbatch_args = cluster_config.sbatch_args[0]
+    all_sbatch_args = sbatch_args_from_dict(config_sbatch_args) + sbatch_args
     sbatch_args_str = shlex.join(all_sbatch_args)
     program_args_str = shlex.join(program_args)
 
@@ -673,13 +763,16 @@ async def sbatch(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    config_sbatch_args: SbatchArgs | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Submit the job via sbatch on the remote cluster, and return the job id."""
     cluster = remote.hostname if remote else current_cluster()
     # Should be set, since `remote` is None if current_cluster() is the same as the cluster argument
     # to `submit`.
     assert cluster
-    sbatch_command = get_sbatch_command(cluster, job_script, sbatch_args, program_args, git_commit)
+    sbatch_command = get_sbatch_command(
+        cluster, job_script, sbatch_args, program_args, git_commit, config_sbatch_args
+    )
 
     display = display_commands.get()
     hide = not display

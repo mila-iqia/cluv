@@ -24,7 +24,7 @@ from cluv.cli.submit import (
     submit_first,
 )
 from cluv.cli.sync import sync
-from cluv.config import get_cluv_config
+from cluv.config import SbatchArgs, get_cluv_config
 from cluv.utils import current_cluster
 from tests.test_integration import IN_GITHUB_CLOUD_CI
 
@@ -226,6 +226,45 @@ class TestGetSbatchCommand:
         # gpus removed by cluster override, time still present
         assert "--gpus" not in sbatch_command
         assert "--time=2:00:00" in sbatch_command
+
+    def test_allocation_selects_which_config_sbatch_args_are_used(self, project_dir: Path) -> None:
+        """With multiple allocations, `config_sbatch_args` picks the one to use (first by default)."""
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.sbatch_args]
+            time = "3:00:00"
+            [tool.cluv.clusters.narval]
+            sbatch_args = [{ account = "rrg-bengioy-ad" }, { account = "def-bengioy" }]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+        allocations = get_cluv_config().get_cluster_config("narval").sbatch_args
+        assert allocations == [
+            {"time": "3:00:00", "account": "rrg-bengioy-ad"},
+            {"time": "3:00:00", "account": "def-bengioy"},
+        ]
+
+        def command_for(config_sbatch_args: SbatchArgs | None) -> str:
+            return get_sbatch_command(
+                cluster="narval",
+                job_script=job_script,
+                sbatch_args=[],
+                program_args=[],
+                git_commit="abc123",
+                config_sbatch_args=config_sbatch_args,
+            )
+
+        # Defaults to the first allocation.
+        assert "--account=rrg-bengioy-ad" in command_for(None)
+        assert "--account=def-bengioy" in command_for(allocations[1])
+        assert "--account=rrg-bengioy-ad" not in command_for(allocations[1])
+        assert "--time=3:00:00" in command_for(allocations[1])
 
 
 class TestSubmitCliParsing:
@@ -539,6 +578,78 @@ async def test_can_submit_on_current_cluster(
     assert returned_job.job_id == jobid
     mock_ensure_clean_git_state.assert_called_once()
     mock.assert_called_once()
+
+
+async def test_submit_races_the_allocations_of_a_cluster(
+    monkeypatch: pytest.MonkeyPatch, project_dir: Path
+) -> None:
+    """A cluster with two allocations gets one job per allocation, and the loser is cancelled."""
+    cluster = "narval"
+    (project_dir / "pyproject.toml").write_text(
+        textwrap.dedent(
+            f"""\
+        [tool.cluv]
+        results_path = "results"
+        [tool.cluv.sbatch_args]
+        time = "1:00:00"
+        [tool.cluv.clusters.{cluster}]
+        sbatch_args = [{{ account = "rrg-bengioy-ad" }}, {{ account = "def-bengioy" }}]
+        """
+        )
+    )
+    # Submit from the cluster itself, so that everything runs locally (no ssh, no sync).
+    current_cluster_mock = unittest.mock.Mock(spec=current_cluster, return_value=cluster)
+    monkeypatch.setattr(cluv.utils, current_cluster.__name__, current_cluster_mock)
+    monkeypatch.setattr(cluv.cli.submit, current_cluster.__name__, current_cluster_mock)
+    monkeypatch.setattr(
+        cluv.cli.submit, ensure_clean_git_state.__name__, lambda **kwargs: "dummy_git_commit"
+    )
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda _: real_sleep(0))
+
+    job_script = project_dir / "job.sh"
+    job_script.write_text("#!/bin/bash\necho Hello World\n")
+
+    # The job of the `def-` allocation starts right away; the `rrg-` one stays pending.
+    rrg_job_id, def_job_id = 111, 222
+    cancelled: list[int] = []
+
+    async def fake_run(program_and_args: tuple[str, ...], **kwargs):
+        full_command = shlex.join(program_and_args)
+
+        def _result(stdout: str):
+            return subprocess.CompletedProcess(
+                program_and_args, returncode=0, stdout=stdout, stderr=""
+            )
+
+        if "sbatch --parsable" in full_command:
+            assert "--time=1:00:00" in full_command  # global sbatch args are applied to both
+            if "--account=rrg-bengioy-ad" in full_command:
+                return _result(str(rrg_job_id))
+            assert "--account=def-bengioy" in full_command
+            return _result(str(def_job_id))
+        if full_command.startswith(f"sacct -j {rrg_job_id} --format=State"):
+            return _result("CANCELLED" if rrg_job_id in cancelled else "PENDING")
+        if full_command.startswith(f"sacct -j {def_job_id} --format=State"):
+            return _result("RUNNING")
+        if full_command == f"scancel {rrg_job_id}":
+            cancelled.append(rrg_job_id)
+            return _result("")
+        pytest.fail(f"Unexpected command: {full_command}")
+
+    run_name = cluv.remote.run.__name__
+    for module in (cluv.remote, cluv.slurm, cluv.cli.submit):
+        monkeypatch.setattr(module, run_name, unittest.mock.AsyncMock(wraps=fake_run))
+
+    returned_job = await submit(
+        cluster=cluster, job_script=job_script, sbatch_args=[], program_args=[]
+    )
+
+    assert returned_job
+    assert returned_job.job_id == def_job_id
+    # The allocation that was used is saved with the job.
+    assert returned_job.sbatch_args == ["--time=1:00:00", "--account=def-bengioy"]
+    assert cancelled == [rrg_job_id]
 
 
 @pytest.mark.parametrize(

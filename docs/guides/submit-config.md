@@ -11,7 +11,7 @@ This guide explains which config fields are used, how global and per-cluster val
 | `project_dir` | global / per-cluster | Where the project is replicated on clusters. |
 | `results_path` | global / per-cluster | Results directory to sync back to the current cluster. |
 | `env` | global / per-cluster | Extra environment variables exported before `sbatch` |
-| `sbatch_args` | global / per-cluster | Extra `sbatch` flags (e.g. `--time`, `--gpus`) |
+| `sbatch_args` | global / per-cluster | Extra `sbatch` flags (e.g. `--time`, `--gpus`). Per-cluster, this can be a list, [one entry per allocation](#multiple-allocations-on-the-same-cluster) |
 
 Per-cluster values are set under `[tool.cluv.clusters.<name>]`.
 
@@ -47,6 +47,63 @@ When submitting to `narval`, the effective settings are:
 - `results_path`: `$SCRATCH/results/narval`
 
 When submitting to any other cluster, the global values apply.
+
+## Multiple allocations on the same cluster
+
+If you have access to more than one allocation on a cluster (for example through two supervisors,
+or both a `def-` and an `rrg-` account of the same group), give `sbatch_args` a **list** of flag
+sets instead of a single one:
+
+```toml title="pyproject.toml"
+[tool.cluv.clusters.narval]
+sbatch_args = [
+    { account = "rrg-bengioy-ad" },
+    { account = "def-bengioy" },
+]
+```
+
+The equivalent array-of-tables syntax also works, and is nicer when each allocation sets several
+flags:
+
+```toml title="pyproject.toml"
+[[tool.cluv.clusters.narval.sbatch_args]]
+account = "rrg-bengioy-ad"
+
+[[tool.cluv.clusters.narval.sbatch_args]]
+account = "def-bengioy"
+time = "24:00:00"       # this allocation allows longer jobs
+```
+
+Each entry is merged on top of the global `[tool.cluv.sbatch_args]` independently, so flags shared
+by all allocations of a cluster are best kept in the global section (there is no per-cluster
+"shared" section: a `sbatch_args` list *replaces* the single-flag-set form).
+
+`cluv submit narval` then submits **one job per allocation**, waits until one of them starts,
+and cancels the others - exactly what [`cluv submit first`](../commands.md#cluv-submit) does across
+clusters. This is useful when you can't predict which allocation will be scheduled first: a `def-`
+allocation often starts sooner when the group has been using a lot of compute recently.
+
+```console
+$ cluv submit narval job.sh
+                             Jobs submitted on the clusters
+┏━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Cluster ┃ Allocation               ┃ Result                                          ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ narval  │ --account=rrg-bengioy-ad │ bash --login -c 'sbatch --parsable              │
+│         │                          │ --chdir=$HOME/my_project                        │
+│         │                          │ --account=rrg-bengioy-ad --time=3:00:00         │
+│         │                          │ $HOME/my_project/job.sh'                        │
+│         │                          │ Job ID: 1234                                    │
+├─────────┼──────────────────────────┼─────────────────────────────────────────────────┤
+│ narval  │ --account=def-bengioy    │ bash --login -c 'sbatch --parsable              │
+│         │                          │ --chdir=$HOME/my_project --account=def-bengioy  │
+│         │                          │ --time=3:00:00 $HOME/my_project/job.sh'         │
+│         │                          │ Job ID: 1235                                    │
+└─────────┴──────────────────────────┴─────────────────────────────────────────────────┘
+Job 1235 on cluster narval is RUNNING. Cancelling the other jobs...
+```
+
+`cluv submit first` also takes every allocation of every cluster into account.
 
 ## What cluv injects automatically
 

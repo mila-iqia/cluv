@@ -68,8 +68,11 @@ async def _invoke_clush(hostfile: Path, command: list[str]) -> int:
 
     Inherits stdout/stderr from the current process (instead of capturing them) so that `clush`'s
     own TTY detection and per-node colored output pass straight through to the user's terminal.
+
+    Passes `-S`/`--maxrc` so that `clush` itself exits with the largest of the per-host command
+    return codes; without it, `clush` always exits 0 regardless of remote command failures.
     """
-    argv = ["uvx", "--from=clustershell", "clush", "--hostfile", str(hostfile), *command]
+    argv = ["uvx", "--from=clustershell", "clush", "-S", "--hostfile", str(hostfile), *command]
     console.log(f"$ {shlex.join(argv)}", style="green")
     proc = await asyncio.create_subprocess_exec(*argv)
     return await proc.wait()

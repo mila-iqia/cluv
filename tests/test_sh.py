@@ -5,6 +5,7 @@ from unittest import mock
 
 import pytest
 
+import cluv.__main__ as cluv_main
 import cluv.cli.sh as sh_module
 from cluv.cli.sh import sh
 from cluv.remote import Remote
@@ -150,7 +151,7 @@ async def test_invoke_clush_builds_expected_argv_and_returns_exit_code(
 
     assert returncode == 0
     create_subprocess_exec.assert_called_once_with(
-        "uvx", "--from=clustershell", "clush", "--hostfile", str(hostfile), "squeue", "--me"
+        "uvx", "--from=clustershell", "clush", "-S", "--hostfile", str(hostfile), "squeue", "--me"
     )
 
 
@@ -189,3 +190,23 @@ async def test_run_locally_returns_nonzero_exit_code(monkeypatch: pytest.MonkeyP
     returncode = await sh_module._run_locally(["false"])
 
     assert returncode == 7
+
+
+def test_sh_cli_parses_command_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cluv_main, cluv_main.sh.__name__, mock_sh := mock.AsyncMock(spec=cluv_main.sh)
+    )
+
+    cluv_main.main(["sh", "squeue", "--me"])
+
+    mock_sh.assert_called_once_with(command=["squeue", "--me"])
+
+
+def test_sh_cli_parses_no_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        cluv_main, cluv_main.sh.__name__, mock_sh := mock.AsyncMock(spec=cluv_main.sh)
+    )
+
+    cluv_main.main(["sh"])
+
+    mock_sh.assert_called_once_with(command=[])

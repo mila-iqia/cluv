@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -62,8 +64,19 @@ async def sh(command: list[str]) -> None:
 
 
 async def _invoke_clush(hostfile: Path, command: list[str]) -> int:
-    raise NotImplementedError  # implemented in Task 2
+    """Runs `clush` (via `uvx --from=clustershell`) against `hostfile`, running `command` on each host.
+
+    Inherits stdout/stderr from the current process (instead of capturing them) so that `clush`'s
+    own TTY detection and per-node colored output pass straight through to the user's terminal.
+    """
+    argv = ["uvx", "--from=clustershell", "clush", "--hostfile", str(hostfile), *command]
+    console.log(f"$ {shlex.join(argv)}", style="green")
+    proc = await asyncio.create_subprocess_exec(*argv)
+    return await proc.wait()
 
 
 async def _run_locally(command: list[str]) -> int:
-    raise NotImplementedError  # implemented in Task 2
+    """Runs `command` directly as a local subprocess (no SSH), inheriting stdout/stderr."""
+    console.log(f"({current_cluster()}) $ {shlex.join(command)}", style="green")
+    proc = await asyncio.create_subprocess_exec(*command)
+    return await proc.wait()

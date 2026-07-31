@@ -129,3 +129,63 @@ async def test_sh_exits_with_local_return_code_when_local_fails_before_clush_run
 
     invoke_clush.assert_called_once()  # clush still runs even though the local run failed.
     assert exc_info.value.code == 3  # but the local (first) failure's code wins.
+
+
+def _fake_proc(returncode: int) -> mock.Mock:
+    proc = mock.Mock()
+    proc.wait = mock.AsyncMock(return_value=returncode)
+    return proc
+
+
+async def test_invoke_clush_builds_expected_argv_and_returns_exit_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    create_subprocess_exec = mock.AsyncMock(return_value=_fake_proc(0))
+    monkeypatch.setattr(sh_module.asyncio, "create_subprocess_exec", create_subprocess_exec)
+
+    hostfile = tmp_path / "hosts.txt"
+    hostfile.write_text("mila\nnarval\n")
+
+    returncode = await sh_module._invoke_clush(hostfile, ["squeue", "--me"])
+
+    assert returncode == 0
+    create_subprocess_exec.assert_called_once_with(
+        "uvx", "--from=clustershell", "clush", "--hostfile", str(hostfile), "squeue", "--me"
+    )
+
+
+async def test_invoke_clush_returns_nonzero_exit_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setattr(
+        sh_module.asyncio, "create_subprocess_exec", mock.AsyncMock(return_value=_fake_proc(42))
+    )
+
+    hostfile = tmp_path / "hosts.txt"
+    hostfile.write_text("mila\n")
+
+    returncode = await sh_module._invoke_clush(hostfile, ["false"])
+
+    assert returncode == 42
+
+
+async def test_run_locally_builds_expected_argv_and_returns_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    create_subprocess_exec = mock.AsyncMock(return_value=_fake_proc(0))
+    monkeypatch.setattr(sh_module.asyncio, "create_subprocess_exec", create_subprocess_exec)
+
+    returncode = await sh_module._run_locally(["squeue", "--me"])
+
+    assert returncode == 0
+    create_subprocess_exec.assert_called_once_with("squeue", "--me")
+
+
+async def test_run_locally_returns_nonzero_exit_code(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        sh_module.asyncio, "create_subprocess_exec", mock.AsyncMock(return_value=_fake_proc(7))
+    )
+
+    returncode = await sh_module._run_locally(["false"])
+
+    assert returncode == 7

@@ -48,12 +48,42 @@ keep only those with an active connection. It never establishes a new connection
 1. `disabled = get_disabled_clusters()`, then `print_disabled_clusters(disabled)` — same
    warning shown by `login`/`sync`/`clean`.
 2. `remotes = await get_active_remotes()`; take `hostnames = [r.hostname for r in remotes]`.
-3. If `remotes` is empty, print a message telling the user to run `cluv login` first,
-   and return without invoking `clush`. (Unlike `sync`/`clean`, which `raise
+3. If `remotes` is empty *and* `current_cluster()` is `None` (nothing to run anything
+   on, locally or remotely), print a message telling the user to run `cluv login`
+   first, and return without invoking `clush`. (Unlike `sync`/`clean`, which `raise
    RuntimeError(...)` in this situation — that produces an unhandled traceback since
    nothing in `__main__.py` catches plain `RuntimeError`. `sh()` intentionally prints
    and returns instead, since there's no cluster-selection argument to make raising
-   meaningful here.)
+   meaningful here.) See "Running locally on the current cluster" below for the case
+   where `current_cluster()` is set.
+
+## Running locally on the current cluster
+
+`get_active_remotes()` excludes `current_cluster()` from its result (you don't need an
+SSH connection to yourself), so if `cluv sh` is invoked *from* a cluster (e.g. the user
+is on Mila and runs `cluv sh squeue --me` there), that cluster's own output would never
+be shown by `clush` alone. To fix this, `sh()` also runs `command` directly as a local
+subprocess (no SSH, no `clush`) whenever `current_cluster()` is set, in addition to (not
+instead of) the `clush` call for whichever other clusters are connected.
+
+The local run and the `clush` run happen **sequentially** (local first, then `clush`),
+not concurrently — this keeps each command's live output as a clean, uninterleaved
+block, consistent with this codebase's existing preference for sequential over
+concurrent execution when live output/prompts could otherwise collide (e.g. `login`
+connects to clusters sequentially to avoid overlapping 2FA prompts).
+
+Both are skipped/included independently based on what's actually available:
+- Not on a cluster (`current_cluster()` is `None`) and no clusters connected: print the
+  "not connected" message and return, as before.
+- Not on a cluster, but some clusters connected: run `clush` only (today's behavior).
+- On a cluster, but no other clusters connected: run the command locally only, no
+  `clush` invocation at all (no hostfile is written).
+- On a cluster, and other clusters are connected: run locally first, then `clush`.
+
+If the local run fails (non-zero exit code) but `clush` doesn't get skipped as a result
+— both always run when both apply. The process exits with the first non-zero return
+code encountered, in run order (local's code takes precedence over `clush`'s if both
+fail), via the same `sys.exit(returncode)` mechanism described below.
 
 ## Running `clush`
 
@@ -98,11 +128,16 @@ even though the user just watched real output scroll by.
 - Unit test the "connected clusters" filtering logic (config clusters minus current
   cluster, minus disabled, minus not-connected) by mocking `control_socket_is_running`
   and `get_disabled_clusters`, similar to existing tests around `login`.
-- Unit test the "no connected clusters" path prints the expected message and does not
-  invoke `clush`.
+- Unit test the "no connected clusters and not on a cluster" path prints the expected
+  message and does not invoke `clush` or run anything locally.
 - Unit test that the hostfile passed to `clush` contains exactly the connected
   hostnames, one per line, and that the temp file no longer exists after the call
   returns.
-- Unit test that a non-zero `clush` return code results in `sys.exit` being called
-  with that code (mock `asyncio.create_subprocess_exec` to avoid actually invoking
-  `uvx`/`clush` in tests).
+- Unit test that when `current_cluster()` is set, the command is also run locally
+  (mocking `current_cluster` and the local-run helper), and that this happens even
+  when there are zero other connected clusters (no hostfile/`clush` invocation in that
+  case).
+- Unit test that local and `clush` runs happen in order (local first) when both apply.
+- Unit test that a non-zero return code from either the local run or `clush` results
+  in `sys.exit` being called with that code (mock `asyncio.create_subprocess_exec` to
+  avoid actually invoking `uvx`/`clush`/local commands in tests).

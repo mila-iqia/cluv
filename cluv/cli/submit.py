@@ -68,7 +68,7 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     return flags
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class Submission:
     """One job to submit: on which cluster, over which connection, and with which sbatch flags."""
 
@@ -177,7 +177,12 @@ async def submit(
         # and keep the first one that starts.
         job = await submit_and_keep_first(
             [
-                Submission(cluster, remote, job_script, config_sbatch_args)
+                Submission(
+                    cluster=cluster,
+                    remote=remote,
+                    job_script=job_script,
+                    config_sbatch_args=config_sbatch_args,
+                )
                 for config_sbatch_args in allocations
             ],
             sbatch_args=sbatch_args,
@@ -251,7 +256,12 @@ async def submit_first(
     # One submission per allocation of each cluster.
     config = get_cluv_config()
     submissions = [
-        Submission(cluster, remote, job_scripts[cluster], config_sbatch_args)
+        Submission(
+            cluster=cluster,
+            remote=remote,
+            job_script=job_scripts[cluster],
+            config_sbatch_args=config_sbatch_args,
+        )
         for cluster, remote in cluster_to_remote.items()
         for config_sbatch_args in config.get_cluster_config(cluster).sbatch_args
     ]

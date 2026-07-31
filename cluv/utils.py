@@ -6,6 +6,7 @@ import socket
 import sys
 from contextvars import ContextVar
 from pathlib import Path
+from typing import TypeVar
 
 import rich.console
 
@@ -18,6 +19,7 @@ console_lock: contextvars.ContextVar[asyncio.Lock | None] = contextvars.ContextV
 
 
 def current_cluster() -> str | None:
+    """Returns the name of the current cluster (Mila,DRAC), or `None` if not on a cluster (or on an unknown cluster)."""
     if socket.gethostname().endswith(".server.mila.quebec"):
         return "mila"
     if "CC_CLUSTER" in os.environ:
@@ -37,8 +39,11 @@ def find_pyproject(start: Path | None = None) -> Path:
     )
 
 
+T = TypeVar("T")
+
+
 @contextlib.contextmanager
-def set_context[T](var: ContextVar[T], value: T):
+def set_context(var: ContextVar[T], value: T):
     """Equivalent of contextlib.ContextVar.set() context manager for Python < 3.14."""
     token = var.set(value)
     try:

@@ -9,9 +9,11 @@ import os
 import tomllib
 from dataclasses import field
 from pathlib import Path, PurePath, PurePosixPath
+from typing import Generic
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
+from typing_extensions import TypeVar
 
 from cluv.utils import current_cluster, find_pyproject
 
@@ -46,8 +48,11 @@ class PartialClusterConfig:
     """Path where the project should be cloned on this cluster."""
 
 
+PathType = TypeVar("PathType", Path, PurePosixPath, default=PurePosixPath)
+
+
 @dataclass(frozen=True)
-class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
+class ClusterConfig(Generic[PathType]):
     """Per-cluster configuration options.
 
     The path fields in this class are by default 'pure' posix paths, to make it explicit that they
@@ -117,7 +122,13 @@ class CluvConfig(BaseModel):
     """Name of the symlink created in the project directory pointing to `results_path`."""
 
     data_source: str | None = None
-    """`hostname:/path` of where to get the data from."""
+    """`hostname:/path` or `/local/path` of where to get the data from.
+
+    When set to `hostname:/path`, Cluv pulls the dataset from the given remote cluster before
+    pushing it to all target clusters.
+    When set to a plain path (no `hostname:` prefix), the data is read directly from that local
+    path and pushed to each target cluster without a prior pull step.
+    """
 
     datasets_path: str | None = None
     """Path to a dataset directory, for example, `'$SCRATCH/my_dataset'`
@@ -193,13 +204,11 @@ def set_local_env_vars(env_vars: dict[str, str]) -> None:
             value = new_value
         if key in os.environ:
             logger.warning(
-                "Overwriting local env var %s=%s with value from [tool.cluv.local.env] %s",
-                key,
-                os.environ[key],
-                value,
+                f"Overwriting local env var {key}={os.environ[key]} "
+                rf"with value from \[tool.cluv.local.env] {value}"
             )
         else:
-            logger.info("Setting local env var %s=%s from [tool.cluv.local.env]", key, value)
+            logger.info(rf"Setting local env var {key}={value} from \[tool.cluv.local.env]")
         os.environ[key] = value
 
 

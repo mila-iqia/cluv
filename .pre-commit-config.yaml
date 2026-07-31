@@ -18,7 +18,7 @@ repos:
         require_serial: true
       - id: check-yaml
         require_serial: true
-        exclude: "mkdocs.yml"
+        exclude: "mkdocs.yaml"
       - id: debug-statements
         require_serial: true
       - id: detect-private-key

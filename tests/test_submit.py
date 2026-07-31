@@ -308,6 +308,8 @@ class TestEnsureCleanGitState:
     def test_ensure_clean_git_state_exits_when_repo_dirty_without_autocommit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        messages: list[str] = []
+
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
             assert kwargs.get("text") is True
@@ -318,9 +320,17 @@ class TestEnsureCleanGitState:
             raise AssertionError(f"Unexpected subprocess.run call: {command}")
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(
+            cluv.cli.submit.console, "print", lambda message: messages.append(message)
+        )
 
         with pytest.raises(SystemExit):
             ensure_clean_git_state()
+
+        assert messages == [
+            "[red]Working directory is dirty. Please commit your changes before submitting, or use "
+            "`--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).[/red]"
+        ]
 
     def test_ensure_clean_git_state_creates_commit_when_autocommit_enabled(
         self, monkeypatch: pytest.MonkeyPatch

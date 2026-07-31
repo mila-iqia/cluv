@@ -25,17 +25,35 @@ cluv sh <command...>
 
 ## Determining "connected" clusters
 
-Mirrors the check already used in `login.py`, but never establishes a new connection
-(never triggers a 2FA prompt):
+`cluv.cli.sync.get_active_remotes()` already implements exactly this filtering (and is
+already reused by `clean` and `submit`), so `sh()` reuses it rather than reimplementing
+the logic:
 
-1. Start from `get_cluv_config().clusters_names`.
-2. Drop `current_cluster()` if present (consistent with `login`).
-3. Fetch `get_disabled_clusters()` and drop any disabled cluster, printing the same
-   warning as `login`/`sync`/`clean` via `print_disabled_clusters`.
-4. For each remaining cluster, check `control_socket_is_running(hostname)` in parallel
-   (`asyncio.gather`). Keep only the clusters where this returns `True`.
-5. If the resulting list is empty, print a message telling the user to run
-   `cluv login` first, and return without invoking `clush`.
+```python
+async def get_active_remotes() -> list[Remote]:
+    """Returns the Remotes for each cluster which has an active SSH connection.
+
+    Disabled clusters (see `cluv disable`) are excluded.
+    """
+```
+
+Internally it does: start from `get_cluv_config().clusters_names`, drop
+`current_cluster()` if present, drop disabled clusters (`get_disabled_clusters()`), then
+check `control_socket_is_running(hostname)` for each remaining cluster in parallel and
+keep only those with an active connection. It never establishes a new connection
+(never triggers a 2FA prompt).
+
+`sh()` calls it like `sync`/`clean` do:
+
+1. `disabled = get_disabled_clusters()`, then `print_disabled_clusters(disabled)` — same
+   warning shown by `login`/`sync`/`clean`.
+2. `remotes = await get_active_remotes()`; take `hostnames = [r.hostname for r in remotes]`.
+3. If `remotes` is empty, print a message telling the user to run `cluv login` first,
+   and return without invoking `clush`. (Unlike `sync`/`clean`, which `raise
+   RuntimeError(...)` in this situation — that produces an unhandled traceback since
+   nothing in `__main__.py` catches plain `RuntimeError`. `sh()` intentionally prints
+   and returns instead, since there's no cluster-selection argument to make raising
+   meaningful here.)
 
 ## Running `clush`
 

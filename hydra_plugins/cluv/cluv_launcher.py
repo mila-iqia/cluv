@@ -31,8 +31,6 @@ from hydra.core.utils import JobReturn, JobStatus
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
-from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-from submitit import SlurmJob
 from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
 from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
@@ -525,11 +523,9 @@ async def run_sweep(
 
         # The path where the remote results will be synced locally.
         local_job_results_path = local_results_dir / run_id
-        # where they came from on the remote.
-        # _cluster_job_results_path = cluster_results_dir / run_id
 
         # TODO: Unclear if we should just reuse Job or if we actually need something like JobInfo.
-        job = JobInfo(
+        job_info = JobInfo(
             cluster=cluster,
             job_id=str(job_id),
             tasks=[
@@ -540,8 +536,9 @@ async def run_sweep(
                     command=job_command,
                 )
             ],
+            n_chunks=job.n_chunks,
         )
-        job_infos.append(job)
+        job_infos.append(job_info)
 
     # Creates a rich.Live table and updates it as the status of the jobs change.
     await monitor_jobs_async(job_infos, poll_interval_seconds=30)
@@ -644,7 +641,6 @@ def get_jobs_table(
                 " ".join(run.command),
                 job.state,
                 str(out),
-                # style=row_style
                 end_section=(task_id == len(job.tasks) - 1),
             )
 
@@ -653,12 +649,11 @@ def get_jobs_table(
 
 def _build_monitoring_table(
     jobs: Sequence[JobInfo],
-    submitit_jobs: Sequence[SlurmJob | RemoteSlurmJob],
     monitoring_start_time: float,
 ) -> rich.table.Table:
     elapsed_minutes = int((time.time() - monitoring_start_time) / 60)
     table = rich.table.Table(
-        title=f"Monitoring {len(jobs)} jobs (elapsed: {elapsed_minutes}min)",
+        title=f"Monitoring {len(jobs)} jobs (elapsed: {elapsed_minutes} min)",
         box=rich.box.ROUNDED,
         header_style="bold white on #1a1a2e",
         title_style="bold cyan",
@@ -668,9 +663,9 @@ def _build_monitoring_table(
     table.add_column("Run id", style="bold")
     table.add_column("Command")
     table.add_column("State")
-    for job, submitit_job in zip(jobs, submitit_jobs):
+    for job in jobs:
         run = job.tasks[0]
-        table.add_row(run.cluster, run.run_id, " ".join(run.command), submitit_job.state)
+        table.add_row(run.cluster, run.run_id, " ".join(run.command), job.state)
     return table
 
 
@@ -694,7 +689,6 @@ async def monitor_jobs_async(
     test_mode: bool
         If in test mode, we do not check the length of poll_frequency
     """
-    here = current_cluster()
     if not test_mode:
         assert poll_interval_seconds >= 30, (
             "You can't refresh too often (>= 30s) to avoid overloading squeue"
@@ -704,56 +698,41 @@ async def monitor_jobs_async(
         print("There are no jobs to monitor")
         return
 
-    submitit_jobs = [
-        RemoteSlurmJob(
-            job.cluster,
-            # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
-            folder=job.tasks[0].results_path,
-            job_id=str(job.job_id),
-            tasks=list(range(len(job.tasks))),
-            remote_dir_sync=None,  # type: ignore
-        )
-        if job.cluster != here
-        else SlurmJob(
-            # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
-            folder=job.tasks[0].results_path,
-            job_id=str(job.job_id),
-            tasks=list(range(len(job.tasks))),
-        )
-        for job in jobs
-    ]
-
     monitoring_start_time = time.time()
     with rich.live.Live(
-        _build_monitoring_table(jobs, submitit_jobs, monitoring_start_time),
+        _build_monitoring_table(jobs, monitoring_start_time),
         refresh_per_second=4,
     ) as live:
         while True:
-            if not test_mode:
-                # Call [Remote]SlurmJob.get_info(mode="force") once for each cluster.
-                # For RemoteSlurmJob, this calls sacct over ssh. For SlurmJob, it uses
-                # sacct locally.
-                for cluster, job in {
-                    (job.cluster if isinstance(job, RemoteSlurmJob) else None): job
-                    for job in submitit_jobs
-                }.items():
-                    logger.debug(f"Calling sacct for cluster {cluster} to update job info.")
-                    job.get_info(mode="force")  # Force update once to sync the state
+            # if not test_mode:
+            #     # Call [Remote]SlurmJob.get_info(mode="force") once for each cluster.
+            #     # For RemoteSlurmJob, this calls sacct over ssh. For SlurmJob, it uses
+            #     # sacct locally.
+            #     for cluster, job in {
+            #         (job.cluster if isinstance(job, RemoteSlurmJob) else None): job
+            #         for job in submitit_jobs
+            #     }.items():
+            #         logger.debug(f"Calling sacct for cluster {cluster} to update job info.")
+            #         job.get_info(mode="force")  # Force update once to sync the state
+
             state_jobs = collections.defaultdict(set)
-            for i, job in enumerate(submitit_jobs):
+            for i, job in enumerate(jobs):
                 state_jobs[job.state.upper()].add(i)
                 if job.done():
                     state_jobs["DONE"].add(i)
 
-            live.update(_build_monitoring_table(jobs, submitit_jobs, monitoring_start_time))
+            live.update(_build_monitoring_table(jobs, monitoring_start_time))
 
-            if len(state_jobs["DONE"]) == len(submitit_jobs):
+            if len(state_jobs["DONE"]) == len(jobs):
                 break
 
             await asyncio.sleep(poll_interval_seconds)
 
     failed_job_indices = sorted(state_jobs["FAILED"])
-    print(f"All jobs finished, jobs with indices {failed_job_indices} failed", flush=True)
+    print("All jobs finished.", flush=True)
+    if len(failed_job_indices) > 0:
+        print(f"Jobs with indices {failed_job_indices} failed.", flush=True)
+
     print(
         f"Whole process is finished, took {int((time.time() - monitoring_start_time) / 60)} minutes"
     )

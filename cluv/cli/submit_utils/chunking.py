@@ -8,12 +8,8 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 3  # In hours
 
 
-def chunking_update_sbatch_args(
-    sbatch_args: list[str], env_vars: dict[str, str], job_script: Path
-) -> list[str]:
+def chunking_update_sbatch_args(n_chunks: int, sbatch_args: list[str]) -> list[str]:
     """Add the sbatch args (--array and --time) for chunking the job into multiple smaller jobs."""
-    # Add job array
-    n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
     logger.info(f"Chunking job into {n_chunks} smaller jobs of {CHUNK_SIZE} hours each.")
     sbatch_args = sbatch_args.copy()
 

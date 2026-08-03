@@ -26,6 +26,11 @@ class Job:
     sbatch_args: list[str]
     program_args: list[str]
 
+    n_chunks: int | None = None
+
+    def __hash__(self) -> int:
+        return hash((self.cluster, self.job_id))
+
 
 @dataclass
 class ProjectStateOnCluster:

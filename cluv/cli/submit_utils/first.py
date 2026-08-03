@@ -1,20 +1,13 @@
 import asyncio
-import dataclasses
 import logging
 import shlex
 
+from cluv.cache import Job
 from cluv.remote import Remote, run
 from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
 from cluv.utils import console
 
 logger = logging.getLogger(__name__)
-
-
-@dataclasses.dataclass(frozen=True)
-class JobHandle:
-    cluster: str
-    job_id: int
-    state: str
 
 
 async def cancel_job(remote: Remote | None, job_id: int, print: bool = False) -> str:
@@ -33,15 +26,15 @@ async def cancel_job(remote: Remote | None, job_id: int, print: bool = False) ->
 
 
 async def wait_for_running_job(
-    cluster_and_jobid_to_jobstate: dict[tuple[str, int], str],
+    job_to_state: dict[Job, str],
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
-) -> JobHandle | None:
+) -> tuple[Job, str] | None:
     """Watch the jobs with sacct until one of them starts (or completes)."""
-    first_running_job: JobHandle | None = None
+    first_running_job: Job | None = None
     wait_time = 1
 
-    to_query = list(cluster_and_jobid_to_jobstate.keys())
+    to_query = list(job_to_state.keys())
 
     while first_running_job is None and to_query:
         # Initial sleep after sbatch to give time for job to appear in sacct.
@@ -49,66 +42,61 @@ async def wait_for_running_job(
         wait_time = min(wait_time * 2, max_wait_time_seconds)
 
         job_states = await asyncio.gather(
-            *(run_sacct(cluster_to_remote[cluster], job_id) for cluster, job_id in to_query)
+            *(run_sacct(cluster_to_remote[job.cluster], job.job_id) for job in to_query)
         )
 
-        for (cluster, job_id), job_state in zip(to_query.copy(), job_states):
-            if (previous_state := cluster_and_jobid_to_jobstate[(cluster, job_id)]) != job_state:
+        for job, job_state in zip(to_query.copy(), job_states):
+            if (previous_state := job_to_state[job]) != job_state:
                 console.print(
-                    f"Job {job_id} on cluster {cluster}: {previous_state} -> {job_state}"
+                    f"Job {job.job_id} on cluster {job.cluster}: {previous_state} -> {job_state}"
                 )
 
-            cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
+            job_to_state[job] = job_state
 
             if job_state.startswith(("RUNNING", "COMPLETED")):
-                return JobHandle(job_id=job_id, cluster=cluster, state=job_state)
+                return job, job_state
             if job_state in FAILED_JOB_STATES:
-                to_query.remove((cluster, job_id))
+                to_query.remove(job)
 
-    # If all failed, `cluster_and_jobid_to_jobstate` is empty.
+    # If all failed, `job_to_state` is empty.
     assert not to_query
     return None
 
 
 async def wait_for_jobs_to_cancel(
-    cluster_and_jobid_to_jobstate: dict[tuple[str, int], str],
-    first_running_job: JobHandle,
+    job_to_state: dict[Job, str],
+    first_running_job: Job,
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
-) -> JobHandle | None:
+) -> None:
     start_wait_time = 5
-    to_cancel = list(cluster_and_jobid_to_jobstate.keys())
-    to_cancel.remove((first_running_job.cluster, first_running_job.job_id))
+    to_cancel = list(job_to_state.keys())
+    to_cancel.remove(first_running_job)
 
     job_states = await asyncio.gather(
-        *(run_sacct(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
+        *(run_sacct(cluster_to_remote[job.cluster], job.job_id) for job in to_cancel)
     )
-    for (cluster, job_id), job_state in zip(to_cancel, job_states):
-        logger.info(f"Job {job_id} on cluster {cluster} state: {job_state}")
+    for job, job_state in zip(to_cancel, job_states):
+        logger.info(f"Job {job.job_id} on cluster {job.cluster} state: {job_state}")
         job_state = clean_job_state(job_state)
-        cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
+        job_to_state[job] = job_state
 
     to_cancel = [
-        (cluster, job_id)
-        for (cluster, job_id), job_state in zip(to_cancel, job_states)
+        job
+        for job, job_state in zip(to_cancel, job_states)
         if not job_state.startswith(("CANCELLED", "COMPLETED"))
     ]
 
     logger.info(f"Need to cancel the following jobs: {to_cancel}")
 
     await asyncio.gather(
-        *[
-            cancel_job(cluster_to_remote[cluster], job_id, print=True)
-            for cluster, job_id in to_cancel
-        ]
+        *[cancel_job(cluster_to_remote[job.cluster], job.job_id, print=True) for job in to_cancel]
     )
 
     wait_time = min(start_wait_time, max_wait_time_seconds)
 
     while not all(
-        cluster_and_jobid_to_jobstate[cluster_jobid].startswith(
-            tuple(["CANCELLED"] + FAILED_JOB_STATES)
-        )
+        job_to_state[cluster_jobid].startswith(tuple(["CANCELLED"] + FAILED_JOB_STATES))
         for cluster_jobid in to_cancel.copy()
     ):
         # Initial sleep after scancel to give time for job to be cancelled.
@@ -116,12 +104,12 @@ async def wait_for_jobs_to_cancel(
         wait_time = min(wait_time * 2, max_wait_time_seconds)
 
         job_states = await asyncio.gather(
-            *(run_sacct(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
+            *(run_sacct(cluster_to_remote[job.cluster], job.job_id) for job in to_cancel)
         )
         logger.debug(f"Job states: {job_states}")
 
-        for (cluster, job_id), job_state in zip(to_cancel, job_states):
-            logger.info(f"Job {job_id} on cluster {cluster} is in state: {job_state}")
+        for job, job_state in zip(to_cancel, job_states):
+            logger.info(f"Job {job.job_id} on cluster {job.cluster} is in state: {job_state}")
             if job_state.startswith("CANCELLED by"):
                 job_state = "CANCELLED"  # just to avoid confusing users.
             if job_state == "FAILED":
@@ -129,10 +117,10 @@ async def wait_for_jobs_to_cancel(
                 # steps that is marked "FAILED" in sacct on some clusters, while the others are
                 # marked "CANCELLED". With "FAILED" in red, users might get a bit worried.
                 job_state = "CANCELLED"
-            cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
+            job_to_state[job] = job_state
             if job_state.startswith(("CANCELLED", "COMPLETED")):
-                console.print(f"Job {job_id} on cluster {cluster} is now {job_state}.")
-                to_cancel.remove((cluster, job_id))
+                console.print(f"Job {job.job_id} on cluster {job.cluster} is now {job_state}.")
+                to_cancel.remove(job)
                 # TODO: Do we remove the jobs from the table if they failed?
                 # Also remove from `cluster_to_jobid` so the ctrl+c handler below doesn't
                 # try to cancel it again.

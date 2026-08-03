@@ -3,14 +3,8 @@ name = "pytorch-example"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "cluster-uv",
-    "numpy>=2.4.4",
-    "torch>=2.7.0,<2.11.0",
-    "torchvision>=0.25.0",
-    "wandb>=0.27.0",
-]
+requires-python = ">=3.11"
+dependencies = ["cluster-uv", "numpy", "torch", "torchvision", "wandb"]
 
 [tool.uv.sources]
 cluster-uv = { workspace = true }

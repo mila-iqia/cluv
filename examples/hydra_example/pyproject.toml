@@ -4,14 +4,14 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [{ name = "Fabrice Normandin", email = "normandf@mila.quebec" }]
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "cluster-uv[hydra]",
     "hydra-colorlog>=1.2.0",
-    "numpy>=2.4.4",
-    "torch>=2.7.0,<2.11.0",
-    "torchvision>=0.25.0",
-    "wandb>=0.27.0",
+    "numpy",
+    "torch",
+    "torchvision",
+    "wandb",
 ]
 
 [tool.uv.sources]

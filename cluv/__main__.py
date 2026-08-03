@@ -190,7 +190,7 @@ def add_status_args(subparsers: Subparsers):
         help="Which table to display: cluster overview, jobs overview, or both (default: all).",
     )
     status_parser.add_argument(
-        "--show_n_jobs",
+        "--max-jobs",
         default=10,
         type=int,
         help="How many jobs to display.",

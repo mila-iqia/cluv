@@ -229,8 +229,8 @@ cluv status [table] [options]
 
 **Options**
 
-`--show_n_jobs`
-:   Number of jobs to show in the `jobs` table. Default to 10.
+`--max-jobs`
+:   Maximum number of jobs to show in the `jobs` table. Default to 10.
 
 ---
 

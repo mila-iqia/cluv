@@ -409,7 +409,7 @@ def _build_cluster_table(
 
 
 def _build_cluv_jobs_table(
-    cached_jobs: list[Job], live_info: dict[int, LiveJobInfo], show_n_jobs: int
+    cached_jobs: list[Job], live_info: dict[int, LiveJobInfo], max_jobs: int
 ) -> Table:
     """Build the jobs overview table with one row per cached job, enriched with live status info."""
     table = Table(
@@ -429,7 +429,7 @@ def _build_cluv_jobs_table(
     table.add_column("Elapsed time")
 
     # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
-    for job in list(reversed(cached_jobs))[:show_n_jobs]:
+    for job in list(reversed(cached_jobs))[:max_jobs]:
         info = live_info.get(job.job_id)
 
         try:
@@ -493,8 +493,8 @@ def _build_cluster_table_legend() -> Panel:
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 
 
-def _build_job_table_legend(show_jobs: int, total_jobs: int) -> Panel:
-    shown_jobs = min(show_jobs, total_jobs)
+def _build_job_table_legend(max_jobs: int, total_jobs: int) -> Panel:
+    shown_jobs = min(max_jobs, total_jobs)
 
     return Panel(
         f"Showing {shown_jobs} / {total_jobs} cluv jobs",
@@ -550,7 +550,7 @@ async def get_job_infos(
     return live_info, clusters_job_stats
 
 
-async def status(table: Literal["clusters", "jobs", "all"], show_n_jobs: int) -> None:
+async def status(table: Literal["clusters", "jobs", "all"], max_jobs: int) -> None:
     """Show status of clusters and jobs.
 
     Parameters:
@@ -605,6 +605,6 @@ async def status(table: Literal["clusters", "jobs", "all"], show_n_jobs: int) ->
         console.print()
 
     if table in ("jobs", "all"):
-        console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, show_n_jobs))
-        console.print(_build_job_table_legend(show_n_jobs, len(cached_jobs)))
+        console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, max_jobs))
+        console.print(_build_job_table_legend(max_jobs, len(cached_jobs)))
         console.print()

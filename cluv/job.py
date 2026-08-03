@@ -9,13 +9,19 @@ import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-
-from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-from submitit.slurm.slurm import SlurmJob
+from typing import TYPE_CHECKING
 
 import cluv
 import cluv.config
 from cluv.utils import current_cluster
+
+if TYPE_CHECKING:
+    # These live behind the optional `hydra` extra (remote-slurm-executor, submitit), so they
+    # can't be imported unconditionally here: `cluv/job.py` is also imported by base CLI commands
+    # (e.g. `cluv/cli/sync.py`) that don't require that extra. `JobInfo.__post_init__` imports
+    # them locally instead, since only code paths that actually construct a `JobInfo` need them.
+    from remote_slurm_executor.slurm_remote import RemoteSlurmJob
+    from submitit.slurm.slurm import SlurmJob
 
 SLURM_JOB_ID: int | None = (
     int(os.environ["SLURM_JOB_ID"]) if "SLURM_JOB_ID" in os.environ else None
@@ -97,6 +103,8 @@ class JobInfo:
 
     def __post_init__(self):
         # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
+        from remote_slurm_executor.slurm_remote import RemoteSlurmJob
+        from submitit.slurm.slurm import SlurmJob
 
         job_ids = (
             [f"{self.job_id}_{i}" for i in range(self.n_chunks)]

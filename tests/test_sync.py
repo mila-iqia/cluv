@@ -43,7 +43,7 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
     other_cluster = "tamia"
     other_cluster_remote = await Remote.connect(other_cluster)
 
-    monkeypatch.chdir("examples/pytorch-example")
+    monkeypatch.chdir("examples/imagenet")
     # We need to change the "tool.cluv.local.env.SCRATCH" to point to the fake scratch path.
     config = get_cluv_config()
     monkeypatch.setattr(config, "local", LocalConfig(env={"SCRATCH": str(fake_scratch)}))

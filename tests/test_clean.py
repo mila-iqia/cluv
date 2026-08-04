@@ -368,7 +368,7 @@ async def test_clean(
     assert not current_cluster(), "test needs to run locally for now."
     assert cluv.cache.read_cache() == CacheContent(), "Assuming a clean cache to begin with."
 
-    monkeypatch.chdir("examples/pytorch-example")
+    monkeypatch.chdir("examples/imagenet")
     config = get_cluv_config()
     try:
         cluster_config = config.get_cluster_config(cluster)

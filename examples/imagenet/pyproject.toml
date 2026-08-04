@@ -1,26 +1,44 @@
 [project]
-name = "pytorch-example"
+name = "imagenet-example"
 version = "0.1.0"
-description = "Add your description here"
+description = "Multi-node, multi-GPU ImageNet training with cluv."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["cluster-uv", "numpy", "torch", "torchvision", "wandb"]
+dependencies = [
+    "cluster-uv",
+    "numpy",
+    "rich",
+    "scikit-learn",
+    "scipy",
+    "simple-parsing",
+    "torch",
+    "torchvision",
+    "tqdm",
+    "wandb",
+]
 
 [tool.uv.sources]
 cluster-uv = { workspace = true }
 
+[tool.ruff]
+line-length = 100
+
 ###  --------------   CLUV CONFIG   --------------  ###
 
 [tool.cluv]
+# Job script used when none is passed to `cluv submit`. Overridden per cluster below, because
+# each cluster has a different node layout (GPUs per node, local disk, whole-node policies, ...).
+job_script_path = "scripts/job.sh"
 # Where to store job results by default.
-results_path = "$SCRATCH/logs/pytorch_example"
+results_path = "$SCRATCH/logs/imagenet"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
 results_symlink = "logs"
 # Where to read the data from when synchronizing data to all clusters.
-data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"
+# This folder holds the ILSVRC2012 archives (train/val tars, devkit and md5sums).
+data_source = "mila:/network/datasets/imagenet"
 # Where the dataset should be replicated on all clusters.
-datasets_path = "$SCRATCH/datasets/cifar10"
+datasets_path = "$SCRATCH/datasets/imagenet"
 
 [tool.cluv.env]
 # Environment variables applied when using Slurm commands on all clusters.
@@ -30,9 +48,8 @@ WANDB_MODE = "offline"
 
 [tool.cluv.sbatch_args]
 # sbatch flags applied on all clusters. CLI-supplied flags take precedence.
-time = "3:00:00"
+time = "2:00:00"
 requeue = true
-mem = "16G"
 
 [tool.cluv.local]
 # Settings (environment variables) applied when using cluv on a local machine (not on a Slurm cluster).
@@ -45,27 +62,32 @@ env = { SCRATCH = "$HOME/scratch" }
 
 [tool.cluv.clusters.mila]
 # Overrides specific to the Mila cluster.
+job_script_path = "scripts/job_mila.sh"
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 
 [tool.cluv.clusters.tamia]
+job_script_path = "scripts/job_tamia.sh"
 
 [tool.cluv.clusters.killarney]
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
-datasets_path = "$HOME/datasets/cifar10"
-results_path = "$HOME/logs/pytorch_example"
+datasets_path = "$HOME/datasets/imagenet"
+results_path = "$HOME/logs/imagenet"
 
 [tool.cluv.clusters.vulcan]
-datasets_path = "$HOME/datasets/cifar10"
-results_path = "$HOME/logs/pytorch_example"
+datasets_path = "$HOME/datasets/imagenet"
+results_path = "$HOME/logs/imagenet"
 
 [tool.cluv.clusters.rorqual]
-env = { SBATCH_ACCOUNT = "rrg-bengioy-ad" }
+job_script_path = "scripts/job_rorqual.sh"
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.fir]
+job_script_path = "scripts/job_fir.sh"
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.nibi]
+job_script_path = "scripts/job_nibi.sh"
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 sbatch_args = { account = "rrg-bengioy-ad" }
 

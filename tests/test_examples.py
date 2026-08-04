@@ -1,11 +1,15 @@
+import asyncio
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
+from cluv.cli.submit import submit
 from cluv.remote import Remote
+from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
 
 # TODO: Also run this test on the Mila cluster using the same self-hosted runner setup as in
 # mila-docs.
@@ -68,3 +72,60 @@ async def test_hydra_example(
     assert re.search(r"lr=0\.1\s+│\s+COMPLETED", output)
     assert re.search(r"lr=0\.2\s+│\s+COMPLETED", output)
     assert subprocess_result.returncode == 0
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "cluster",
+    ["mila", "tamia", "rorqual", "fir", "nibi"],
+    indirect=True,
+)
+async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch) -> None:
+    """End-to-end: submit the ImageNet example on a cluster with its own job script.
+
+    Uses `--use_fake_data` so this doesn't need the (~150GB) ImageNet archives to have been synced
+    to the cluster, and doesn't pass a job script, so that the per-cluster `job_script_path` from
+    the example's `[tool.cluv.clusters.<cluster>]` config is the thing being exercised.
+
+    Requires an active SSH connection to the cluster and a clean git tree.
+    """
+    repo_root = Path(__file__).parent.parent
+    monkeypatch.chdir(repo_root / "examples/imagenet")
+
+    job = await submit(
+        remote.hostname,
+        job_script=None,
+        sbatch_args=[],
+        program_args=[
+            "python",
+            "main.py",
+            "--use_fake_data",
+            "--epochs=1",
+            "--limit_train_samples=2048",
+            "--limit_val_samples=512",
+            "--model_name=resnet18",
+            "--no_wandb",
+        ],
+    )
+    assert job is not None
+    # The job script that cluv picked should be the one configured for this cluster.
+    assert job.job_script == f"scripts/job_{remote.hostname}.sh"
+
+    state = await wait_for_job_to_finish(remote, job.job_id)
+    assert state.startswith("COMPLETED"), state
+
+
+async def wait_for_job_to_finish(remote: Remote, job_id: int, timeout_minutes: int = 30) -> str:
+    """Poll `sacct` until the job reaches a terminal state, and return that state."""
+    deadline = time.time() + timeout_minutes * 60
+    state = "UNKNOWN"
+    while time.time() < deadline:
+        await asyncio.sleep(10)
+        sacct_output = (await run_sacct(remote, job_id)).strip().splitlines()
+        if not sacct_output:
+            continue  # the job hasn't shown up in the accounting database yet.
+        state = clean_job_state(sacct_output[0])
+        print(f"Job {job_id} on {remote.hostname}: {state}")
+        if state.startswith(("COMPLETED", "CANCELLED")) or state in FAILED_JOB_STATES:
+            return state
+    pytest.skip(f"Job {job_id} on {remote.hostname} did not finish within {timeout_minutes}min.")

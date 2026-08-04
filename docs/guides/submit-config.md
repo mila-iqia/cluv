@@ -105,3 +105,11 @@ cluv submit narval new_job.sh   # uses new_job.sh, ignoring config
 
 If neither a CLI script nor a configured `job_script_path` exists for the target cluster, `cluv
 submit` exits with an error.
+
+!!! tip "Worked example"
+    [`examples/imagenet`](https://github.com/mila-iqia/cluv/tree/master/examples/imagenet) uses one
+    job script per cluster: each `scripts/job_<cluster>.sh` holds only the `#SBATCH` directives for
+    that cluster's node layout, then `exec`s a shared `scripts/train.sh`.
+
+Note that a per-cluster job script still has to exist **on your local machine**: `cluv submit` reads
+its header to detect an `#SBATCH --output` directive before submitting.

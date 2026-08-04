@@ -17,6 +17,7 @@ import cluv.remote
 import cluv.slurm
 import cluv.utils
 from cluv.cli.submit import (
+    SubmissionArgs,
     build_submit_command,
     ensure_clean_git_state,
     get_sbatch_command,
@@ -107,10 +108,11 @@ class TestGetSbatchCommand:
         sbatch_script = project_dir / "my_script.sh"
         sbatch_script.touch(0o755)
         cluster = "mila"
-        sbatch_command = get_sbatch_command(
+        sbatch_args = ["--account=my_account", "--mem=8G"]
+        sbatch_command, submission_args = get_sbatch_command(
             cluster=cluster,
             job_script=sbatch_script,
-            sbatch_args=["--account=my_account", "--mem=8G"],
+            sbatch_args=sbatch_args,
             program_args=["program_arg_1", "program_arg_2"],
             git_commit="abecdef",
             chunking=False,
@@ -124,6 +126,7 @@ class TestGetSbatchCommand:
             "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
             f"--mem=8G $HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
+        assert submission_args == SubmissionArgs(sbatch_args=sbatch_args)
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"
@@ -145,10 +148,12 @@ class TestGetSbatchCommand:
         job_script = project_dir / "scripts" / "my_script.sh"
         job_script.parent.mkdir()
         job_script.touch(0o755)
-        sbatch_command = get_sbatch_command(
+
+        sbatch_args = []
+        sbatch_command, submission_args = get_sbatch_command(
             cluster="mila",
             job_script=job_script,
-            sbatch_args=[],
+            sbatch_args=sbatch_args,
             program_args=[],
             git_commit="abecdef",
             chunking=False,
@@ -159,6 +164,7 @@ class TestGetSbatchCommand:
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
             "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh '"
         )
+        assert submission_args == SubmissionArgs(sbatch_args=sbatch_args)
 
     def test_config_sbatch_args_prepended_to_cli_args(self, project_dir: Path) -> None:
         """Config-derived sbatch flags are prepended; CLI flags come last and can override."""
@@ -180,7 +186,7 @@ class TestGetSbatchCommand:
         )
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
-        sbatch_command = get_sbatch_command(
+        sbatch_command, submission_args = get_sbatch_command(
             cluster="mila",
             job_script=job_script,
             sbatch_args=["--time=1:00:00"],  # CLI overrides the config time
@@ -196,6 +202,9 @@ class TestGetSbatchCommand:
         assert "--time=1:00:00" in sbatch_command
         # Config flags appear before CLI flags in the command string
         assert sbatch_command.index("--time=3:00:00") < sbatch_command.index("--time=1:00:00")
+        assert submission_args == SubmissionArgs(
+            sbatch_args=["--time=3:00:00", "--requeue", "--gpus=a100:2", "--time=1:00:00"]
+        )
 
     def test_cluster_sbatch_args_override_global(self, project_dir: Path) -> None:
         """Cluster-level sbatch_args override global ones; empty string removes a flag."""
@@ -217,7 +226,7 @@ class TestGetSbatchCommand:
         )
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
-        sbatch_command = get_sbatch_command(
+        sbatch_command, submission_args = get_sbatch_command(
             cluster="cpu_cluster",
             job_script=job_script,
             sbatch_args=[],
@@ -228,6 +237,7 @@ class TestGetSbatchCommand:
         # gpus removed by cluster override, time still present
         assert "--gpus" not in sbatch_command
         assert "--time=2:00:00" in sbatch_command
+        assert submission_args == SubmissionArgs(sbatch_args=["--time=2:00:00"])
 
     def test_use_correct_time_value_when_chunking(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"
@@ -247,7 +257,7 @@ class TestGetSbatchCommand:
         job_script.parent.mkdir()
         job_script.write_text("#SBATCH --time=20:00:00")
 
-        sbatch_command = get_sbatch_command(
+        sbatch_command, submission_args = get_sbatch_command(
             cluster="mila",
             job_script=job_script,
             sbatch_args=["--time=10:00:00"],
@@ -255,7 +265,11 @@ class TestGetSbatchCommand:
             git_commit="abecdef",
             chunking=True,
         )
-        assert "--time=3:00:00 --array=0-3%1" in sbatch_command
+
+        expected_sbatch_args = ["--time=3:00:00", "--array=0-3%1"]
+
+        assert " ".join(expected_sbatch_args) in sbatch_command
+        assert submission_args == SubmissionArgs(sbatch_args=expected_sbatch_args, n_chunks=4)
 
 
 class TestSubmitCliParsing:
@@ -341,7 +355,7 @@ class TestEnsureCleanGitState:
     def test_ensure_clean_git_state_exits_when_repo_dirty_without_autocommit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        messages: list[str] = []
+        messages: list[tuple[str, dict]] = []
 
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
@@ -354,15 +368,20 @@ class TestEnsureCleanGitState:
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
         monkeypatch.setattr(
-            cluv.cli.submit.console, "print", lambda message: messages.append(message)
+            cluv.cli.submit.console,
+            "print",
+            lambda message, **kwargs: messages.append((message, kwargs)),
         )
 
         with pytest.raises(SystemExit):
             ensure_clean_git_state()
 
         assert messages == [
-            "[red]Working directory is dirty. Please commit your changes before submitting, or use "
-            "`--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).[/red]"
+            (
+                "Working directory is dirty. Please commit your changes before submitting, or use "
+                "`--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).",
+                {"style": "red"},
+            )
         ]
 
     def test_ensure_clean_git_state_creates_commit_when_autocommit_enabled(

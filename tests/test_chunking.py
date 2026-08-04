@@ -53,31 +53,28 @@ class TestChunkingUpdateSbatchArgs:
         sbatch_args = ["--abc=123", "--time=01:00:00", "-t=20:30:00", "--def=456"]
         env_vars = {}
         job_script = Path("my_script.sh")
+        n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
 
         expected_sbatch_args = ["--abc=123", "--def=456", "--time=3:00:00", "--array=0-6%1"]
 
-        assert (
-            chunking_update_sbatch_args(sbatch_args, env_vars, job_script) == expected_sbatch_args
-        )
+        assert chunking_update_sbatch_args(n_chunks, sbatch_args) == expected_sbatch_args
 
     def test_should_return_one_chunk_if_time_inferior_to_a_chunk(self) -> None:
         sbatch_args = ["--abc=123", "-t=02:00:00", "--def=456"]
         env_vars = {}
         job_script = Path("my_script.sh")
+        n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
 
         expected_sbatch_args = ["--abc=123", "--def=456", "--time=3:00:00", "--array=0-0%1"]
 
-        assert (
-            chunking_update_sbatch_args(sbatch_args, env_vars, job_script) == expected_sbatch_args
-        )
+        assert chunking_update_sbatch_args(n_chunks, sbatch_args) == expected_sbatch_args
 
     def test_should_return_one_chunk_if_null_time(self) -> None:
         sbatch_args = ["--abc=123", "--time=00:00:00", "--def=456"]
         env_vars = {}
         job_script = Path("my_script.sh")
+        n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
 
         expected_sbatch_args = ["--abc=123", "--def=456", "--time=3:00:00", "--array=0-0%1"]
 
-        assert (
-            chunking_update_sbatch_args(sbatch_args, env_vars, job_script) == expected_sbatch_args
-        )
+        assert chunking_update_sbatch_args(n_chunks, sbatch_args) == expected_sbatch_args

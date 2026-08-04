@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fir: 4 H100 GPUs on a single node.
+# Fir: the 4 H100 GPUs of a node (48 cores / 1.1TB of RAM per node).
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --gpus-per-task=h100:1

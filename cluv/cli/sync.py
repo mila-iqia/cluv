@@ -77,7 +77,6 @@ async def sync(
 
     # Show disabled clusters early so the user is aware.
     disabled = get_disabled_clusters()
-    print_disabled_clusters(disabled)
 
     # When no cluster is passed, sync with clusters for which we have an active SSH connection.
     all_remotes = await get_active_remotes()
@@ -87,11 +86,13 @@ async def sync(
         # Pass the already-fetched disabled dict so login does not print the warning a second time.
         remotes = await login(enabled_clusters, disabled=disabled) if enabled_clusters else []
     elif not all_remotes:
+        print_disabled_clusters(disabled)
         raise RuntimeError(
             "[red]Not currently connected to any Slurm cluster.[/red] "
             "Use `cluv login` to login and create reusable connections."
         )
     else:
+        print_disabled_clusters(disabled)
         remotes = all_remotes.copy()
         clusters = [remote.hostname for remote in all_remotes]
 

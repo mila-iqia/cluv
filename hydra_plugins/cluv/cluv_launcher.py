@@ -672,7 +672,6 @@ def _build_monitoring_table(
 async def monitor_jobs_async(
     jobs: Sequence[JobInfo],
     poll_interval_seconds: float = 30,
-    test_mode: bool = False,
 ) -> None:
     """Async version of `monitor_jobs` from submitit.
 
@@ -686,13 +685,10 @@ async def monitor_jobs_async(
     poll_frequency: int
         The time (in seconds) between two refreshes of the monitoring.
         Can't be inferior to 30s.
-    test_mode: bool
-        If in test mode, we do not check the length of poll_frequency
     """
-    if not test_mode:
-        assert poll_interval_seconds >= 30, (
-            "You can't refresh too often (>= 30s) to avoid overloading squeue"
-        )
+    assert poll_interval_seconds >= 30, (
+        "You can't refresh too often (>= 30s) to avoid overloading squeue"
+    )
 
     if len(jobs) == 0:
         print("There are no jobs to monitor")
@@ -704,17 +700,6 @@ async def monitor_jobs_async(
         refresh_per_second=4,
     ) as live:
         while True:
-            # if not test_mode:
-            #     # Call [Remote]SlurmJob.get_info(mode="force") once for each cluster.
-            #     # For RemoteSlurmJob, this calls sacct over ssh. For SlurmJob, it uses
-            #     # sacct locally.
-            #     for cluster, job in {
-            #         (job.cluster if isinstance(job, RemoteSlurmJob) else None): job
-            #         for job in submitit_jobs
-            #     }.items():
-            #         logger.debug(f"Calling sacct for cluster {cluster} to update job info.")
-            #         job.get_info(mode="force")  # Force update once to sync the state
-
             state_jobs = collections.defaultdict(set)
             for i, job in enumerate(jobs):
                 state_jobs[job.state.upper()].add(i)

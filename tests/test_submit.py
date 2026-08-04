@@ -17,7 +17,7 @@ import cluv.remote
 import cluv.slurm
 import cluv.utils
 from cluv.cli.submit import (
-    SubmissionArgs,
+    ResolvedSbatchArgs,
     build_submit_command,
     ensure_clean_git_state,
     get_sbatch_command,
@@ -126,7 +126,7 @@ class TestGetSbatchCommand:
             "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
             f"--mem=8G $HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
-        assert submission_args == SubmissionArgs(sbatch_args=sbatch_args)
+        assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"
@@ -164,7 +164,7 @@ class TestGetSbatchCommand:
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
             "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh '"
         )
-        assert submission_args == SubmissionArgs(sbatch_args=sbatch_args)
+        assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
 
     def test_config_sbatch_args_prepended_to_cli_args(self, project_dir: Path) -> None:
         """Config-derived sbatch flags are prepended; CLI flags come last and can override."""
@@ -202,7 +202,7 @@ class TestGetSbatchCommand:
         assert "--time=1:00:00" in sbatch_command
         # Config flags appear before CLI flags in the command string
         assert sbatch_command.index("--time=3:00:00") < sbatch_command.index("--time=1:00:00")
-        assert submission_args == SubmissionArgs(
+        assert submission_args == ResolvedSbatchArgs(
             sbatch_args=["--time=3:00:00", "--requeue", "--gpus=a100:2", "--time=1:00:00"]
         )
 
@@ -237,7 +237,7 @@ class TestGetSbatchCommand:
         # gpus removed by cluster override, time still present
         assert "--gpus" not in sbatch_command
         assert "--time=2:00:00" in sbatch_command
-        assert submission_args == SubmissionArgs(sbatch_args=["--time=2:00:00"])
+        assert submission_args == ResolvedSbatchArgs(sbatch_args=["--time=2:00:00"])
 
     def test_use_correct_time_value_when_chunking(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"
@@ -269,7 +269,7 @@ class TestGetSbatchCommand:
         expected_sbatch_args = ["--time=3:00:00", "--array=0-3%1"]
 
         assert " ".join(expected_sbatch_args) in sbatch_command
-        assert submission_args == SubmissionArgs(sbatch_args=expected_sbatch_args, n_chunks=4)
+        assert submission_args == ResolvedSbatchArgs(sbatch_args=expected_sbatch_args, n_chunks=4)
 
 
 class TestSubmitCliParsing:

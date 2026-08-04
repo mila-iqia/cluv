@@ -15,7 +15,6 @@ import rich.syntax
 import rich.table
 import rich.text
 from rich.live import Live
-from typing_extensions import TypeVar
 
 from cluv.cache import Job, save_job
 from cluv.cli.submit_utils.chunking import chunking_update_sbatch_args, get_n_chunks
@@ -34,11 +33,10 @@ logger = logging.getLogger(__name__)
 __all__ = ["submit"]
 display_commands = ContextVar("display_commands", default=True)
 raise_on_command_error = ContextVar("raise_on_command_error", default=False)
-PathT = TypeVar("PathT", Path, PurePosixPath, default=PurePosixPath)
 
 
 @dataclass
-class SubmissionArgs:
+class ResolvedSbatchArgs:
     sbatch_args: list[str]
     n_chunks: int | None = None
 
@@ -442,7 +440,9 @@ def get_job_script_path_from_config(cluster: str) -> Path | PurePosixPath | None
     return job_script_path
 
 
-def _check_job_script_not_none(job_script: PathT | None, cluster: str) -> PathT:
+def _check_job_script_not_none(
+    job_script: Path | PurePosixPath | None | None, cluster: str
+) -> Path | PurePosixPath:
     if job_script is None:
         raise ValueError(
             f"No job script was provided and no [tool.cluv] job_script_path is configured for {cluster}."
@@ -472,7 +472,7 @@ def get_sbatch_command(
     program_args: list[str],
     git_commit: str,
     chunking: bool,
-) -> tuple[str, SubmissionArgs]:
+) -> tuple[str, ResolvedSbatchArgs]:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate
     sbatch_arguments, environment variables and paths set.
@@ -550,7 +550,7 @@ def get_sbatch_command(
         f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
 
-    return sbatch_command, SubmissionArgs(sbatch_args=sbatch_args, n_chunks=n_chunks)
+    return sbatch_command, ResolvedSbatchArgs(sbatch_args=sbatch_args, n_chunks=n_chunks)
 
 
 async def sbatch(

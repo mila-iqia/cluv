@@ -6,22 +6,12 @@ import os
 import re
 import subprocess
 import warnings
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING
 
 import cluv
 import cluv.config
 from cluv.utils import current_cluster
-
-if TYPE_CHECKING:
-    # These live behind the optional `hydra` extra (remote-slurm-executor, submitit), so they
-    # can't be imported unconditionally here: `cluv/job.py` is also imported by base CLI commands
-    # (e.g. `cluv/cli/sync.py`) that don't require that extra. `JobInfo.__post_init__` imports
-    # them locally instead, since only code paths that actually construct a `JobInfo` need them.
-    from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-    from submitit.slurm.slurm import SlurmJob
 
 SLURM_JOB_ID: int | None = (
     int(os.environ["SLURM_JOB_ID"]) if "SLURM_JOB_ID" in os.environ else None
@@ -96,68 +86,6 @@ class JobInfo:
     job_id: str
     tasks: list[RunInfo]
     n_chunks: int | None = None
-
-    _slurm_jobs: Sequence[SlurmJob | RemoteSlurmJob] = dataclasses.field(
-        init=False, repr=False, default_factory=list
-    )
-
-    def __post_init__(self):
-        # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
-        from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-        from submitit.slurm.slurm import SlurmJob
-
-        job_ids = (
-            [f"{self.job_id}_{i}" for i in range(self.n_chunks)]
-            if self.n_chunks
-            else [self.job_id]
-        )
-
-        if self.cluster == current_cluster():
-            self._slurm_jobs = [
-                SlurmJob(
-                    folder=self.tasks[0].results_path,
-                    job_id=job_id,
-                    tasks=list(range(len(self.tasks))),
-                )
-                for job_id in job_ids
-            ]
-        else:
-            self._slurm_jobs = [
-                RemoteSlurmJob(
-                    self.cluster,
-                    folder=self.tasks[0].results_path,
-                    job_id=job_id,
-                    tasks=list(range(len(self.tasks))),
-                    remote_dir_sync=None,  # type: ignore
-                )
-                for job_id in job_ids
-            ]
-
-    @property
-    def slurm_jobs(self) -> Sequence[SlurmJob | RemoteSlurmJob]:
-        """The underlying submitit job(s) for each chunk of this job."""
-        return self._slurm_jobs
-
-    @property
-    def state(self) -> str:
-        """Reuse the state polling logic from submitit to get the state of the job.
-
-        Note: This doesn't call sacct too often, there is a caching mechanism in submitit.
-        """
-        states = [chunk_job.state for chunk_job in self._slurm_jobs]
-        if "FAILED" in states:
-            return "FAILED"
-        for state in reversed(states):
-            if state != "UNKNOWN":
-                return state
-        return "UNKNOWN"
-
-    def done(self, force_check: bool = False) -> bool:
-        """Whether all the chunks of this job are finished.
-
-        Reuses the result-file/state-polling logic from submitit (see `SlurmJob.done`).
-        """
-        return all(chunk_job.done(force_check=force_check) for chunk_job in self._slurm_jobs)
 
 
 def get_results_path() -> Path:

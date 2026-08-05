@@ -41,6 +41,8 @@ from cluv.job import JobInfo, RunInfo, current_run_info, get_results_path, get_r
 from cluv.remote import Remote
 from cluv.utils import current_cluster, set_context
 
+from .submitit_job import get_job_state, is_job_done
+
 logger = logging.getLogger(__name__)
 
 current_job: RunInfo | None = None
@@ -581,8 +583,9 @@ def _jobs_to_hydra_jobreturn_format(
             except ValueError:
                 pass
 
-            logger.info(f"Run {run.run_id} finished ({job.state}): Output: {output_file}")
-            job_status = JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED
+            job_state = get_job_state(job)
+            logger.info(f"Run {run.run_id} finished ({job_state}): Output: {output_file}")
+            job_status = JobStatus.COMPLETED if job_state == "COMPLETED" else JobStatus.FAILED
             job_returns.append(
                 JobReturn(
                     overrides=run.command,
@@ -623,6 +626,7 @@ def get_jobs_table(
     table.add_column("Output File")
 
     for job in job_infos:
+        job_state = get_job_state(job)
         for task_id, run in enumerate(job.tasks):
             out = next(
                 (
@@ -639,7 +643,7 @@ def get_jobs_table(
             table.add_row(
                 run.run_id,
                 " ".join(run.command),
-                job.state,
+                job_state,
                 str(out),
                 end_section=(task_id == len(job.tasks) - 1),
             )
@@ -664,8 +668,9 @@ def _build_monitoring_table(
     table.add_column("Command")
     table.add_column("State")
     for job in jobs:
+        job_state = get_job_state(job)
         run = job.tasks[0]
-        table.add_row(run.cluster, run.run_id, " ".join(run.command), job.state)
+        table.add_row(run.cluster, run.run_id, " ".join(run.command), job_state)
     return table
 
 
@@ -702,8 +707,10 @@ async def monitor_jobs_async(
         while True:
             state_jobs = collections.defaultdict(set)
             for i, job in enumerate(jobs):
-                state_jobs[job.state.upper()].add(i)
-                if job.done():
+                job_state = get_job_state(job)
+                state_jobs[job_state].add(i)
+
+                if is_job_done(job):
                     state_jobs["DONE"].add(i)
 
             live.update(_build_monitoring_table(jobs, monitoring_start_time))

@@ -28,6 +28,16 @@ echo "Attempt #${SLURM_RESTART_COUNT:-0}"
 echo "Git commit: ${GIT_COMMIT:-<not set - submit this job with 'cluv submit'>}"
 echo "Command:    uv run ${job_command[*]}"
 
+# `srun` refuses to launch a step when more than one of these is set:
+#   srun: fatal: SLURM_MEM_PER_CPU, SLURM_MEM_PER_GPU, and SLURM_MEM_PER_NODE are mutually exclusive
+# That happens on clusters where a site-wide default memory setting ends up in the job environment
+# alongside the one this job actually asked for. Keep the most specific one.
+if [ -n "${SLURM_MEM_PER_GPU:-}" ]; then
+    unset SLURM_MEM_PER_CPU SLURM_MEM_PER_NODE
+elif [ -n "${SLURM_MEM_PER_CPU:-}" ]; then
+    unset SLURM_MEM_PER_NODE
+fi
+
 # Run this once per node. $SLURM_TMPDIR is set by a Slurm plugin at step launch, so it has to be
 # read inside an `srun` step rather than here in the batch script.
 one_task_per_node="srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1}"

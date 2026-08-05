@@ -119,7 +119,8 @@ class TestGetSbatchCommand:
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz SBATCH_JOB_NAME=cluv-my_script "
             # Ugly, quite hard-coded.
-            f"GIT_COMMIT=abecdef SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out "
+            f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster} "
+            f"SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out "
             "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
             f"--mem=8G $HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
@@ -154,6 +155,7 @@ class TestGetSbatchCommand:
 
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
+            "CLUV_CLUSTER=mila "
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
             "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh '"
         )

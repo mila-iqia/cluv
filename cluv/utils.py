@@ -20,6 +20,12 @@ console_lock: contextvars.ContextVar[asyncio.Lock | None] = contextvars.ContextV
 
 def current_cluster() -> str | None:
     """Returns the name of the current cluster (Mila,DRAC), or `None` if not on a cluster (or on an unknown cluster)."""
+    if cluster := os.environ.get("CLUV_CLUSTER"):
+        # Set by `cluv submit` so that a job knows which `[tool.cluv.clusters.<name>]` section it
+        # was submitted with. This is authoritative, because a cluster doesn't always call itself
+        # by the name used to reach it: a job submitted to `trillium-gpu` reports
+        # `CC_CLUSTER=trillium`, and Slurm's own `ClusterName` there is `grillium`.
+        return cluster
     if socket.gethostname().endswith(".server.mila.quebec"):
         return "mila"
     if "CC_CLUSTER" in os.environ:

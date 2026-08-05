@@ -619,6 +619,11 @@ def get_sbatch_command(
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
+    # Tell the job which cluster config it is running under, so that `cluv.job` / `cluv.config`
+    # resolve the same `[tool.cluv.clusters.<name>]` section that we used to submit it. The cluster
+    # can't always be identified from inside the job: a job submitted to `trillium-gpu` reports
+    # `CC_CLUSTER=trillium`, and Killarney/Vulcan only set `CC_CLUSTER` in a login shell.
+    env_vars["CLUV_CLUSTER"] = cluster
 
     in_job_chunking = False
     in_job_packing = False

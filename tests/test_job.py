@@ -8,6 +8,7 @@ import pytest
 import cluv.config
 import cluv.job
 from cluv.job import current_run_info
+from cluv.utils import current_cluster
 
 
 @pytest.fixture
@@ -51,3 +52,17 @@ def test_current_run_info_in_every_task(in_a_job: None, request: pytest.FixtureR
 def test_current_run_info_outside_of_a_job(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cluv.job, "SLURM_JOB_ID", None)
     assert current_run_info() is None
+
+
+def test_cluv_cluster_overrides_cluster_detection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`cluv submit` exports $CLUV_CLUSTER so jobs know which config section applies.
+
+    A cluster doesn't always call itself by the name used to reach it: a job submitted to
+    `trillium-gpu` reports `CC_CLUSTER=trillium`, so `$CC_CLUSTER` alone would pick the wrong
+    `[tool.cluv.clusters.<name>]` section.
+    """
+    monkeypatch.setenv("CC_CLUSTER", "trillium")
+    assert current_cluster() == "trillium"
+
+    monkeypatch.setenv("CLUV_CLUSTER", "trillium-gpu")
+    assert current_cluster() == "trillium-gpu"

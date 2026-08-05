@@ -34,13 +34,15 @@ results_path = "$SCRATCH/logs/imagenet"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
 # This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
 results_symlink = "logs"
-# Where to find the ILSVRC2012 archives (train/val tars, devkit and md5sums) on each cluster.
-# `prepare_data.py` extracts them from here into each node's $SLURM_TMPDIR.
+# Where to read the ILSVRC2012 archives from when synchronizing data to all clusters.
+data_source = "mila:/network/datasets/imagenet"
+# Where the archives should be replicated on all clusters. `prepare_data.py` reads them from here
+# and extracts them into each node's $SLURM_TMPDIR.
 #
-# NOTE: `data_source` is deliberately NOT set for this example. `cluv sync` would copy the dataset
-# through the machine you submit from, and ImageNet is ~150GB. Instead, `datasets_path` is
-# overridden below for the clusters that already have a copy. On a cluster that doesn't, put the
-# archives in this folder yourself (`cluv submit --use_fake_data` needs no dataset at all).
+# NOTE: `cluv sync` rsyncs *into* this path on every cluster, so it has to be somewhere you own -
+# don't point it at a read-only shared dataset folder. Several clusters do have a shared copy of
+# ImageNet (see the README); to read that instead of your own, override `datasets_path` for that
+# cluster and run `cluv sync --no-sync-datasets`.
 datasets_path = "$SCRATCH/datasets/imagenet"
 
 [tool.cluv.env]
@@ -60,6 +62,8 @@ requeue = true
 # Settings (environment variables) applied when using cluv on a local machine (not on a Slurm cluster).
 # Fake "$SCRATCH" directory to use when not on a Slurm cluster.
 # This makes the examples runnable either from a laptop or from a Slurm cluster.
+# NOTE: `cluv sync` stages the ~150GB of ImageNet archives through the local `datasets_path` on
+# their way to the clusters, so this needs to point at a filesystem with room for them.
 env = { SCRATCH = "$HOME/scratch" }
 
 
@@ -68,20 +72,18 @@ env = { SCRATCH = "$HOME/scratch" }
 [tool.cluv.clusters.mila]
 # Overrides specific to the Mila cluster.
 job_script_path = "scripts/job_mila.sh"
-datasets_path = "/network/datasets/imagenet"
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 
 [tool.cluv.clusters.tamia]
 job_script_path = "scripts/job_tamia.sh"
 
 [tool.cluv.clusters.killarney]
-# For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
-datasets_path = "$HOME/datasets/imagenet"
-results_path = "$HOME/logs/imagenet"
+job_script_path = "scripts/job_killarney.sh"
+sbatch_args = { account = "aip-bengioy" }
 
 [tool.cluv.clusters.vulcan]
-datasets_path = "$HOME/datasets/imagenet"
-results_path = "$HOME/logs/imagenet"
+job_script_path = "scripts/job_vulcan.sh"
+sbatch_args = { account = "aip-bengioy" }
 
 [tool.cluv.clusters.rorqual]
 job_script_path = "scripts/job_rorqual.sh"
@@ -89,8 +91,6 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.fir]
 job_script_path = "scripts/job_fir.sh"
-# Mila's DRAC allocation already has a curated copy of ImageNet here.
-datasets_path = "$HOME/projects/rrg-bengioy-ad/data/curated/imagenet"
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 sbatch_args = { account = "rrg-bengioy-ad" }
 
@@ -99,15 +99,12 @@ job_script_path = "scripts/job_nibi.sh"
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 sbatch_args = { account = "rrg-bengioy-ad" }
 
-# TODO: There are issues with the job output script being created in $HOME. Once #87 is implemented,
-# uncomment these to also submit on Trillium and Trillium-gpu.
-# See also: #61
-# [tool.cluv.clusters.trillium]
-# env = {SBATCH_TIMELIMIT="00:15:00"}
-
-# [tool.cluv.clusters.trillium-gpu]
-# env = {SBATCH_GPUS_PER_NODE="1", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+# Trillium's compute nodes have no GPUs, so this example only targets its GPU login (trillium-gpu).
+[tool.cluv.clusters.trillium-gpu]
+job_script_path = "scripts/job_trillium-gpu.sh"
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.narval]
+job_script_path = "scripts/job_narval.sh"
 # Mila doesn't have an allocation on Narval anymore.
 sbatch_args = { account = "def-bengioy" }

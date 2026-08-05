@@ -28,6 +28,18 @@ echo "Attempt #${SLURM_RESTART_COUNT:-0}"
 echo "Git commit: ${GIT_COMMIT:-<not set - submit this job with 'cluv submit'>}"
 echo "Command:    uv run ${job_command[*]}"
 
+# Run this once per node. $SLURM_TMPDIR is set by a Slurm plugin at step launch, so it has to be
+# read inside an `srun` step rather than here in the batch script.
+one_task_per_node="srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1}"
+
+## Warm up the virtualenv on each node ##
+# `import torch` pulls in ~2GB of shared libraries. Faulting those in from a networked filesystem
+# ($HOME is on Lustre on the DRAC clusters) in all the tasks of a node at once is *very* slow - the
+# tasks sit in `cl_sync_io_wait` for minutes. Reading them once per node first puts them in the
+# node's page cache, so the tasks below start quickly.
+echo "Warming up the virtualenv on each node..."
+$one_task_per_node uv run python -c 'import torch, torchvision; print(torch.__version__, flush=True)'
+
 ## Stage the dataset into $SLURM_TMPDIR ##
 # Extract the ImageNet archives onto each node's local disk, using all the CPUs of each node.
 # `prepare_data.py` reads the archives from the `datasets_path` that cluv resolved for this cluster,
@@ -37,7 +49,16 @@ echo "Command:    uv run ${job_command[*]}"
 if [[ "${job_command[*]}" == *--use_fake_data* ]]; then
     echo "Skipping the dataset staging step, since --use_fake_data was passed."
 else
-    srun --ntasks-per-node=1 --ntasks="${SLURM_JOB_NUM_NODES:-1}" uv run python prepare_data.py
+    $one_task_per_node bash -c '
+        echo "SLURM_TMPDIR: ${SLURM_TMPDIR:-<unset>}"
+        if [ -z "${SLURM_TMPDIR:-}" ]; then
+            echo "ERROR: \$SLURM_TMPDIR is not set in this job, so there is no node-local disk to" >&2
+            echo "extract ImageNet onto. Refusing to write ~150GB into the node shared /tmp." >&2
+            echo "Request local disk for the job (for example with --tmp), or pass" >&2
+            echo "--use_fake_data to run without the real dataset." >&2
+            exit 1
+        fi
+        uv run python prepare_data.py'
 fi
 
 # These environment variables are used by torch.distributed and should ideally be set

@@ -53,16 +53,17 @@ export WORLD_SIZE=$SLURM_NTASKS
 
 ## Pure Slurm version ##
 # `srun` runs the command once per task, which is once per GPU in our case.
-# --gres-flags=allow-task-sharing is required to allow tasks on the same node to
-# access GPUs allocated to other tasks on that node. Without this flag,
-# --gpus-per-task=1 would isolate each task to only see its own GPU, which
-# causes a mysterious NCCL error in nn.parallel.DistributedDataParallel:
-# ncclUnhandledCudaError: Call to CUDA function failed.
-# when NCCL tries to communicate to local GPUs via shared memory but fails due
-# to cgroups isolation. See https://slurm.schedmd.com/srun.html#OPT_gres-flags
-# and https://support.schedmd.com/show_bug.cgi?id=17875 for details.
-# A per-cluster wrapper can `export SRUN_EXTRA_ARGS=` to change or drop these flags.
-srun ${SRUN_EXTRA_ARGS---gres-flags=allow-task-sharing} uv run "${job_command[@]}"
+#
+# Note: the job scripts request GPUs with `--gpus-per-node`, not `--gpus-per-task`. With
+# `--gpus-per-task=1`, Slurm's cgroups give each task only *its own* GPU, so every task sees a
+# single device and `torch.cuda.set_device(LOCAL_RANK)` fails with "invalid device ordinal" in every
+# task but the first. (It also breaks NCCL's shared-memory path between local GPUs, giving a
+# mysterious `ncclUnhandledCudaError: Call to CUDA function failed`.) `--gres-flags=allow-task-sharing`
+# is supposed to lift that isolation, but it is not honoured everywhere, so it's simpler to allocate
+# the GPUs per node and let each task pick its own by local rank.
+#
+# A per-cluster wrapper can `export SRUN_EXTRA_ARGS=...` to add flags here.
+srun ${SRUN_EXTRA_ARGS-} uv run "${job_command[@]}"
 
 ## srun + torchrun version ##
 # srun --ntasks-per-node=1 bash -c "\

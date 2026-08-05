@@ -3,7 +3,7 @@
 # their own in the pyproject.toml, and as the default for `cluv submit first`.
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-task=1
+#SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-gpu=32G
 

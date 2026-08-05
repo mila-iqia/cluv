@@ -4,7 +4,7 @@
 # get anyway.
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
-#SBATCH --gpus-per-task=1
+#SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=0
 

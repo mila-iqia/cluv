@@ -79,7 +79,10 @@ job_script_path = "scripts/job_tamia.sh"
 
 [tool.cluv.clusters.killarney]
 job_script_path = "scripts/job_killarney.sh"
-sbatch_args = { account = "aip-bengioy" }
+# Slurm on the Vector clusters does not create the parent directory of `--output`, and cluv's
+# default is `{results_path}/{cluster}_%j/slurm-%j.out`, so the job is killed before it starts.
+# Setting `output` explicitly here keeps cluv from computing that path (see `get_sbatch_command`).
+sbatch_args = { account = "aip-bengioy", output = "$SCRATCH/logs/imagenet/killarney_%j.out" }
 # Killarney refuses to run jobs whose submission directory is under /home
 # ("Submitting jobs from directories residing in /home is not permitted"), so the project lives on
 # $SCRATCH there instead of the default $HOME location.
@@ -87,7 +90,8 @@ project_dir = "$SCRATCH/repos/cluv/examples/imagenet"
 
 [tool.cluv.clusters.vulcan]
 job_script_path = "scripts/job_vulcan.sh"
-sbatch_args = { account = "aip-bengioy" }
+# Same as Killarney: the parent directory of `--output` isn't created for us here.
+sbatch_args = { account = "aip-bengioy", output = "$SCRATCH/logs/imagenet/vulcan_%j.out" }
 
 [tool.cluv.clusters.rorqual]
 job_script_path = "scripts/job_rorqual.sh"

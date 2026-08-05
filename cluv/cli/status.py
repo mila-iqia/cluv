@@ -330,15 +330,14 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
         colour = "yellow"
     else:
         colour = "red"
-    return Text(f"{bar_str} {idle:>5}/{total}", style=colour)
+    return Text(f"{bar_str} {idle:>4}/{total}", style=colour)
 
 
-def _gpu_bars(gpu_stats: dict[str, tuple[int, int]]) -> Text:
+def _gpu_bars(gpu_stats: dict[str, tuple[int, int]], name_width: int) -> Text:
     """Return one free-GPU bar per model, stacked vertically and labelled."""
     if not gpu_stats:
         return Text("-")
 
-    name_width = max(len(model) for model in gpu_stats)
     bars = Text()
     for i, (model, (idle, total)) in enumerate(gpu_stats.items()):
         if i:
@@ -365,10 +364,12 @@ def _build_cluster_table(
         expand=True,
     )
 
-    table.add_column("Cluster", style="bold", ratio=1)
-    table.add_column("Free GPUs (by type)", justify="left", ratio=2)
-    table.add_column("My jobs\nrun / pend / fail / comp", justify="center", ratio=2)
-    table.add_column("Storage used", justify="left", ratio=2)
+    table.add_column("Cluster", style="bold")
+    table.add_column("Available GPUs (by type)", justify="left")
+    table.add_column("My jobs\nrun / pend / fail / comp", justify="center")
+    table.add_column("Storage used", justify="left")
+
+    max_gpu_name_width = max((len(model) for c in data for model in c.gpu_stats), default=0)
 
     for c in data:
         status = Text("● ", style="bold green") if c.online else Text("⚠ ", style="bold red")
@@ -400,7 +401,7 @@ def _build_cluster_table(
 
         table.add_row(
             cluster_status,
-            _gpu_bars(c.gpu_stats) if c.online else "-",
+            _gpu_bars(c.gpu_stats, max_gpu_name_width) if c.online else "-",
             my_jobs if c.online else "-",
             home_bar + "\n" + scratch_bar if c.online else "-",
         )
@@ -483,7 +484,7 @@ def _build_legend() -> Panel:
     legend = (
         "[green]●[/green] connected  "
         "[red]⚠[/red] disconnected  "
-        "[green]▰[/green] free GPU  "
+        "[green]▰[/green] idle GPU  "
         "[red]▱[/red] busy GPU   "
         "[green]▰[/green]/[yellow]▰[/yellow]/[red]▰[/red] disk usage (low/med/high)"
     )

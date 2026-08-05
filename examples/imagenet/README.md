@@ -179,3 +179,14 @@ was no SSH connection to nibi available at the time.
 - `scripts/train.sh` reads the virtualenv once per node before launching the tasks. Without that,
   every rank faults the same ~2GB of torch libraries in from the networked `$HOME` simultaneously,
   which on Lustre-backed clusters stalls the job for many minutes.
+
+### Per-cluster quirks worked around in the config
+
+| Cluster | Quirk | Worked around with |
+|---|---|---|
+| killarney | Refuses jobs submitted from a directory under `/home` | `project_dir` on `$SCRATCH` |
+| trillium-gpu | `/home` isn't mounted on compute nodes | `project_dir` on `$SCRATCH` |
+| trillium-gpu | Rejects `--mem` entirely (186 GiB/GPU is implicit) | no `--mem` in the job script |
+| killarney, vulcan | Slurm doesn't create the parent directory of `--output`, so cluv's default `{results_path}/{cluster}_%j/slurm-%j.out` kills the job at launch | explicit `output` in `sbatch_args` |
+| trillium-gpu | Reports `CC_CLUSTER=trillium`, and Slurm's `ClusterName` is `grillium` | `cluv submit` exports `$CLUV_CLUSTER` |
+| killarney, vulcan | `$CC_CLUSTER` and `$SCRATCH` are only set in a *login* shell | same |

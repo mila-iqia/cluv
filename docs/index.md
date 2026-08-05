@@ -5,7 +5,9 @@ This is a quick overview. For more information, check out the [introduction](gui
 
 ## Installation
 
-Add the package to your project with `uv add` or `pip install`:
+Cluv can be installed on a local machine or on a remote cluster.
+
+Add the package to your project with `uv add`:
 
 ```console
 uv add cluster-uv
@@ -80,7 +82,8 @@ See the ["Cleaning runs"](guides/cleaning-runs.md) guide for details on how this
 cluv submit rorqual scripts/job.sh --time=00:10:00 -- python main.py
 ```
 
-See the ["Configuring job submission"](guides/submit-config.md) guide for details on how to use the config to submit jobs.
+See the ["Writing a job script"](guides/job-scripts.md) guide for what `job.sh` should contain, and
+["Configuring job submission"](guides/submit-config.md) for how to use the config to submit jobs.
 
 ### Run a command in the synced project a specific cluster
 ```console

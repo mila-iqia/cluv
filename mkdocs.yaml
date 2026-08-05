@@ -11,7 +11,9 @@ nav:
   - Guides:
       - Introduction: guides/introduction.md
       - Syncing datasets: guides/syncing-datasets.md
-      - Configuring job submission: guides/submit-config.md
+      - Configuring job submission:
+        - Using the config: guides/submit/config.md
+        - Writing a job script: guides/submit/job-scripts.md
       - Cleaning runs: guides/cleaning-runs.md
   - Reference:
       - CLI:

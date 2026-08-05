@@ -220,9 +220,9 @@ class TestParseSinfoNodes:
         result = parse_sinfo_nodes(output)
         assert result == {"A100": (8, 8)}
 
-    def test_mig_node_physical_gpu_count(self):
-        # Rorqual-style MIG node: 3 MIG profiles from 4 physical H100s
-        # sum(g_val * count) = 3*4 + 2*4 + 1*8 = 28; 28 // 7 = 4 physical GPUs
+    def test_mig_node_reports_each_profile_as_its_own_type(self):
+        # Rorqual-style MIG node: each MIG profile is its own GPU type, counted
+        # in slices (not reconstructed into a physical GPU count).
         output = (
             "rg12501 idle "
             "gpu:nvidia_h100_80gb_hbm3_3g.40gb:4(S:0-3),"
@@ -230,10 +230,14 @@ class TestParseSinfoNodes:
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
         result = parse_sinfo_nodes(output)
-        assert result == {"H100": (4, 4)}
+        assert result == {
+            "H100-1g.10gb": (8, 8),
+            "H100-2g.20gb": (4, 4),
+            "H100-3g.40gb": (4, 4),
+        }
 
     def test_mig_model_normalization(self):
-        # MIG GRES name should normalize to the base model (H100)
+        # MIG GRES names should normalize to "<base>-<profile>", one type per profile
         output = (
             "rg01 alloc "
             "gpu:nvidia_h100_80gb_hbm3_3g.40gb:4(S:0-3),"
@@ -241,11 +245,11 @@ class TestParseSinfoNodes:
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
         result = parse_sinfo_nodes(output)
-        assert list(result.keys()) == ["H100"]
+        assert list(result.keys()) == ["H100-1g.10gb", "H100-2g.20gb", "H100-3g.40gb"]
 
     def test_mixed_regular_and_mig_nodes(self):
-        # Mix of regular H100 nodes and MIG nodes (rorqual-like)
-        # Regular node: 4 GPUs; MIG node: 4 physical GPUs
+        # Mix of regular H100 nodes and MIG nodes (rorqual-like): the regular
+        # node counts as "H100", MIG slices count as their own profile types.
         output = (
             "rg00 idle gpu:h100:4(S:0-3)\n"
             "rg01 idle "
@@ -254,7 +258,12 @@ class TestParseSinfoNodes:
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
         result = parse_sinfo_nodes(output)
-        assert result == {"H100": (8, 8)}  # 4 + 4
+        assert result == {
+            "H100": (4, 4),
+            "H100-1g.10gb": (8, 8),
+            "H100-2g.20gb": (4, 4),
+            "H100-3g.40gb": (4, 4),
+        }
 
     def test_deduplication_via_sort_u(self):
         # Same node appearing multiple times (once per Slurm partition) should

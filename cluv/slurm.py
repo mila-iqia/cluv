@@ -197,34 +197,24 @@ _IDLE_STATES = {"idle", "idle~", "idle+"}
 def _normalize_gpu_model(raw: str) -> str:
     """Normalize a raw GRES GPU model name to a short human-readable form.
 
+    MIG slices are kept as their own distinct GPU type (suffixed with their
+    profile) rather than folded back into the base model, since a MIG slice
+    is not interchangeable with a full physical GPU.
+
     Examples:
         "h100"                              → "H100"
         "a100"                              → "A100"
-        "nvidia_h100_80gb_hbm3_3g.40gb"    → "H100"
+        "nvidia_h100_80gb_hbm3_3g.40gb"     → "H100-3g.40gb"
     """
     # Strip optional "nvidia_" vendor prefix
     clean = re.sub(r"^nvidia_", "", raw, flags=re.IGNORECASE)
     m = _MODEL_TOKEN_RE.search(clean)
-    return m.group(1).upper() if m else raw.upper()
+    base = m.group(1).upper() if m else raw.upper()
 
-
-def _mig_physical_gpus(entries: list[tuple[str, int]]) -> int | None:
-    """Return the number of physical GPUs represented by a list of MIG GRES entries.
-
-    MIG profile names embed the compute slice fraction as ``<g_val>g.<mem>gb``
-    (e.g. ``3g.40gb``).  An H100 has 7 compute slices, so:
-
-        physical_gpus = sum(g_val * count) // 7
-
-    Returns *None* if any entry lacks a parseable MIG profile (not a pure MIG node).
-    """
-    total_compute = 0
-    for model, count in entries:
-        m = _MIG_PROFILE_RE.search(model)
-        if not m:
-            return None  # mixed or non-MIG node
-        total_compute += int(m.group(1)) * count
-    return total_compute // 7
+    mig = _MIG_PROFILE_RE.search(clean)
+    if mig:
+        return f"{base}-{mig.group(0).lower()}"
+    return base
 
 
 def parse_sinfo_nodes(output: str) -> dict[str, tuple[int, int]]:
@@ -240,13 +230,13 @@ def parse_sinfo_nodes(output: str) -> dict[str, tuple[int, int]]:
     unique, so nodes that belong to multiple Slurm partitions are not counted
     more than once.
 
-    MIG nodes are handled by reconstructing the physical GPU count from the
-    per-slice g-values (``sum(g_val * count) // 7`` for H100), grouped by
-    the model they belong to.
+    MIG slices are reported as their own GPU type (e.g. ``"H100-3g.40gb"``)
+    rather than reconstructed into a physical GPU count, since a MIG slice
+    can't be scheduled interchangeably with a full GPU.
 
     Returns:
-        A dict mapping each GPU model name (e.g. ``"H100"``) to a
-        ``(idle, total)`` tuple of physical GPU counts, sorted by model name.
+        A dict mapping each GPU model/MIG-profile name to a ``(idle, total)``
+        tuple of GRES counts, sorted by name.
     """
     per_model: dict[str, list[int]] = {}
 
@@ -263,24 +253,14 @@ def parse_sinfo_nodes(output: str) -> dict[str, tuple[int, int]]:
         if not matches:
             continue
 
-        entries: list[tuple[str, int]] = [(model, int(count_str)) for model, count_str in matches]
-
-        model_groups: dict[str, list[tuple[str, int]]] = {}
-        for model, count in entries:
-            model_groups.setdefault(_normalize_gpu_model(model), []).append((model, count))
-
-        for model, group_entries in model_groups.items():
-            # Compute physical GPU count for this model on this node.
-            # If all GRES entries are MIG slices, reconstruct the physical count.
-            # Otherwise sum only the non-MIG GRES entries.
-            node_gpus = _mig_physical_gpus(group_entries)
-            if node_gpus is None:
-                node_gpus = sum(c for m, c in group_entries if not _MIG_PROFILE_RE.search(m))
+        for raw_model, count_str in matches:
+            model = _normalize_gpu_model(raw_model)
+            count = int(count_str)
 
             idle_total = per_model.setdefault(model, [0, 0])
-            idle_total[1] += node_gpus
+            idle_total[1] += count
             if state in _IDLE_STATES:
-                idle_total[0] += node_gpus
+                idle_total[0] += count
 
     return {model: (idle, total) for model, (idle, total) in sorted(per_model.items())}
 

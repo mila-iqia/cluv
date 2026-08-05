@@ -5,10 +5,8 @@ faster to read from during training than the shared filesystem.
 
 Run this with `srun --ntasks-per-node=1 --pty uv run python prepare_data.py`
 
-The archives are read from the `datasets_path` of the `[tool.cluv]` config for the current cluster.
-On the cluster listed in `data_source` (the Mila cluster here), this is the shared dataset folder
-itself, so nothing needs to be copied. On the other clusters, this is where `cluv sync` replicated
-the archives.
+The archives are read from the `datasets_path` of the `[tool.cluv]` config for the current cluster,
+which points at the shared copy of ImageNet on the clusters that have one.
 """
 
 import argparse
@@ -67,8 +65,9 @@ def prepare_imagenet(output_directory: Path, imagenet_dir: Path | None = None):
         raise FileNotFoundError(
             f"Could not find the ImageNet dataset archives at {imagenet_dir}: "
             f"{', '.join(missing)} do not exist.\n"
-            f"Run `cluv sync` to replicate the archives from the `data_source` cluster to this "
-            f"cluster, or pass `--use_fake_data` to main.py to run without the real dataset."
+            f"Copy the ILSVRC2012 archives there (or point `datasets_path` at an existing copy in "
+            f"the [tool.cluv.clusters.*] config for this cluster), or pass `--use_fake_data` to "
+            f"main.py to run without the real dataset."
         )
     output_directory.mkdir(parents=True, exist_ok=True)
 

@@ -59,27 +59,49 @@ staging step in that case. This is the fastest way to check that a cluster's job
 setup and results path all work:
 
 ```bash
-cluv submit tamia -- python main.py --use_fake_data --epochs=1 \
+cluv submit tamia --time=0:20:00 -- python main.py --use_fake_data --epochs=1 \
     --limit_train_samples=2048 --limit_val_samples=512 --no_wandb --model_name=resnet18
 ```
+
+That takes a couple of minutes once the job starts (a short `--time` also helps it get scheduled
+sooner).
 
 ### The real thing
 
 `prepare_data.py` needs the ILSVRC2012 archives (`ILSVRC2012_img_train.tar`,
 `ILSVRC2012_img_val.tar`, `ILSVRC2012_devkit_t12.tar.gz`, `md5sums`) in the `datasets_path` of the
-current cluster. On the Mila cluster that is `/network/datasets/imagenet`, so there is nothing to do.
-Elsewhere, `cluv sync` replicates them to `$SCRATCH/datasets/imagenet`:
+current cluster. Two clusters already have a shared copy, so `datasets_path` just points at it:
 
-```bash
-cluv sync fir            # ~150GB the first time - this takes a while
-```
+| Cluster | `datasets_path` |
+|---|---|
+| mila | `/network/datasets/imagenet` |
+| fir | `$HOME/projects/rrg-bengioy-ad/data/curated/imagenet` |
+| anywhere else | `$SCRATCH/datasets/imagenet` (you have to put the archives there) |
+
+Note that this example deliberately does **not** set `data_source`: `cluv sync` copies datasets
+_through the machine you submit from_, which is fine for CIFAR-10 (see the hydra example) but not for
+150GB of ImageNet. Add a `datasets_path` override for your cluster instead, pointing at wherever the
+archives already live.
 
 Then submit as usual:
 
 ```bash
 cluv submit mila                          # uses scripts/job_mila.sh
-cluv submit fir   -- python main.py --epochs=10 --use_amp --compile=default
 cluv submit first -- python main.py       # submit everywhere, keep the first job to start
+```
+
+Extracting ImageNet into `$SLURM_TMPDIR` takes 10-15 minutes, so a run that has to fit in the
+configured 1h limit should train on a subset:
+
+```bash
+cluv submit fir -- python main.py --epochs=1 --limit_train_samples=100_000 \
+    --limit_val_samples=10_000 --use_amp
+```
+
+For real training, ask for more time - the flags are forwarded straight to `sbatch`:
+
+```bash
+cluv submit fir --time=12:00:00 -- python main.py --epochs=10 --use_amp --compile=default
 ```
 
 Results (checkpoints, wandb files, the slurm output) land in `results_path`, which cluv symlinks to

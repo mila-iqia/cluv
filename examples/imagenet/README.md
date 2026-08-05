@@ -155,5 +155,13 @@ srun --ntasks=4 --nodes=2 uv run python main.py
   `examples/hydra_example/scripts/safe_job.sh`.
 - Don't add `#SBATCH --output=` to the job scripts: cluv overrides it so that results land under the
   cluster's `results_path`.
-- The per-cluster resource requests (CPUs, memory, GPU model) in `scripts/job_<cluster>.sh` are a
-  starting point - adjust them to what each cluster actually offers.
+- The per-cluster resource requests (CPUs, memory, GPU model) in `scripts/job_<cluster>.sh` match
+  the GPU nodes of each cluster (`sinfo -o "%D %c %m %G"`); adjust them if you want a different
+  share of a node.
+- The job scripts ask for GPUs with `--gpus-per-node`, not `--gpus-per-task`. With
+  `--gpus-per-task`, Slurm's cgroups show each task only its own GPU, and
+  `torch.cuda.set_device(LOCAL_RANK)` then fails with `invalid device ordinal` in every rank but the
+  first.
+- `scripts/train.sh` reads the virtualenv once per node before launching the tasks. Without that,
+  every rank faults the same ~2GB of torch libraries in from the networked `$HOME` simultaneously,
+  which on Lustre-backed clusters stalls the job for many minutes.

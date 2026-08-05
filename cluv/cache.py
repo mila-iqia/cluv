@@ -32,7 +32,7 @@ class Job:
         return hash((self.cluster, self.job_id))
 
 
-@dataclass(frozen=True)
+@dataclass()
 class ProjectStateOnCluster:
     """The cached info we have about the state of the project on a cluster.
 

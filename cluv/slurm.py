@@ -36,18 +36,55 @@ def parse_timestamp(timestamp: str) -> datetime:
 
 
 def parse_slurm_time(time: str) -> timedelta:
-    """Parse a time value from the sbatch format to a timedelta object."""
-    # The SLURM time format is days-hours:minutes:seconds, with the days part optional.
-    match = re.match(r"(?:(\d+)-)?(\d{1,2}):(\d{2}):(\d{2})", time.strip())
-    if not match:
+    """Parse a time value from the sbatch format to a timedelta object.
+
+    The SLURM time format (https://slurm.schedmd.com/sbatch.html#OPT_time) can be:
+        1. days-hours:minutes:seconds
+        2. days-hours:minutes
+        3. days-hours
+        4. hours:minutes:seconds
+        5. minutes:seconds
+        6. minutes
+    """
+    value = time.strip()
+    if not value:
         raise ValueError(f"Could not parse time value: {time}")
 
-    return timedelta(
-        days=int(match.group(1) or 0),
-        hours=int(match.group(2)),
-        minutes=int(match.group(3)),
-        seconds=int(match.group(4)),
-    )
+    days, hours, minutes, seconds = 0, 0, 0, 0
+    has_days = "-" in value
+    if has_days:
+        day_part, value = value.split("-", 1)
+        if not day_part.isdigit():
+            raise ValueError(f"Could not parse time value: {time}")
+        days = int(day_part)
+
+    parts = value.split(":")
+    if len(parts) == 1:
+        if not parts[0].isdigit():
+            raise ValueError(f"Could not parse time value: {time}")
+        if has_days:
+            hours = int(parts[0])
+        else:
+            minutes = int(parts[0])
+    elif len(parts) == 2:
+        if not all(part.isdigit() for part in parts):
+            raise ValueError(f"Could not parse time value: {time}")
+        if has_days:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+        else:
+            minutes = int(parts[0])
+            seconds = int(parts[1])
+    elif len(parts) == 3:
+        if not all(part.isdigit() for part in parts):
+            raise ValueError(f"Could not parse time value: {time}")
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = int(parts[2])
+    else:
+        raise ValueError(f"Could not parse time value: {time}")
+
+    return timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
 
 
 async def run_sacct(
@@ -190,7 +227,7 @@ def _mig_physical_gpus(entries: list[tuple[str, int]]) -> int | None:
     return total_compute // 7
 
 
-def parse_sinfo_nodes(output: str) -> tuple[int, int, list[str]]:
+def parse_sinfo_nodes(output: str) -> dict[str, tuple[int, int]]:
     """Parse ``sinfo --noheader -N -o '%N %t %G' | sort -u | grep gpu`` output.
 
     Each line has the form ``<nodename> <state> <gres_field>`` where the GRES
@@ -204,16 +241,14 @@ def parse_sinfo_nodes(output: str) -> tuple[int, int, list[str]]:
     more than once.
 
     MIG nodes are handled by reconstructing the physical GPU count from the
-    per-slice g-values (``sum(g_val * count) // 7`` for H100).
+    per-slice g-values (``sum(g_val * count) // 7`` for H100), grouped by
+    the model they belong to.
 
     Returns:
-        gpu_idle  – total idle physical GPUs
-        gpu_total – total physical GPUs across all nodes
-        models    – sorted unique GPU model names (e.g. ``["H100", "A100"]``)
+        A dict mapping each GPU model name (e.g. ``"H100"``) to a
+        ``(idle, total)`` tuple of physical GPU counts, sorted by model name.
     """
-    gpu_idle = 0
-    gpu_total = 0
-    models: set[str] = set()
+    per_model: dict[str, list[int]] = {}
 
     for line in output.splitlines():
         line = line.strip()
@@ -230,21 +265,24 @@ def parse_sinfo_nodes(output: str) -> tuple[int, int, list[str]]:
 
         entries: list[tuple[str, int]] = [(model, int(count_str)) for model, count_str in matches]
 
-        for model, _ in entries:
-            models.add(_normalize_gpu_model(model))
+        model_groups: dict[str, list[tuple[str, int]]] = {}
+        for model, count in entries:
+            model_groups.setdefault(_normalize_gpu_model(model), []).append((model, count))
 
-        # Compute physical GPU count for this node.
-        # If all GRES entries are MIG slices, reconstruct the physical count.
-        # Otherwise sum only the non-MIG GRES entries.
-        node_gpus = _mig_physical_gpus(entries)
-        if node_gpus is None:
-            node_gpus = sum(c for m, c in entries if not _MIG_PROFILE_RE.search(m))
+        for model, group_entries in model_groups.items():
+            # Compute physical GPU count for this model on this node.
+            # If all GRES entries are MIG slices, reconstruct the physical count.
+            # Otherwise sum only the non-MIG GRES entries.
+            node_gpus = _mig_physical_gpus(group_entries)
+            if node_gpus is None:
+                node_gpus = sum(c for m, c in group_entries if not _MIG_PROFILE_RE.search(m))
 
-        gpu_total += node_gpus
-        if state in _IDLE_STATES:
-            gpu_idle += node_gpus
+            idle_total = per_model.setdefault(model, [0, 0])
+            idle_total[1] += node_gpus
+            if state in _IDLE_STATES:
+                idle_total[0] += node_gpus
 
-    return gpu_idle, gpu_total, sorted(models)
+    return {model: (idle, total) for model, (idle, total) in sorted(per_model.items())}
 
 
 # ---------------------------------------------------------------------------
@@ -257,28 +295,23 @@ def parse_sinfo_nodes(output: str) -> tuple[int, int, list[str]]:
 _SAVAIL_LINE_RE = re.compile(r"^(\w+)\s+(\d+)\s*/\s*(\d+)")
 
 
-def parse_savail(output: str) -> tuple[int, int, list[str]]:
+def parse_savail(output: str) -> dict[str, tuple[int, int]]:
     """Parse the output of the Mila-specific ``savail`` command.
 
     Returns:
-        gpu_idle  – total available (idle) GPUs across all types
-        gpu_total – total GPUs across all types
-        models    – sorted list of GPU model names in upper-case
+        A dict mapping each GPU model name (e.g. ``"A100"``) to a
+        ``(idle, total)`` tuple of GPU counts, sorted by model name.
     """
-    gpu_idle = 0
-    gpu_total = 0
-    models: list[str] = []
+    per_model: dict[str, tuple[int, int]] = {}
 
     for line in output.splitlines():
         m = _SAVAIL_LINE_RE.match(line.strip())
         if not m:
             continue
         model, avail, total = m.group(1), int(m.group(2)), int(m.group(3))
-        gpu_idle += avail
-        gpu_total += total
-        models.append(model.upper())
+        per_model[model.upper()] = (avail, total)
 
-    return gpu_idle, gpu_total, sorted(models)
+    return dict(sorted(per_model.items()))
 
 
 # ---------------------------------------------------------------------------

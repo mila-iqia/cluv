@@ -177,10 +177,8 @@ class TestParsePartitionStats:
 class TestParseSinfoNodes:
     def test_all_alloc(self):
         output = "node01 alloc gpu:h100:4(S:0-1)\nnode02 alloc gpu:h100:4(S:0-1)\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 0
-        assert total == 8
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert result == {"H100": (0, 8)}
 
     def test_mixed_states(self):
         output = (
@@ -188,51 +186,39 @@ class TestParseSinfoNodes:
             "node02 alloc gpu:h200:8(S:0-1)\n"
             "node03 mix   gpu:h100:4(S:0-1)\n"
         )
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 4  # only the idle node
-        assert total == 4 + 8 + 4  # all three nodes
-        assert models == ["H100", "H200"]
+        result = parse_sinfo_nodes(output)
+        assert result == {"H100": (4, 8), "H200": (0, 8)}
 
     def test_idle_tilde_state(self):
         # sinfo sometimes reports "idle~" for draining idle nodes
         output = "node01 idle~ gpu:a100:8\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 8
-        assert total == 8
+        result = parse_sinfo_nodes(output)
+        assert result == {"A100": (8, 8)}
 
     def test_multiple_models_sorted(self):
         output = "node01 idle gpu:v100:2\nnode02 idle gpu:a100:4\nnode03 idle gpu:h100:8\n"
-        _, _, models = parse_sinfo_nodes(output)
-        assert models == ["A100", "H100", "V100"]
+        result = parse_sinfo_nodes(output)
+        assert list(result.keys()) == ["A100", "H100", "V100"]
 
     def test_gres_without_socket_spec(self):
         # Some nodes report GRES without the (S:...) suffix
         output = "node01 idle gpu:h100:4\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 4
-        assert total == 4
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert result == {"H100": (4, 4)}
 
     def test_empty_output(self):
-        idle, total, models = parse_sinfo_nodes("")
-        assert idle == 0
-        assert total == 0
-        assert models == []
+        assert parse_sinfo_nodes("") == {}
 
     def test_no_gpu_gres(self):
         # Lines without gpu: in GRES should be skipped
         output = "node01 idle cpu:32\nnode02 idle (null)\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 0
-        assert total == 0
-        assert models == []
+        assert parse_sinfo_nodes(output) == {}
 
     def test_nvidia_prefix_normalized(self):
         # Full GRES name with nvidia_ prefix → model name is just the base
         output = "node01 idle gpu:nvidia_a100:8\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert models == ["A100"]
-        assert total == 8
+        result = parse_sinfo_nodes(output)
+        assert result == {"A100": (8, 8)}
 
     def test_mig_node_physical_gpu_count(self):
         # Rorqual-style MIG node: 3 MIG profiles from 4 physical H100s
@@ -243,10 +229,8 @@ class TestParseSinfoNodes:
             "gpu:nvidia_h100_80gb_hbm3_2g.20gb:4(S:0-3),"
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
-        idle, total, models = parse_sinfo_nodes(output)
-        assert total == 4, f"Expected 4 physical GPUs, got {total}"
-        assert idle == 4
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert result == {"H100": (4, 4)}
 
     def test_mig_model_normalization(self):
         # MIG GRES name should normalize to the base model (H100)
@@ -256,8 +240,8 @@ class TestParseSinfoNodes:
             "gpu:nvidia_h100_80gb_hbm3_2g.20gb:4(S:0-3),"
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
-        _, _, models = parse_sinfo_nodes(output)
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert list(result.keys()) == ["H100"]
 
     def test_mixed_regular_and_mig_nodes(self):
         # Mix of regular H100 nodes and MIG nodes (rorqual-like)
@@ -269,10 +253,8 @@ class TestParseSinfoNodes:
             "gpu:nvidia_h100_80gb_hbm3_2g.20gb:4(S:0-3),"
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
-        idle, total, models = parse_sinfo_nodes(output)
-        assert total == 8  # 4 + 4
-        assert idle == 8
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert result == {"H100": (8, 8)}  # 4 + 4
 
     def test_deduplication_via_sort_u(self):
         # Same node appearing multiple times (once per Slurm partition) should
@@ -286,9 +268,8 @@ class TestParseSinfoNodes:
         # contract that sort -u must be done upstream (in _REMOTE_SCRIPT).
         # Here we just verify the format is parsed correctly for one entry.
         output_deduped = "node01 idle gpu:h100:4\n"
-        idle, total, models = parse_sinfo_nodes(output_deduped)
-        assert total == 4
-        assert idle == 4
+        result = parse_sinfo_nodes(output_deduped)
+        assert result == {"H100": (4, 4)}
 
 
 # ---------------------------------------------------------------------------
@@ -298,37 +279,40 @@ class TestParseSinfoNodes:
 
 class TestParseSavail:
     def test_total_gpus(self):
-        _, total, _ = parse_savail(MILA_SAVAIL)
+        result = parse_savail(MILA_SAVAIL)
         # 32+136+8+16+352+376+56 = 976
-        assert total == 976
+        assert sum(total for _, total in result.values()) == 976
 
     def test_idle_gpus(self):
-        idle, _, _ = parse_savail(MILA_SAVAIL)
+        result = parse_savail(MILA_SAVAIL)
         # 15+13+0+0+10+130+5 = 173
-        assert idle == 173
+        assert sum(idle for idle, _ in result.values()) == 173
 
     def test_models_sorted(self):
-        _, _, models = parse_savail(MILA_SAVAIL)
-        assert models == ["A100", "A100L", "A6000", "H100", "L40S", "RTX8000", "V100"]
+        result = parse_savail(MILA_SAVAIL)
+        assert list(result.keys()) == [
+            "A100",
+            "A100L",
+            "A6000",
+            "H100",
+            "L40S",
+            "RTX8000",
+            "V100",
+        ]
 
     def test_header_and_separator_skipped(self):
         # The "GPU  Avail / Total" header and "===" separator must not be parsed as data
-        _, _, models = parse_savail(MILA_SAVAIL)
-        assert "GPU" not in models
-        assert "AVAIL" not in models
+        result = parse_savail(MILA_SAVAIL)
+        assert "GPU" not in result
+        assert "AVAIL" not in result
 
     def test_zero_available_still_counts_total(self):
         output = "a6000   0 / 8\nh100    0 / 16\n"
-        idle, total, models = parse_savail(output)
-        assert idle == 0
-        assert total == 24
-        assert models == ["A6000", "H100"]
+        result = parse_savail(output)
+        assert result == {"A6000": (0, 8), "H100": (0, 16)}
 
     def test_empty_output(self):
-        idle, total, models = parse_savail("")
-        assert idle == 0
-        assert total == 0
-        assert models == []
+        assert parse_savail("") == {}
 
 
 class TestParseDiskQuota:
@@ -415,10 +399,16 @@ class TestParseDiskusageReport:
 
 
 class TestParseTime:
-    def test_parse_slurm_time(self) -> None:
-        td = parse_slurm_time("12:28:45")
-        assert td == timedelta(hours=12, minutes=28, seconds=45)
-
-    def test_parse_slurm_time_with_day(self) -> None:
-        td = parse_slurm_time("07-12:28:45")
-        assert td == timedelta(days=7, hours=12, minutes=28, seconds=45)
+    @pytest.mark.parametrize(
+        ("input", "expected"),
+        [
+            ("12:28:45", timedelta(hours=12, minutes=28, seconds=45)),
+            ("07-12:28:45", timedelta(days=7, hours=12, minutes=28, seconds=45)),
+            ("07-12", timedelta(days=7, hours=12)),
+            ("07-12:28", timedelta(days=7, hours=12, minutes=28)),
+            ("28:12", timedelta(minutes=28, seconds=12)),
+            ("28", timedelta(minutes=28)),
+        ],
+    )
+    def test_parse_slurm_time(self, input: str, expected: timedelta) -> None:
+        assert parse_slurm_time(input) == expected

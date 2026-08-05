@@ -107,7 +107,9 @@ async def sync(
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
     for remote in remotes:
-        tasks.append(functools.partial(sync_task_function, remote=remote))
+        tasks.append(
+            functools.partial(sync_task_function, remote=remote, sync_datasets=sync_datasets)
+        )
         task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
 
     token = console_lock.set(asyncio.Lock())
@@ -175,7 +177,9 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
-async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) -> list[Path]:
+async def sync_task_function(
+    report_progress: ReportProgressFn, remote: Remote, sync_datasets: bool = True
+) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     config = get_cluv_config()
     cluster = remote.hostname
@@ -198,7 +202,8 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    num_tasks = 5 if config.data_source else 4
+    push_datasets = sync_datasets and bool(config.data_source)
+    num_tasks = 5 if push_datasets else 4
 
     project_state = read_cache().project_states.get(cluster) or ProjectStateOnCluster()
 
@@ -229,7 +234,7 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     new_runs = await fetch_results(remote, config, project_state)
     _save()
 
-    if config.data_source:
+    if push_datasets:
         _update_progress(4, "Syncing datasets", num_tasks)
         here = current_cluster()
         if ":" not in config.data_source:

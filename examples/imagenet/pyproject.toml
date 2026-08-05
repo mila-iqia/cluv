@@ -107,6 +107,10 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 [tool.cluv.clusters.trillium-gpu]
 job_script_path = "scripts/job_trillium-gpu.sh"
 sbatch_args = { account = "rrg-bengioy-ad" }
+# $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
+# location is rejected ("Job output requested to be written to a filesystem not available on
+# compute nodes"). Keep the project on $SCRATCH instead.
+project_dir = "$SCRATCH/repos/cluv/examples/imagenet"
 
 [tool.cluv.clusters.narval]
 job_script_path = "scripts/job_narval.sh"

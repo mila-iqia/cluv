@@ -94,8 +94,8 @@ Extracting ImageNet into `$SLURM_TMPDIR` takes 10-15 minutes, so a run that has 
 configured 1h limit should train on a subset:
 
 ```bash
-cluv submit fir -- python main.py --epochs=1 --limit_train_samples=100_000 \
-    --limit_val_samples=10_000 --use_amp
+cluv submit mila -- python main.py --epochs=1 --limit_train_samples=100_000 \
+    --limit_val_samples=10_000 --batch_size=256 --use_amp
 ```
 
 For real training, ask for more time - the flags are forwarded straight to `sbatch`:

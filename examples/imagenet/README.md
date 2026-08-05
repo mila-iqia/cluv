@@ -188,5 +188,14 @@ was no SSH connection to nibi available at the time.
 | trillium-gpu | `/home` isn't mounted on compute nodes | `project_dir` on `$SCRATCH` |
 | trillium-gpu | Rejects `--mem` entirely (186 GiB/GPU is implicit) | no `--mem` in the job script |
 | killarney, vulcan | Slurm doesn't create the parent directory of `--output`, so cluv's default `{results_path}/{cluster}_%j/slurm-%j.out` kills the job at launch | explicit `output` in `sbatch_args` |
+| killarney, vulcan | `$SCRATCH` in a path handed to `sbatch` expands to *nothing*, because cluv's command is assembled so that paths are expanded by the non-login ssh shell (see below) | an `output` path relative to the job's working directory, via cluv's `logs` symlink |
 | trillium-gpu | Reports `CC_CLUSTER=trillium`, and Slurm's `ClusterName` is `grillium` | `cluv submit` exports `$CLUV_CLUSTER` |
 | killarney, vulcan | `$CC_CLUSTER` and `$SCRATCH` are only set in a *login* shell | same |
+
+About that `$SCRATCH` expansion: `cluv submit` runs
+`bash --login -c '<env vars> sbatch ... <args>'`, but the arguments are `shlex`-quoted and then
+concatenated *into* that single-quoted string, which closes it. So `$SCRATCH` is expanded by the
+non-login shell that ssh starts, not by the login shell. On most clusters `$SCRATCH` is set in both,
+so this goes unnoticed; on Killarney and Vulcan it is login-shell-only, and Slurm ends up recording
+`StdOut=/logs/imagenet/<jobid>.out`. Anything else that relies on `$SCRATCH` in a cluv-computed path
+has the same problem on those clusters.

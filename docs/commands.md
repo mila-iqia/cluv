@@ -171,6 +171,11 @@ cluv submit [options] <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]
 `--autocommit`
 :   Automatically create a local commit with the tracked changes before submitting, instead of failing when the working tree is dirty.
 
+`--sync-datasets`, `--no-sync-datasets`
+:   Whether the sync that precedes the submission should also replicate `data_source` to the
+    cluster's `datasets_path`. Enabled by default. Use `--no-sync-datasets` when the data is already
+    on the cluster, or when a separate `cluv sync` is already replicating it.
+
 ---
 
 ## [`cluv clean`](#cluv-clean)

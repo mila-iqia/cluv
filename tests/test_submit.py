@@ -248,6 +248,7 @@ class TestSubmitCliParsing:
                 "sbatch_args": [],
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
+                "sync_datasets": True,
             }
         )
 
@@ -267,6 +268,7 @@ class TestSubmitCliParsing:
                 "sbatch_args": ["--mem=8G"],
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
+                "sync_datasets": True,
             }
         )
 
@@ -289,6 +291,7 @@ class TestSubmitCliParsing:
                 "sbatch_args": [],
                 "program_args": [],
                 "autocommit": False,
+                "sync_datasets": True,
             }
         )
 

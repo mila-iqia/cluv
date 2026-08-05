@@ -74,6 +74,7 @@ async def submit(
     sbatch_args: list[str],
     program_args: list[str],
     autocommit: bool = False,
+    sync_datasets: bool = True,
     _skip_sync: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
@@ -93,6 +94,9 @@ async def submit(
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
+        sync_datasets: If False, don't replicate `data_source` to the cluster's `datasets_path`
+            during the sync that precedes the submission. Useful when the data is already there, or
+            when a `cluv sync` is already replicating it.
         _skip_sync: If True, skip the synchronization step before submitting.
 
     Returns:
@@ -127,7 +131,12 @@ async def submit(
 
     if cluster == "first":
         job = await submit_first(
-            job_script, sbatch_args, program_args, git_commit, _skip_sync=_skip_sync
+            job_script,
+            sbatch_args,
+            program_args,
+            git_commit,
+            sync_datasets=sync_datasets,
+            _skip_sync=_skip_sync,
         )
         if job:
             save_job(job)
@@ -144,7 +153,7 @@ async def submit(
         if _skip_sync:
             remote = await Remote.connect(hostname=cluster)
         else:
-            remote = (await sync(clusters=[cluster]))[0]
+            remote = (await sync(clusters=[cluster], sync_datasets=sync_datasets))[0]
     else:
         # Submitting to the current cluster. The sbatch command will run locally.
         remote = None
@@ -181,6 +190,7 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    sync_datasets: bool = True,
     _skip_sync: bool = False,
 ) -> Job | None:
     """Submit the job on all clusters, and wait until one of them starts.
@@ -188,7 +198,7 @@ async def submit_first(
     """
     # Sync with all clusters with an existing connections.
     if not _skip_sync:
-        remotes = await sync()
+        remotes = await sync(sync_datasets=sync_datasets)
     else:
         remotes = await get_active_remotes()
     cluster_to_remote: dict[str, Remote | None] = {remote.hostname: remote for remote in remotes}

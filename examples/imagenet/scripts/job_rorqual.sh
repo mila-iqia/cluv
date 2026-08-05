@@ -8,4 +8,6 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-gpu=64G
 
-exec bash "$SLURM_SUBMIT_DIR/scripts/train.sh" "$@"
+# `cluv submit` runs `sbatch --chdir=<project dir>`, so the job starts in this project's
+# folder on the cluster, and the rest of the work is shared with the other clusters:
+exec bash scripts/train.sh "$@"

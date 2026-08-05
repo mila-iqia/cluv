@@ -5,11 +5,13 @@
 # `exec` this script. Which wrapper is used for which cluster is set with `job_script_path` in the
 # `[tool.cluv.clusters.<cluster>]` sections of the pyproject.toml.
 #
-# `cluv submit` runs `sbatch --chdir=<project_dir>`, so $SLURM_SUBMIT_DIR is this project's folder
-# on the cluster and `uv run` picks up the right environment without any `--directory` flag.
+# `cluv submit` runs `sbatch --chdir=<project_dir>`, so the job (and therefore this script) starts in
+# this project's folder on the cluster, and `uv run` picks up the right environment without any
+# `--directory` flag.
+# (Note: $SLURM_SUBMIT_DIR is *not* that folder - it is the directory sbatch itself was run from,
+# which for `cluv submit` is the home directory of the SSH session.)
 
 set -e # exit on error.
-cd "${SLURM_SUBMIT_DIR:-.}"
 
 # The command to run, as passed after the `--` of `cluv submit`.
 job_command=("$@")

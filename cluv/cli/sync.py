@@ -559,6 +559,10 @@ async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets
             "--chmod=u+w",
             "--exclude=.git",
             "--exclude=.datalad",
+            # Mila's /network/datasets folders are datalad datasets whose git-annex object
+            # store lives in `.git.bak`. For ImageNet that is a second, 145GB copy of the
+            # very archives we are already copying.
+            "--exclude=.git.bak",
             f"{source_host}:{source_path}/",
             f"{local_datasets_path}/",
         ),
@@ -600,6 +604,10 @@ async def _push_datasets_to_remote(
             "--chmod=u+w",
             "--exclude=.git",
             "--exclude=.datalad",
+            # Mila's /network/datasets folders are datalad datasets whose git-annex object
+            # store lives in `.git.bak`. For ImageNet that is a second, 145GB copy of the
+            # very archives we are already copying.
+            "--exclude=.git.bak",
             f"{local_source}/",
             f"{remote.hostname}:{resolved_path}/",
         ),

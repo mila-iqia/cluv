@@ -121,8 +121,8 @@ You can also skip `cluv submit` and run the same scripts inside an interactive j
 cluster:
 
 ```bash
-ssh -tt mila salloc --nodes=1-2 --ntasks=4 --gpus-per-task=l40s:1 --cpus-per-task=4 \
-    --mem=32G --tmp=200G --time=02:59:00 --partition=short-unkillable
+ssh -tt mila salloc --nodes=1 --ntasks=4 --gpus-per-node=l40s:4 --cpus-per-task=6 \
+    --mem=64G --tmp=200G --time=02:59:00 --partition=short-unkillable
 
 cd repos/cluv/examples/imagenet
 # Prepare the dataset once per node:
@@ -134,7 +134,7 @@ srun uv run python main.py
 To open the example in VsCode on a compute node:
 
 ```bash
-mila code repos/cluv/examples/imagenet --alloc --ntasks=4 --gpus-per-task=l40s:1 --mem=32G \
+mila code repos/cluv/examples/imagenet --alloc --ntasks=4 --gpus-per-node=l40s:4 --mem=64G \
     --tmp=200G --time=02:59:00 --partition=short-unkillable
 ```
 
@@ -142,9 +142,16 @@ In the VsCode terminal you have to spell out the nodes/tasks explicitly, since t
 variables aren't set there:
 
 ```bash
-srun --ntasks-per-node=1 --nodes=2 uv run python prepare_data.py
-srun --ntasks=4 --nodes=2 uv run python main.py
+srun --ntasks-per-node=1 --nodes=1 uv run python prepare_data.py
+srun --ntasks=4 --nodes=1 uv run python main.py
 ```
+
+## Verified on
+
+The fake-data smoke run above was checked end-to-end (training, validation, checkpoints, profiler
+traces from every rank) on **mila** (2x L40S), **tamia** (4x H100, whole node), **rorqual** (4x H100,
+no compute-node internet) and **fir** (4x H100). Each finished in well under a minute of runtime.
+`scripts/job_nibi.sh` follows the same shape as the other DRAC scripts but has not been run.
 
 ## Notes
 

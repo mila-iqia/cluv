@@ -92,13 +92,15 @@ cluv submit mila                          # uses scripts/job_mila.sh
 cluv submit first -- python main.py       # submit everywhere, keep the first job to start
 ```
 
-Extracting ImageNet into `$SLURM_TMPDIR` takes 10-15 minutes, so a run that has to fit in the
-configured 1h limit should train on a subset:
+Extracting ImageNet into `$SLURM_TMPDIR` takes 10-15 minutes (11m37s on a Mila L40S node), so a run
+that has to fit in the configured 1h limit should train on a subset:
 
 ```bash
 cluv submit mila -- python main.py --epochs=1 --limit_train_samples=100_000 \
     --limit_val_samples=10_000 --batch_size=256 --use_amp
 ```
+
+That is a ~13 minute job end to end: extraction, then ~2500 images/second on 2 L40S.
 
 For real training, ask for more time - the flags are forwarded straight to `sbatch`:
 
@@ -151,7 +153,12 @@ srun --ntasks=4 --nodes=1 uv run python main.py
 The fake-data smoke run above was checked end-to-end (training, validation, checkpoints, profiler
 traces from every rank) on **mila** (2x L40S), **tamia** (4x H100, whole node), **rorqual** (4x H100,
 no compute-node internet) and **fir** (4x H100). Each finished in well under a minute of runtime.
-`scripts/job_nibi.sh` follows the same shape as the other DRAC scripts but has not been run.
+
+The real-ImageNet subset run was checked on **mila**: 13m29s in total, of which 11m37s was extracting
+the archives into `$SLURM_TMPDIR`.
+
+`scripts/job_nibi.sh` follows the same shape as the other DRAC scripts but has not been run - there
+was no SSH connection to nibi available at the time.
 
 ## Notes
 

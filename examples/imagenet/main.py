@@ -221,17 +221,16 @@ class Args:
     use_amp: bool = False
     """If True, use automatic mixed precision (AMP) for training."""
 
-    run_name: str | None = RUN_ID + (
-        f"_step{_step}" if (_step := int(os.environ.get("SLURM_STEP_ID", "0"))) > 0 else ""
-    )
+    run_name: str | None = RUN_ID
     """Name for the run (in wandb and in tensorboard)."""
 
-    wandb_run_id: str = RUN_ID + (
-        f"_step{_step}" if (_step := int(os.environ.get("SLURM_STEP_ID", "0"))) > 0 else ""
-    )
+    wandb_run_id: str = RUN_ID
     """Unique ID for the Weights & Biases run.
 
-    Used to resume a run if the job is restarted.
+    Used to resume a run if the job is restarted. This is cluv's run id, which is already unique
+    per job (and accounts for job arrays and job packing), so it deliberately does *not* include
+    `$SLURM_STEP_ID`: that would change the run id whenever the number of preceding `srun` steps in
+    the job script changes.
     """
 
     wandb_group: str | None = None

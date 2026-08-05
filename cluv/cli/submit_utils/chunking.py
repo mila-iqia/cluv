@@ -11,7 +11,6 @@ CHUNK_SIZE = 3  # In hours
 def chunking_update_sbatch_args(n_chunks: int, sbatch_args: list[str]) -> list[str]:
     """Add the sbatch args (--array and --time) for chunking the job into multiple smaller jobs."""
     logger.info(f"Chunking job into {n_chunks} smaller jobs of {CHUNK_SIZE} hours each.")
-    sbatch_args = sbatch_args.copy()
 
     # Remove any existing --time or -t args, and add the new one at the end.
     sbatch_args = [arg for arg in sbatch_args if not arg.startswith(("--time=", "-t="))]

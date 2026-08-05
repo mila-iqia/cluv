@@ -35,7 +35,7 @@ display_commands = ContextVar("display_commands", default=True)
 raise_on_command_error = ContextVar("raise_on_command_error", default=False)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ResolvedSbatchArgs:
     sbatch_args: list[str]
     n_chunks: int | None = None
@@ -566,7 +566,7 @@ async def sbatch(
     # Should be set, since `remote` is None if current_cluster() is the same as the cluster argument
     # to `submit`.
     assert cluster
-    sbatch_command, submission_args = get_sbatch_command(
+    sbatch_command, resolved_args = get_sbatch_command(
         cluster, job_script, sbatch_args, program_args, git_commit, chunking
     )
     display = display_commands.get()
@@ -591,10 +591,10 @@ async def sbatch(
         cluster=cluster,
         job_script=str(job_script),
         git_commit=git_commit,
-        sbatch_args=submission_args.sbatch_args,
+        sbatch_args=resolved_args.sbatch_args,
         program_args=program_args,
         submitted_at=submit_time.isoformat(),
-        n_chunks=submission_args.n_chunks,
+        n_chunks=resolved_args.n_chunks,
     )
 
     return result, job

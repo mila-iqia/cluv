@@ -80,6 +80,10 @@ job_script_path = "scripts/job_tamia.sh"
 [tool.cluv.clusters.killarney]
 job_script_path = "scripts/job_killarney.sh"
 sbatch_args = { account = "aip-bengioy" }
+# Killarney refuses to run jobs whose submission directory is under /home
+# ("Submitting jobs from directories residing in /home is not permitted"), so the project lives on
+# $SCRATCH there instead of the default $HOME location.
+project_dir = "$SCRATCH/repos/cluv/examples/imagenet"
 
 [tool.cluv.clusters.vulcan]
 job_script_path = "scripts/job_vulcan.sh"

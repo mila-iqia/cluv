@@ -370,6 +370,13 @@ async def clone_project(
 
     if local_project_root == local_repo_dir:
         cluster_repo_dir = project_path
+    elif project_dir_is_configured(remote.hostname):
+        # A subproject with an explicit `project_dir` for this cluster. The repo has to be cloned
+        # somewhere that contains it, so strip the subproject's relative offset back off the
+        # (already resolved) project path. Needed on clusters that refuse to run jobs out of $HOME.
+        cluster_repo_dir = repo_dir_from_project_dir(
+            project_path, local_project_root.relative_to(local_repo_dir)
+        )
     elif not local_repo_dir.is_relative_to(Path.home()):
         # Try to find the directory where the project should be cloned on the cluster
         # by reading the pyproject.toml at the repo root. Hopefully it has a cluv config with project_dir set.
@@ -726,3 +733,25 @@ def get_loglevel():
 async def host_uses_controlmaster(hostname: str) -> bool:
     applied_options_for_host = get_ssh_options_for_host(hostname)
     return applied_options_for_host.get("controlmaster", "no").lower() != "no"
+
+
+def project_dir_is_configured(cluster: str) -> bool:
+    """Whether a `project_dir` is set for this cluster (globally or per-cluster)."""
+    return get_cluv_config().get_cluster_config(cluster).project_dir is not None
+
+
+def repo_dir_from_project_dir(
+    project_dir: PurePosixPath | str, project_dir_relative_to_repo: PurePosixPath | Path
+) -> PurePosixPath:
+    """Where to clone the git repo, given where its subproject should live on a cluster.
+
+    `project_dir` points at the subproject (e.g. `examples/imagenet`), but the repository has to be
+    cloned at a path that contains it, so the subproject's relative offset is stripped back off.
+
+    >>> repo_dir_from_project_dir("/scratch/me/repos/cluv/examples/imagenet", "examples/imagenet")
+    PurePosixPath('/scratch/me/repos/cluv')
+    >>> repo_dir_from_project_dir("/scratch/me/cluv/sub", "sub")
+    PurePosixPath('/scratch/me/cluv')
+    """
+    depth = len(PurePosixPath(project_dir_relative_to_repo).parts)
+    return PurePosixPath(project_dir).parents[depth - 1]

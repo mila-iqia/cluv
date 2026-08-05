@@ -342,7 +342,10 @@ def _gpu_bars(gpu_stats: dict[str, tuple[int, int]], name_width: int) -> Text:
     for i, (model, (idle, total)) in enumerate(gpu_stats.items()):
         if i:
             bars += Text("\n")
-        bars += Text(f"{model:<{name_width}} ", style="bright_blue") + _gpu_bar(idle, total)
+        if total == 0:
+            bars += Text("N/A", style="dim")
+        else:
+            bars += Text(f"{model:<{name_width}} ", style="bright_blue") + _gpu_bar(idle, total)
     return bars
 
 

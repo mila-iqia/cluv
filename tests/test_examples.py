@@ -95,7 +95,7 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
     job = await submit(
         remote.hostname,
         job_script=None,
-        sbatch_args=[],
+        sbatch_args=["--time=0:20:00"],
         program_args=[
             "python",
             "main.py",
@@ -103,6 +103,7 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
             "--epochs=1",
             "--limit_train_samples=2048",
             "--limit_val_samples=512",
+            "--batch_size=64",
             "--model_name=resnet18",
             "--no_wandb",
         ],

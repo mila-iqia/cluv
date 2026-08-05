@@ -60,11 +60,13 @@ setup and results path all work:
 
 ```bash
 cluv submit tamia --time=0:20:00 -- python main.py --use_fake_data --epochs=1 \
-    --limit_train_samples=2048 --limit_val_samples=512 --no_wandb --model_name=resnet18
+    --limit_train_samples=2048 --limit_val_samples=512 --batch_size=64 \
+    --model_name=resnet18 --no_wandb
 ```
 
-That takes a couple of minutes once the job starts (a short `--time` also helps it get scheduled
-sooner).
+That takes well under a minute once the job starts (a short `--time` also helps it get scheduled
+sooner). It leaves `epoch_0.pt` / `epoch_1.pt` and one profiler trace per rank in the run's results
+directory, so you can tell that training, checkpointing and profiling all worked.
 
 ### The real thing
 

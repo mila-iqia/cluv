@@ -52,8 +52,8 @@ else
     $one_task_per_node bash -c '
         echo "SLURM_TMPDIR: ${SLURM_TMPDIR:-<unset>}"
         if [ -z "${SLURM_TMPDIR:-}" ]; then
-            echo "ERROR: \$SLURM_TMPDIR is not set in this job, so there is no node-local disk to" >&2
-            echo "extract ImageNet onto. Refusing to write ~150GB into the node shared /tmp." >&2
+            echo "ERROR: \$SLURM_TMPDIR is not set in this job, so we do not know where this" >&2
+            echo "cluster wants ~150GB of node-local scratch to be written. Refusing to guess." >&2
             echo "Request local disk for the job (for example with --tmp), or pass" >&2
             echo "--use_fake_data to run without the real dataset." >&2
             exit 1

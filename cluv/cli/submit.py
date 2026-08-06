@@ -37,6 +37,10 @@ raise_on_command_error = ContextVar("raise_on_command_error", default=False)
 
 @dataclass(frozen=True)
 class ResolvedSbatchArgs:
+    """The resolved sbatch arguments after merging the config and the command-line args, and the
+    external information we can infer from them, such as the number of chunks for chunked jobs
+    when calling get_sbatch_command()."""
+
     sbatch_args: list[str]
     n_chunks: int | None = None
 

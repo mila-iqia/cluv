@@ -30,7 +30,9 @@ async def wait_for_running_job(
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
 ) -> tuple[Job, str] | None:
-    """Watch the jobs with sacct until one of them starts (or completes)."""
+    """Watch the jobs with sacct until one of them starts (or completes).
+    Returns the first job that starts with its state, or None if all jobs fail before any start.
+    """
     first_running_job: Job | None = None
     wait_time = 1
 
@@ -69,6 +71,7 @@ async def wait_for_jobs_to_cancel(
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
 ) -> None:
+    """Wait for all jobs except the first running job to be cancelled or completed."""
     start_wait_time = 5
     to_cancel = list(job_to_state.keys())
     to_cancel.remove(first_running_job)

@@ -13,8 +13,8 @@ from cluv.config import CluvConfig, PartialClusterConfig
 @pytest.mark.parametrize(
     "python_version",
     [
-        pytest.param("3.11", marks=pytest.mark.xfail(reason="TODO: cluv needs 3.13 atm.")),
-        pytest.param("3.12", marks=pytest.mark.xfail(reason="TODO: cluv needs 3.13 atm.")),
+        "3.11",
+        "3.12",
         "3.13",
         pytest.param(
             "3.14",

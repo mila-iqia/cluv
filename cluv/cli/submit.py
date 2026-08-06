@@ -14,6 +14,8 @@ from pathlib import Path, PurePosixPath
 import rich.syntax
 import rich.table
 import rich.text
+from rich.live import Live
+from typing_extensions import TypeVar
 
 from cluv import tui
 from cluv.cache import Job, save_job
@@ -29,6 +31,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["submit"]
 display_commands = ContextVar("display_commands", default=True)
 raise_on_command_error = ContextVar("raise_on_command_error", default=False)
+PathT = TypeVar("PathT", Path, PurePosixPath, default=PurePosixPath)
 
 
 def sbatch_args_from_dict(d: dict[str, str | bool]) -> list[str]:
@@ -518,7 +521,8 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
             create_submit_commit(submit_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
             console.print(
-                "[red]Working directory is dirty. Please commit your changes before submitting.[/red]",
+                "[red]Working directory is dirty. Please commit your changes before submitting, "
+                "or use `--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).[/red]",
             )
             sys.exit(1)
 
@@ -555,7 +559,7 @@ def get_job_script_path_from_config(cluster: str) -> Path | PurePosixPath | None
     return job_script_path
 
 
-def _check_job_script_not_none[P: Path | PurePosixPath](job_script: P | None, cluster: str) -> P:
+def _check_job_script_not_none(job_script: PathT | None, cluster: str) -> PathT:
     if job_script is None:
         raise ValueError(
             f"No job script was provided and no [tool.cluv] job_script_path is configured for {cluster}."

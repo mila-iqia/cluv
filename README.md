@@ -8,7 +8,7 @@ In early development. Commands are functional, but expect bugs or missing featur
 
 ## Requirements
 
-- Python >= 3.13
+- Python >= 3.11
 - [UV](https://docs.astral.sh/uv/)
 - SSH access configured for each cluster in `~/.ssh/config`
 - A GitHub repository with your project

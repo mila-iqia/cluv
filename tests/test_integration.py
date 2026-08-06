@@ -103,7 +103,8 @@ async def test_status_online(cluster_status: ClusterStatus, cluster: str):
 async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
     if cluster not in STATUS_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    assert cluster_status.gpu_total > 0, "Expected cluster to report GPU nodes"
+    total_gpus = sum(total for _, total in cluster_status.gpu_stats.values())
+    assert total_gpus > 0, "Expected cluster to report GPU nodes"
 
 
 @pytest.mark.slow
@@ -113,7 +114,8 @@ async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
 async def test_status_gpu_model(cluster_status: ClusterStatus, cluster: str):
     if cluster not in STATUS_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    assert cluster_status.gpu_model != "?", f"GPU model not detected: {cluster_status.gpu_model!r}"
+    assert cluster_status.gpu_stats, "GPU model not detected"
+    assert "?" not in cluster_status.gpu_stats
 
 
 @pytest.mark.slow
@@ -145,7 +147,7 @@ TEST_SUBMIT_TIMEOUT_SECONDS = 180
 )
 @pytest.mark.slow
 @pytest.mark.timeout(TEST_SUBMIT_TIMEOUT_SECONDS)
-async def test_submit(remote: Remote, fake_scratch: Path):
+async def test_submit(remote: Remote):
     """End-to-end: actually submit scripts/job.sh to a slurm cluster via sbatch.
 
     Requires an active SSH connection to the cluster and a clean git tree.

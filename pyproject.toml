@@ -3,7 +3,7 @@ name = "cluster-uv"
 description = "cluv (from 'cluster' + 'uv') - A versatile tool to work with uv python projects across HPC clusters."
 readme = "README.md"
 authors = [{ name = "Fabrice Normandin", email = "normandf@mila.quebec" }]
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dynamic = ["version"]
 dependencies = [
     "milatools>=0.1.9",

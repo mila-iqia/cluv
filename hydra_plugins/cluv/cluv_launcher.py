@@ -12,7 +12,6 @@ TODO: Also allows job packing (multiple runs per GPU).
 
 import asyncio
 import collections
-import itertools
 import logging
 import sys
 import time
@@ -39,7 +38,7 @@ from cluv.cli.sync import fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import JobInfo, RunInfo, current_run_info, get_results_path, get_run_id
 from cluv.remote import Remote
-from cluv.utils import current_cluster, set_context
+from cluv.utils import batched, current_cluster, set_context
 
 from .submitit_job import get_job_state, is_job_done
 
@@ -375,7 +374,7 @@ class CluvLauncher(Launcher):
             first_job_idx = initial_job_idx
             job_results: list[JobReturn] = []
             for batch_index, job_overrides_batch in enumerate(
-                itertools.batched(job_overrides, array_parallelism or len(job_overrides))
+                batched(job_overrides, array_parallelism or len(job_overrides))
             ):
                 logger.debug(f"Launching batch #{batch_index} of {len(job_overrides_batch)} jobs.")
                 job_batch_results = await self.launch_jobs(job_overrides_batch)

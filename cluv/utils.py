@@ -4,6 +4,7 @@ import contextvars
 import os
 import socket
 import sys
+from collections.abc import Iterator, Sequence
 from contextvars import ContextVar
 from pathlib import Path
 from typing import TypeVar
@@ -50,3 +51,11 @@ def set_context(var: ContextVar[T], value: T):
         yield
     finally:
         var.reset(token)
+
+
+def batched(iterable: Sequence[T], n: int) -> Iterator[tuple[T, ...]]:
+    """Backport of `itertools.batched` (added in Python 3.12) for our Python 3.11 baseline."""
+    if n < 1:
+        raise ValueError("n must be at least one")
+    for i in range(0, len(iterable), n):
+        yield tuple(iterable[i : i + n])

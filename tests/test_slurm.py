@@ -408,10 +408,16 @@ class TestParseDiskusageReport:
 
 
 class TestParseTime:
-    def test_parse_slurm_time(self) -> None:
-        td = parse_slurm_time("12:28:45")
-        assert td == timedelta(hours=12, minutes=28, seconds=45)
-
-    def test_parse_slurm_time_with_day(self) -> None:
-        td = parse_slurm_time("07-12:28:45")
-        assert td == timedelta(days=7, hours=12, minutes=28, seconds=45)
+    @pytest.mark.parametrize(
+        ("input", "expected"),
+        [
+            ("12:28:45", timedelta(hours=12, minutes=28, seconds=45)),
+            ("07-12:28:45", timedelta(days=7, hours=12, minutes=28, seconds=45)),
+            ("07-12", timedelta(days=7, hours=12)),
+            ("07-12:28", timedelta(days=7, hours=12, minutes=28)),
+            ("28:12", timedelta(minutes=28, seconds=12)),
+            ("28", timedelta(minutes=28)),
+        ],
+    )
+    def test_parse_slurm_time(self, input: str, expected: timedelta) -> None:
+        assert parse_slurm_time(input) == expected

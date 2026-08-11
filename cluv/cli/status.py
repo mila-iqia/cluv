@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 __all__ = ["status"]
 
 
+DEFAULT_SHOW_JOBS = 10
+
+
 @dataclass
 class ClusterJobStats:
     running: int
@@ -409,7 +412,7 @@ def _build_cluster_table(
 
 
 def _build_cluv_jobs_table(
-    cached_jobs: list[Job], live_info: dict[int, LiveJobInfo], max_jobs: int
+    cached_jobs: list[Job], live_info: dict[int, LiveJobInfo], max_jobs: int | None
 ) -> Table:
     """Build the jobs overview table with one row per cached job, enriched with live status info."""
     table = Table(
@@ -493,11 +496,12 @@ def _build_cluster_table_legend() -> Panel:
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 
 
-def _build_job_table_legend(max_jobs: int, total_jobs: int) -> Panel:
-    shown_jobs = min(max_jobs, total_jobs)
+def _build_job_table_legend(max_jobs: int | None, total_jobs: int) -> Panel:
+    if max_jobs is None or max_jobs >= total_jobs:
+        return Panel(f"Showing {total_jobs} / {total_jobs} cluv jobs.", border_style="dim")
 
     return Panel(
-        f"Showing {shown_jobs} / {total_jobs} cluv jobs",
+        f"Showing {max_jobs} / {total_jobs} cluv jobs. Use --all-jobs to show all jobs.",
         border_style="dim",
     )
 
@@ -550,7 +554,7 @@ async def get_job_infos(
     return live_info, clusters_job_stats
 
 
-async def status(table: Literal["clusters", "jobs", "all"], max_jobs: int) -> None:
+async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> None:
     """Show status of clusters and jobs.
 
     Parameters:
@@ -605,6 +609,7 @@ async def status(table: Literal["clusters", "jobs", "all"], max_jobs: int) -> No
         console.print()
 
     if table in ("jobs", "all"):
+        max_jobs = None if all_jobs else DEFAULT_SHOW_JOBS
         console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, max_jobs))
         console.print(_build_job_table_legend(max_jobs, len(cached_jobs)))
         console.print()

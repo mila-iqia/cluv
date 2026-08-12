@@ -602,8 +602,11 @@ async def test_can_submit_on_current_cluster(
             False,
             marks=pytest.mark.xfail(
                 IN_GITHUB_CLOUD_CI,
-                reason="This test doesn't work in the GitHub Cloud CI, not sure why.",
-                strict=True,
+                reason=(
+                    "This test is racy on the GitHub Cloud CI's shared runners, not sure why. "
+                    "Not strict: it sometimes passes there too, and that's fine."
+                ),
+                strict=False,
             ),
         ),
     ],

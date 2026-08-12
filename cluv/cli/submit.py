@@ -186,7 +186,6 @@ async def submit(
         # Submitting to the current cluster. The sbatch command will run locally.
         remote = None
 
-
     allocations = get_cluv_config().get_cluster_config(cluster).sbatch_args
     if len(allocations) > 1:
         # More than one allocation is configured for this cluster: submit one job per allocation
@@ -212,8 +211,13 @@ async def submit(
 
     (config_sbatch_args,) = allocations
     result, job = await sbatch(
-        remote, job_script, sbatch_args, program_args, git_commit,
-        config_sbatch_args=config_sbatch_args, chunking=chunking,
+        remote,
+        job_script,
+        sbatch_args,
+        program_args,
+        git_commit,
+        config_sbatch_args=config_sbatch_args,
+        chunking=chunking,
     )
 
     if result.returncode != 0 or job is None:
@@ -273,7 +277,10 @@ async def submit_first(
         for config_sbatch_args in config.get_cluster_config(cluster).sbatch_args
     ]
     return await submit_and_keep_first(
-        submissions, sbatch_args=sbatch_args, program_args=program_args, git_commit=git_commit,
+        submissions,
+        sbatch_args=sbatch_args,
+        program_args=program_args,
+        git_commit=git_commit,
         chunking=chunking,
     )
 

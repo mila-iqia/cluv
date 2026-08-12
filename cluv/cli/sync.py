@@ -99,7 +99,7 @@ async def prepare_sync(
     """Runs the steps of `sync` that are shared by all the clusters.
 
     These have to happen before any cluster is synced: figuring out which clusters we can sync with,
-    pushing the local commits, and pulling the datasets from the source cluster when it isn't this
+    pushing the local commits, and pulling the datasets from the source cluster when it isn't on this
     machine.
 
     Returns the Remotes of the clusters to sync with (see `sync_task_function`).

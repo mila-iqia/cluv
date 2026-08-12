@@ -59,7 +59,7 @@ datasets_path = "$HOME/datasets/cifar10"
 results_path = "$HOME/logs/pytorch_example"
 
 [tool.cluv.clusters.rorqual]
-env = { SBATCH_ACCOUNT = "rrg-bengioy-ad" }
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.fir]
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }

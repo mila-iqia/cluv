@@ -103,10 +103,21 @@ async def sync(
     # TODO: Add an --ignore flag to ignore some clusters?
     console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
+    # Some cluster hostnames (e.g. `trillium` / `trillium-gpu`) are actually distinct login nodes
+    # of the same cluster that share a single $HOME filesystem. Syncing to them concurrently races
+    # on the same on-disk git checkout / venv (e.g. clobbering `.git/FETCH_HEAD` mid-checkout).
+    # This dict of locks, shared across the tasks below and keyed by the resolved project
+    # directory, serializes `sync_task_function` for remotes that resolve to the same path.
+    project_dir_locks: dict[str, asyncio.Lock] = {}
+
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
     for remote in remotes:
-        tasks.append(functools.partial(sync_task_function, remote=remote))
+        tasks.append(
+            functools.partial(
+                sync_task_function, remote=remote, project_dir_locks=project_dir_locks
+            )
+        )
         task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
 
     token = console_lock.set(asyncio.Lock())
@@ -174,7 +185,11 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
-async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) -> list[Path]:
+async def sync_task_function(
+    report_progress: ReportProgressFn,
+    remote: Remote,
+    project_dir_locks: dict[str, asyncio.Lock],
+) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     config = get_cluv_config()
     cluster = remote.hostname
@@ -212,42 +227,46 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
         cache.project_states[cluster] = project_state
         write_cache(cache)
 
-    _update_progress(0, "Checking/Installing UV", num_tasks)
-    await install_uv(remote, project_state)
-    _save()
-
-    _update_progress(1, "Setting up project", num_tasks)
-    await clone_project(remote, project_path=project_path, project_state=project_state)
-    _save()
-
-    _update_progress(2, "Running 'uv sync'", num_tasks)
-    await run_uv_sync(remote, project_path, project_state)
-    _save()
-
-    _update_progress(3, "Fetching results", num_tasks)
-    new_runs = await fetch_results(remote, config, project_state)
-    _save()
-
-    if config.data_source:
-        _update_progress(4, "Syncing datasets", num_tasks)
-        here = current_cluster()
-        if ":" not in config.data_source:
-            # data_source is a local path; use it directly as the source.
-            # Note: this tool targets POSIX (Linux/macOS) systems only; Windows drive-letter
-            # paths (e.g. C:\...) are not supported.
-            local_dataset_path = Path(os.path.expandvars(config.data_source))
-        else:
-            local_dataset_path = (
-                config.get_cluster_config(here) if here else config
-            ).datasets_path
-            if not local_dataset_path:
-                raise RuntimeError("data_source is set, so datasets_path should also be set!")
-            local_dataset_path = Path(os.path.expandvars(local_dataset_path))
-        await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
+    # Remotes that resolve to the same (expanded) project directory share the underlying
+    # filesystem (e.g. `trillium` and `trillium-gpu` are separate login nodes with the same
+    # $HOME), so the git checkout / venv living there can't be touched concurrently.
+    async with project_dir_locks.setdefault(str(project_path), asyncio.Lock()):
+        _update_progress(0, "Checking/Installing UV", num_tasks)
+        await install_uv(remote, project_state)
         _save()
 
-    _update_progress(num_tasks, "Done", num_tasks)
-    return new_runs
+        _update_progress(1, "Setting up project", num_tasks)
+        await clone_project(remote, project_path=project_path, project_state=project_state)
+        _save()
+
+        _update_progress(2, "Running 'uv sync'", num_tasks)
+        await run_uv_sync(remote, project_path, project_state)
+        _save()
+
+        _update_progress(3, "Fetching results", num_tasks)
+        new_runs = await fetch_results(remote, config, project_state)
+        _save()
+
+        if config.data_source:
+            _update_progress(4, "Syncing datasets", num_tasks)
+            here = current_cluster()
+            if ":" not in config.data_source:
+                # data_source is a local path; use it directly as the source.
+                # Note: this tool targets POSIX (Linux/macOS) systems only; Windows drive-letter
+                # paths (e.g. C:\...) are not supported.
+                local_dataset_path = Path(os.path.expandvars(config.data_source))
+            else:
+                local_dataset_path = (
+                    config.get_cluster_config(here) if here else config
+                ).datasets_path
+                if not local_dataset_path:
+                    raise RuntimeError("data_source is set, so datasets_path should also be set!")
+                local_dataset_path = Path(os.path.expandvars(local_dataset_path))
+            await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
+            _save()
+
+        _update_progress(num_tasks, "Done", num_tasks)
+        return new_runs
 
 
 async def expandvars(remote: Remote, path: str | PurePosixPath) -> PurePosixPath:

@@ -59,7 +59,9 @@ async def test_save_does_not_clobber_a_concurrently_written_cluster(
     monkeypatch.setattr(sync_module, "fetch_results", fake_fetch_results)
 
     await sync_module.sync_task_function(
-        report_progress=lambda **kwargs: None, remote=Remote(hostname="foo")
+        report_progress=lambda **kwargs: None,
+        remote=Remote(hostname="foo"),
+        project_dir_locks={},
     )
 
     cache = read_cache()

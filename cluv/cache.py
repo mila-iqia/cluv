@@ -14,7 +14,7 @@ from cluv.utils import find_pyproject
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True)
 class Job:
     """A Job on a Slurm cluster. This object is returned by `cluv submit`."""
 
@@ -26,8 +26,13 @@ class Job:
     sbatch_args: list[str]
     program_args: list[str]
 
+    n_chunks: int | None = None
 
-@dataclass
+    def __hash__(self) -> int:
+        return hash((self.cluster, self.job_id))
+
+
+@dataclass()
 class ProjectStateOnCluster:
     """The cached info we have about the state of the project on a cluster.
 
@@ -44,7 +49,7 @@ class ProjectStateOnCluster:
     user pruned locally from runs that were never fetched."""
 
 
-@dataclass
+@dataclass(frozen=True)
 class DisabledCluster:
     """Represents a cluster that has been temporarily or indefinitely disabled."""
 
@@ -55,7 +60,7 @@ class DisabledCluster:
     """When the cluster should automatically re-enable. None means disabled indefinitely."""
 
 
-@dataclass
+@dataclass(frozen=True)
 class CacheContent:
     project_states: dict[str, ProjectStateOnCluster] = dataclasses.field(default_factory=dict)
     disabled_clusters: dict[str, DisabledCluster] = dataclasses.field(default_factory=dict)

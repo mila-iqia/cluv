@@ -163,6 +163,7 @@ async def test_run_sweep_races_every_job_independently_on_first(
         sbatch_args,
         program_args,
         autocommit: bool = False,
+        chunking: bool = False,
         _skip_sync: bool = False,
     ) -> Job:
         submitted_clusters.append(cluster)

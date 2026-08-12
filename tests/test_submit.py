@@ -728,6 +728,12 @@ async def test_submit_first_doesnt_wait_for_the_slowest_cluster_to_sync(
             raise
         return []
 
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        sync_task_function.__name__,
+        mock_sync_task := unittest.mock.AsyncMock(wraps=fake_sync_task_function),
+    )
+
     async def fake_run(
         program_and_args: tuple[str, ...],
         input: str | None = None,
@@ -757,15 +763,19 @@ async def test_submit_first_doesnt_wait_for_the_slowest_cluster_to_sync(
             return _result("")
         pytest.fail(f"Unexpected command: {full_command}")
 
+    # Both clusters go through SSH here (there's no "current" cluster to run locally on), so only
+    # `cluv.remote.run` is ever exercised; patching `cluv.slurm.run` / `cluv.cli.submit.run` too
+    # would be needless.
+    monkeypatch.setattr(
+        cluv.remote, cluv.remote.run.__name__, mock_run := unittest.mock.AsyncMock(wraps=fake_run)
+    )
+
     real_sleep = asyncio.sleep
     monkeypatch.setattr(asyncio, "sleep", lambda x: real_sleep(0.01 * x))
-    for module in (cluv.remote, cluv.slurm, cluv.cli.submit):
-        monkeypatch.setattr(module, "run", unittest.mock.AsyncMock(wraps=fake_run))
-    monkeypatch.setattr(cluv.cli.submit, sync_task_function.__name__, fake_sync_task_function)
     monkeypatch.setattr(
         cluv.cli.submit,
         prepare_sync.__name__,
-        unittest.mock.AsyncMock(
+        mock_prepare_sync := unittest.mock.AsyncMock(
             return_value=[cluv.remote.Remote(hostname=c) for c in (fast_cluster, slow_cluster)]
         ),
     )
@@ -790,6 +800,10 @@ async def test_submit_first_doesnt_wait_for_the_slowest_cluster_to_sync(
     # Nothing was ever submitted on the cluster that was still syncing when the race ended.
     assert submitted_on == [fast_cluster]
     assert slow_sync_was_cancelled
+    mock_prepare_sync.assert_awaited_once()
+    # Both clusters started syncing (the slow one just never got to finish).
+    assert mock_sync_task.await_count == 2
+    mock_run.assert_awaited()
 
 
 async def test_submit_first_returns_none_when_no_cluster_can_submit(
@@ -812,15 +826,21 @@ async def test_submit_first_returns_none_when_no_cluster_can_submit(
             program_and_args, returncode=1, stdout="", stderr="sbatch: error: Invalid account"
         )
 
-    for module in (cluv.remote, cluv.slurm, cluv.cli.submit):
-        monkeypatch.setattr(module, "run", unittest.mock.AsyncMock(wraps=fake_run))
+    # Both clusters go through SSH here (there's no "current" cluster to run locally on), so only
+    # `cluv.remote.run` is ever exercised; patching `cluv.slurm.run` / `cluv.cli.submit.run` too
+    # would be needless.
     monkeypatch.setattr(
-        cluv.cli.submit, sync_task_function.__name__, unittest.mock.AsyncMock(return_value=[])
+        cluv.remote, cluv.remote.run.__name__, mock_run := unittest.mock.AsyncMock(wraps=fake_run)
+    )
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        sync_task_function.__name__,
+        mock_sync_task := unittest.mock.AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
         cluv.cli.submit,
         prepare_sync.__name__,
-        unittest.mock.AsyncMock(
+        mock_prepare_sync := unittest.mock.AsyncMock(
             return_value=[cluv.remote.Remote(hostname=cluster) for cluster in clusters]
         ),
     )
@@ -835,3 +855,6 @@ async def test_submit_first_returns_none_when_no_cluster_can_submit(
         timeout=30,
     )
     assert returned_job is None
+    mock_prepare_sync.assert_awaited_once()
+    assert mock_sync_task.await_count == len(clusters)
+    mock_run.assert_awaited()

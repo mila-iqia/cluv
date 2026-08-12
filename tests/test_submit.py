@@ -595,10 +595,17 @@ async def test_submit_first_considers_current_cluster(
                 program_and_args, returncode=0, stdout=stdout, stderr=""
             )
 
+        # `ssh` to the other cluster: not just `("ssh", other_cluster, ...)`, since `Remote.run`
+        # inserts `-oControlMaster=...`-style multiplexing flags before the hostname whenever the
+        # local `~/.ssh/config` doesn't already set them (e.g. on a CI runner).
+        runs_via_ssh_to_other_cluster = (
+            program_and_args[0] == "ssh" and other_cluster in program_and_args
+        )
+
         print(f"Running command: {full_command}")
-        if full_command.startswith("bash --login -c '") and "sbatch --parsable" in full_command:
+        if not runs_via_ssh_to_other_cluster and "sbatch --parsable" in full_command:
             return _result(str(this_cluster_jobid))
-        if full_command.startswith(f"ssh {other_cluster}") and "sbatch --parsable" in full_command:
+        if runs_via_ssh_to_other_cluster and "sbatch --parsable" in full_command:
             return _result(str(other_cluster_jobid))
 
         # Querying for the job's state:
@@ -609,8 +616,9 @@ async def test_submit_first_considers_current_cluster(
             if this_cluster_wait_time > 0:
                 return _result("PENDING")
             return _result("RUNNING")
-        if full_command.startswith(
-            f"ssh {other_cluster} 'sacct -j {other_cluster_jobid} --format=State"
+        if (
+            runs_via_ssh_to_other_cluster
+            and f"sacct -j {other_cluster_jobid} --format=State" in full_command
         ):
             other_cluster_wait_time -= 1
             if scancel_received_on_other_cluster:
@@ -622,7 +630,8 @@ async def test_submit_first_considers_current_cluster(
         # Cancelling once the jobs are running.
         if (
             runs_first_on_current_cluster
-            and full_command == f"ssh {other_cluster} 'scancel {other_cluster_jobid}'"
+            and runs_via_ssh_to_other_cluster
+            and f"scancel {other_cluster_jobid}" in full_command
         ):
             scancel_received_on_other_cluster = True
             return _result("")
@@ -734,7 +743,10 @@ async def test_submit_first_doesnt_wait_for_the_slowest_cluster_to_sync(
             )
 
         if "sbatch --parsable" in full_command:
-            cluster = fast_cluster if f"ssh {fast_cluster}" in full_command else slow_cluster
+            # `Remote.run` inserts `-oControlMaster=...`-style multiplexing flags before the
+            # hostname whenever `~/.ssh/config` doesn't already set them (e.g. on a CI runner),
+            # so check the hostname's presence in the argument tuple rather than a fixed prefix.
+            cluster = fast_cluster if fast_cluster in program_and_args else slow_cluster
             submitted_on.append(cluster)
             return _result(str(fast_jobid if cluster == fast_cluster else slow_jobid))
         if f"sacct -j {fast_jobid}" in full_command:

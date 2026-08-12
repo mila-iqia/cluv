@@ -18,6 +18,7 @@ nav:
           - init: reference/cli/init.md
           - login: reference/cli/login.md
           - run: reference/cli/run.md
+          - sh: reference/cli/sh.md
           - submit: reference/cli/submit.md
           - status: reference/cli/status.md
           - sync: reference/cli/sync.md

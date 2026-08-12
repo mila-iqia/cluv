@@ -3,16 +3,16 @@
 Follows the same signature as the submitit launcher to make it easier to transition for researchers.
 
 + Allows launching jobs on remote slurm clusters.
+    + Job chunking (splitting a long job into multiple shorter jobs)
 + Syncs back results
 
-TODO: Also allows job packing (multiple runs per GPU) and job chunking (splitting a long job into multiple shorter jobs).
+
+TODO: Also allows job packing (multiple runs per GPU).
 """
 
 import asyncio
 import collections
-import itertools
 import logging
-import os.path
 import sys
 import time
 from collections.abc import Sequence
@@ -30,17 +30,17 @@ from hydra.core.utils import JobReturn, JobStatus
 from hydra.plugins.launcher import Launcher
 from hydra.types import HydraContext, TaskFunction
 from omegaconf import DictConfig, OmegaConf
-from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-from submitit import SlurmJob
 from submitit.slurm.slurm import SlurmExecutor, _make_sbatch_string
 
 from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.submit import display_commands, submit
-from cluv.cli.sync import expandvars, fetch_results, get_active_remotes, sync
+from cluv.cli.sync import fetch_results, get_active_remotes, sync
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config
 from cluv.job import JobInfo, RunInfo, current_run_info, get_results_path, get_run_id
 from cluv.remote import Remote
-from cluv.utils import current_cluster, set_context
+from cluv.utils import batched, current_cluster, set_context
+
+from .submitit_job import get_job_state, is_job_done
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +86,7 @@ class CluvLauncher(Launcher):
         job_script: str | Path | None = None,
         autocommit: bool = False,
         vram_gb: int | None = None,  # Enables job packing!
-        checkpointing: bool = False,  # Enables job chunking (via job arrays!)
+        chunking: bool = False,  # Enables job chunking (via job arrays!)
         ## Submitit arguments:
         account: str | None = None,
         array_parallelism: int = 256,
@@ -139,8 +139,8 @@ class CluvLauncher(Launcher):
             autocommit: Whether to create a commit instead of raising an error, if the git workspace is dirty.
             vram_gb:  The required amount of GPU memory (VRAM) per run.
                 TODO: This will be used to automatically stack multiple runs per GPU in the future.
-            checkpointing: Whether the submitted job has checkpointing support.
-                TODO: This will be used to automatically chunk the jobs into shorter slices for faster execution in the future.
+            chunking: Whether the submitted job has checkpointing support with chunking.
+                This will be used to automatically chunk the jobs into shorter slices for faster execution.
             array_parallelism: Maximum number of simultaneously running jobs.
             comment: Passed down to `sbatch` as the argument of the same name. (Same as the submitit launcher).
             constraint:     Passed down to `sbatch`. Same as the submitit launcher.
@@ -203,7 +203,7 @@ class CluvLauncher(Launcher):
         self.autocommit = autocommit
 
         self.vram_gb = vram_gb
-        self.checkpointing = checkpointing
+        self.chunking = chunking
 
         if setup:
             # TODO: Check if the lines are already in the job script, and if so, just ignore the fact that it is set here.
@@ -243,7 +243,6 @@ class CluvLauncher(Launcher):
                 raise ValueError(f"Can't use both timeout_min ({timeout_min}) and time ({time}).")
             # An int is interpreted as a number of minutes (See https://slurm.schedmd.com/sbatch.html#OPT_time)
             time = str(timeout_min)
-            timeout_min = None
 
         if tasks_per_node is not None:
             if ntasks_per_node is not None:
@@ -298,7 +297,6 @@ class CluvLauncher(Launcher):
         self.cluster_remotes: dict[str, Remote | None] = {}
         self.cluv_config: CluvConfig | None = None
 
-        self.chunking = self.checkpointing
         self.packing = self.vram_gb is not None
         try:
             self._loop = asyncio.get_running_loop()
@@ -376,10 +374,10 @@ class CluvLauncher(Launcher):
             first_job_idx = initial_job_idx
             job_results: list[JobReturn] = []
             for batch_index, job_overrides_batch in enumerate(
-                itertools.batched(job_overrides, array_parallelism or len(job_overrides))
+                batched(job_overrides, array_parallelism or len(job_overrides))
             ):
                 logger.debug(f"Launching batch #{batch_index} of {len(job_overrides_batch)} jobs.")
-                job_batch_results = await self.launch_jobs(job_overrides_batch, first_job_idx)
+                job_batch_results = await self.launch_jobs(job_overrides_batch)
                 job_results.extend(job_batch_results)
 
                 first_job_idx += len(job_overrides_batch)
@@ -390,9 +388,7 @@ class CluvLauncher(Launcher):
             _launch_jobs(job_overrides, array_parallelism=self.array_parallelism)
         )
 
-    async def launch_jobs(
-        self, job_overrides: Sequence[Sequence[str]], initial_job_idx: int
-    ) -> list[JobReturn]:
+    async def launch_jobs(self, job_overrides: Sequence[Sequence[str]]) -> list[JobReturn]:
         assert self.cluv_config, "setup should have been called"
         assert self.cluster_remotes, "setup should have been called"
         assert self.task_function, "setup should have been called"
@@ -456,7 +452,7 @@ class CluvLauncher(Launcher):
             job_script=job_script,
             autocommit=self.autocommit,
             sbatch_args=sbatch_args,
-            chunking=self.checkpointing,
+            chunking=self.chunking,
             packing=self.packing,
         )
         results_path = get_results_path()
@@ -483,27 +479,6 @@ async def run_sweep(
     chunking: bool,
     packing: bool,
 ) -> list[JobInfo]:
-    if cluster == "first":
-        # submit_first adds the `SBATCH_OUTPUT` env var that should work as expected.
-        output_args = []
-    else:
-        _cluster_remote = cluster_remotes[cluster]
-        _cluster_results_dir = cluv_config.get_cluster_config(cluster).results_path
-        if _cluster_remote:
-            _cluster_results_dir = await expandvars(_cluster_remote, _cluster_results_dir)
-        else:
-            # no remote, we are using the current cluster
-            _cluster_results_dir = Path(os.path.expandvars(_cluster_results_dir))
-        _runid_template = get_run_id(
-            cluster=cluster,
-            job_id="%j",
-            task_index="%t",
-            array_job_id="%A" if chunking else None,
-            doing_job_packing=packing,
-            doing_job_chunking=chunking,
-        )
-        # TODO: If we leave the '%t' in the output file path, there are weird generated files?
-        output_args = [f"--output={_cluster_results_dir}/{_runid_template}/%j.out"]
 
     local_results_dir = get_results_path()
     sbatch_flags = [f"{k}={v}" if v is not None else f"{k}" for k, v in sbatch_args.items()]
@@ -523,9 +498,10 @@ async def run_sweep(
                 # We will have to think about this once we add job packing with --ntasks-per-gpu, which will
                 # conflict with the `--gpus-per-task` flag which might be hard-coded in the job script header.
                 # At that point, maybe we shouldn't have much in the job script header, and have cluv add almost everything via sbatch args?
-                sbatch_args=sbatch_flags + output_args,
+                sbatch_args=sbatch_flags,
                 program_args=job_command,
                 autocommit=autocommit,
+                chunking=chunking,
                 _skip_sync=True,
             )
         if job is None:
@@ -535,7 +511,7 @@ async def run_sweep(
         cluster = job.cluster
         job_id = job.job_id
 
-        assert not chunking and not packing  # jobid is the "run id" for now.
+        assert not packing  # jobid is the "run id" for now.
         run_id = get_run_id(
             cluster=cluster,
             job_id=job_id,
@@ -548,14 +524,11 @@ async def run_sweep(
 
         # The path where the remote results will be synced locally.
         local_job_results_path = local_results_dir / run_id
-        # where they came from on the remote.
-        # _cluster_job_results_path = cluster_results_dir / run_id
 
         # TODO: Unclear if we should just reuse Job or if we actually need something like JobInfo.
-        job = JobInfo(
+        job_info = JobInfo(
             cluster=cluster,
-            job_id=job_id,
-            array_job_id=None,
+            job_id=str(job_id),
             tasks=[
                 RunInfo(
                     cluster=cluster,
@@ -564,8 +537,9 @@ async def run_sweep(
                     command=job_command,
                 )
             ],
+            n_chunks=job.n_chunks,
         )
-        job_infos.append(job)
+        job_infos.append(job_info)
 
     # Creates a rich.Live table and updates it as the status of the jobs change.
     await monitor_jobs_async(job_infos, poll_interval_seconds=30)
@@ -608,17 +582,15 @@ def _jobs_to_hydra_jobreturn_format(
             except ValueError:
                 pass
 
-            logger.info(f"Run {run.run_id} finished ({job.state}): Output: {output_file}")
-            job_status = JobStatus.COMPLETED if job.state == "COMPLETED" else JobStatus.FAILED
+            job_state = get_job_state(job)
+            logger.info(f"Run {run.run_id} finished ({job_state}): Output: {output_file}")
+            job_status = JobStatus.COMPLETED if job_state == "COMPLETED" else JobStatus.FAILED
             job_returns.append(
                 JobReturn(
                     overrides=run.command,
                     working_dir=str(run.results_path),
                     status=job_status,
                     _return_value=(
-                        # submitit.core.utils.FailedJobError(
-                        #     f"Job {run.run_id} failed, see the output file {out} for more info."
-                        # )
                         # Mimic the output produced by the submitit launcher in case of error, which includes the error file.
                         submitit.core.utils.FailedJobError(
                             f"Job (task={task_id}) failed during processing with trace:\n"
@@ -648,11 +620,12 @@ def get_jobs_table(
     )
 
     table.add_column("Run id", style="bold")
-    table.add_column("Command", justify="right")
-    table.add_column("State", justify="right")
-    table.add_column("Output File", justify="right")
+    table.add_column("Command")
+    table.add_column("State")
+    table.add_column("Output File")
 
     for job in job_infos:
+        job_state = get_job_state(job)
         for task_id, run in enumerate(job.tasks):
             out = next(
                 (
@@ -669,9 +642,8 @@ def get_jobs_table(
             table.add_row(
                 run.run_id,
                 " ".join(run.command),
-                job.state,
+                job_state,
                 str(out),
-                # style=row_style
                 end_section=(task_id == len(job.tasks) - 1),
             )
 
@@ -680,12 +652,11 @@ def get_jobs_table(
 
 def _build_monitoring_table(
     jobs: Sequence[JobInfo],
-    submitit_jobs: Sequence[SlurmJob | RemoteSlurmJob],
     monitoring_start_time: float,
 ) -> rich.table.Table:
     elapsed_minutes = int((time.time() - monitoring_start_time) / 60)
     table = rich.table.Table(
-        title=f"Monitoring {len(jobs)} jobs (elapsed: {elapsed_minutes}min)",
+        title=f"Monitoring {len(jobs)} jobs (elapsed: {elapsed_minutes} min)",
         box=rich.box.ROUNDED,
         header_style="bold white on #1a1a2e",
         title_style="bold cyan",
@@ -693,18 +664,18 @@ def _build_monitoring_table(
     )
     table.add_column("Cluster", style="bold")
     table.add_column("Run id", style="bold")
-    table.add_column("Command", justify="right")
-    table.add_column("State", justify="right")
-    for job, submitit_job in zip(jobs, submitit_jobs):
+    table.add_column("Command")
+    table.add_column("State")
+    for job in jobs:
+        job_state = get_job_state(job)
         run = job.tasks[0]
-        table.add_row(run.cluster, run.run_id, " ".join(run.command), submitit_job.state)
+        table.add_row(run.cluster, run.run_id, " ".join(run.command), job_state)
     return table
 
 
 async def monitor_jobs_async(
     jobs: Sequence[JobInfo],
     poll_interval_seconds: float = 30,
-    test_mode: bool = False,
 ) -> None:
     """Async version of `monitor_jobs` from submitit.
 
@@ -718,70 +689,41 @@ async def monitor_jobs_async(
     poll_frequency: int
         The time (in seconds) between two refreshes of the monitoring.
         Can't be inferior to 30s.
-    test_mode: bool
-        If in test mode, we do not check the length of poll_frequency
     """
-    here = current_cluster()
-    if not test_mode:
-        assert poll_interval_seconds >= 30, (
-            "You can't refresh too often (>= 30s) to avoid overloading squeue"
-        )
+    assert poll_interval_seconds >= 30, (
+        "You can't refresh too often (>= 30s) to avoid overloading squeue"
+    )
 
-    n_jobs = len(jobs)
-    if n_jobs == 0:
+    if len(jobs) == 0:
         print("There are no jobs to monitor")
         return
 
-    submitit_jobs = [
-        RemoteSlurmJob(
-            job.cluster,
-            # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
-            folder=job.tasks[0].results_path,
-            job_id=str(job.job_id),
-            tasks=list(range(len(job.tasks))),
-            remote_dir_sync=None,  # type: ignore
-        )
-        if job.cluster != here
-        else SlurmJob(
-            # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
-            folder=job.tasks[0].results_path,
-            job_id=str(job.job_id),
-            tasks=list(range(len(job.tasks))),
-        )
-        for job in jobs
-    ]
-
     monitoring_start_time = time.time()
     with rich.live.Live(
-        _build_monitoring_table(jobs, submitit_jobs, monitoring_start_time),
+        _build_monitoring_table(jobs, monitoring_start_time),
         refresh_per_second=4,
     ) as live:
         while True:
-            if not test_mode:
-                # Call [Remote]SlurmJob.get_info(mode="force") once for each cluster.
-                # For RemoteSlurmJob, this calls sacct over ssh. For SlurmJob, it uses
-                # sacct locally.
-                for cluster, job in {
-                    (job.cluster if isinstance(job, RemoteSlurmJob) else None): job
-                    for job in submitit_jobs
-                }.items():
-                    logger.debug(f"Calling sacct for cluster {cluster} to update job info.")
-                    job.get_info(mode="force")  # Force update once to sync the state
             state_jobs = collections.defaultdict(set)
-            for i, job in enumerate(submitit_jobs):
-                state_jobs[job.state.upper()].add(i)
-                if job.done():
+            for i, job in enumerate(jobs):
+                job_state = get_job_state(job)
+                state_jobs[job_state].add(i)
+
+                if is_job_done(job):
                     state_jobs["DONE"].add(i)
 
-            live.update(_build_monitoring_table(jobs, submitit_jobs, monitoring_start_time))
+            live.update(_build_monitoring_table(jobs, monitoring_start_time))
 
-            if len(state_jobs["DONE"]) == len(submitit_jobs):
+            if len(state_jobs["DONE"]) == len(jobs):
                 break
 
             await asyncio.sleep(poll_interval_seconds)
 
     failed_job_indices = sorted(state_jobs["FAILED"])
-    print(f"All jobs finished, jobs with indices {failed_job_indices} failed", flush=True)
+    print("All jobs finished.", flush=True)
+    if len(failed_job_indices) > 0:
+        print(f"Jobs with indices {failed_job_indices} failed.", flush=True)
+
     print(
         f"Whole process is finished, took {int((time.time() - monitoring_start_time) / 60)} minutes"
     )
@@ -790,19 +732,7 @@ async def monitor_jobs_async(
 @hydra_zen.hydrated_dataclass(
     target=CluvLauncher, populate_full_signature=True, hydra_convert="object"
 )
-class CluvLauncherConfig:
-    ...
-
-    # cluster: str
-
-
-# CluvLauncherConfig = hydra_zen.builds(
-#     CluvLauncher,
-#     populate_full_signature=True,
-#     # zen_partial=True,
-#     hydra_convert="object",
-#     zen_dataclass={"cls_name": "CluvLauncherConfig"},
-# )
+class CluvLauncherConfig: ...
 
 
 # # Interesting idea: Create the config based on the signature of that function directly.

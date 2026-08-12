@@ -22,7 +22,7 @@ def init(path: Path | None = None) -> None:
 
     This does the following:
 
-    * Runs `uv init --package --build-backend hatch --python 3.13` to initialize a new uv project
+    * Runs `uv init --package --build-backend hatch --python 3.11` to initialize a new uv project
       in the current directory (if there isn't one already).
     * Adds a default configuration for Cluv in the `[tool.cluv]` section of pyproject.toml.
     * Adds job script templates in the `scripts/` directory of the project.
@@ -103,7 +103,7 @@ def run_uv_init() -> None:
     Try to run the uv init command. If the command fails because a pyproject.toml file
     already exists, continue. Otherwise, raise an error.
     """
-    command = ["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.13"]
+    command = ["uv", "init", "--package", "--build-backend", "hatch", "--python", "3.11"]
     console.log(" ".join(command))
 
     uv_init = subprocess.run(command, capture_output=True, text=True)

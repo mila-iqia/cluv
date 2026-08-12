@@ -21,6 +21,7 @@ import rich_argparse
 import simple_parsing
 
 from . import __version__
+from .cli.cache import show as show_cache
 from .cli.clean import clean
 from .cli.disable import disable, enable
 from .cli.init import init
@@ -93,6 +94,8 @@ def main(argv: list[str] | None = None) -> None:
     enable_parser = add_enable_args(subparsers)
     _add_v_arg(enable_parser)
 
+    add_cache_args(subparsers)
+
     args = parser.parse_args(argv)
     args_dict = vars(args)
 
@@ -101,6 +104,7 @@ def main(argv: list[str] | None = None) -> None:
     quiet: bool = max(args_dict.pop("quiet", False), args_dict.pop("_quiet", False))
     setup_logging(verbose=verbose, quiet=quiet)
     subcommand = args_dict.pop("<command>")
+    args_dict.pop("<cache_command>", None)
     function: Callable = args_dict.pop("func")
 
     if subcommand == "submit":
@@ -378,6 +382,24 @@ def add_enable_args(subparsers: Subparsers):
     )
     enable_parser.set_defaults(func=enable)
     return enable_parser
+
+
+def add_cache_args(subparsers: Subparsers):
+    cache_parser = subparsers.add_parser(
+        "cache",
+        help="Inspect the local cache.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    cache_subparsers = cache_parser.add_subparsers(dest="<cache_command>", required=True)
+
+    show_parser = cache_subparsers.add_parser(
+        "show",
+        help="Display the current contents of the local cache.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    show_parser.set_defaults(func=show_cache)
+    _add_v_arg(show_parser)
+    return cache_parser
 
 
 def setup_logging(verbose: int | None, quiet: bool = False) -> None:

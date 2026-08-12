@@ -150,7 +150,7 @@ See the ["Configuring job submission"](guides/submit-config.md) guide for more i
 
 **Usage**
 ```console
-cluv submit [options] <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]
+cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 ```
 
 **Arguments**
@@ -173,6 +173,11 @@ cluv submit [options] <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]
 
 `--autocommit`
 :   Automatically create a local commit with the tracked changes before submitting, instead of failing when the working tree is dirty.
+
+`--chunking`
+:   Split the submitted job into an array of smaller consecutive jobs ("chunks"), based on the requested time.
+    Before using this option, make sure that checkpointing is implemented in your code so it can be restarted at any step.
+    Default size of a chunk is 3 hours. For example, a job of 12h will be split into 4 jobs of 3h.
 
 ---
 

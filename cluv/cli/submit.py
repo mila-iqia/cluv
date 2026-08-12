@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import datetime
 import logging
 import os
@@ -9,19 +8,24 @@ import shlex
 import subprocess
 import sys
 from contextvars import ContextVar
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 import rich.syntax
 import rich.table
 import rich.text
 from rich.live import Live
-from typing_extensions import TypeVar
 
 from cluv.cache import Job, save_job
+from cluv.cli.submit_utils.chunking import chunking_update_sbatch_args, get_n_chunks
+from cluv.cli.submit_utils.first import (
+    cancel_job,
+    wait_for_jobs_to_cancel,
+    wait_for_running_job,
+)
 from cluv.cli.sync import get_active_remotes, sync
 from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
-from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
@@ -29,7 +33,16 @@ logger = logging.getLogger(__name__)
 __all__ = ["submit"]
 display_commands = ContextVar("display_commands", default=True)
 raise_on_command_error = ContextVar("raise_on_command_error", default=False)
-PathT = TypeVar("PathT", Path, PurePosixPath, default=PurePosixPath)
+
+
+@dataclass(frozen=True)
+class ResolvedSbatchArgs:
+    """The resolved sbatch arguments after merging the config and the command-line args, and the
+    external information we can infer from them, such as the number of chunks for chunked jobs
+    when calling get_sbatch_command()."""
+
+    sbatch_args: list[str]
+    n_chunks: int | None = None
 
 
 def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
@@ -68,7 +81,7 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     return flags
 
 
-@dataclasses.dataclass(frozen=True, kw_only=True)
+@dataclass(frozen=True, kw_only=True)
 class Submission:
     """One job to submit: on which cluster, over which connection, and with which sbatch flags."""
 
@@ -93,6 +106,7 @@ async def submit(
     sbatch_args: list[str],
     program_args: list[str],
     autocommit: bool = False,
+    chunking: bool = False,
     _skip_sync: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
@@ -115,6 +129,7 @@ async def submit(
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
+        chunking: Whether to split the job up into multiple consecutive short jobs.
         _skip_sync: If True, skip the synchronization step before submitting.
 
     Returns:
@@ -149,7 +164,7 @@ async def submit(
 
     if cluster == "first":
         job = await submit_first(
-            job_script, sbatch_args, program_args, git_commit, _skip_sync=_skip_sync
+            job_script, sbatch_args, program_args, git_commit, chunking, _skip_sync=_skip_sync
         )
         if job:
             save_job(job)
@@ -171,6 +186,7 @@ async def submit(
         # Submitting to the current cluster. The sbatch command will run locally.
         remote = None
 
+
     allocations = get_cluv_config().get_cluster_config(cluster).sbatch_args
     if len(allocations) > 1:
         # More than one allocation is configured for this cluster: submit one job per allocation
@@ -188,38 +204,28 @@ async def submit(
             sbatch_args=sbatch_args,
             program_args=program_args,
             git_commit=git_commit,
+            chunking=chunking,
         )
         if job:
             save_job(job)
         return job
 
     (config_sbatch_args,) = allocations
-    result = await sbatch(
-        remote, job_script, sbatch_args, program_args, git_commit, config_sbatch_args
+    result, job = await sbatch(
+        remote, job_script, sbatch_args, program_args, git_commit,
+        config_sbatch_args=config_sbatch_args, chunking=chunking,
     )
-    submit_time = datetime.datetime.now()
 
-    if result.returncode != 0:
+    if result.returncode != 0 or job is None:
         console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
-        return None
+    else:
+        save_job(job)
 
-    job_id = int(result.stdout.strip())
-    job = Job(
-        job_id=job_id,
-        cluster=cluster,
-        job_script=str(job_script),
-        git_commit=git_commit,
-        sbatch_args=sbatch_args_from_dict(config_sbatch_args) + sbatch_args,
-        program_args=program_args,
-        submitted_at=submit_time.isoformat(),
-    )
-    save_job(job)
-
-    console.log(
-        f"Successfully submitted job {job_id} on the {cluster} cluster.\n"
-        f"Use `ssh {cluster} sacct -j {job_id}` to view its status, and `cluv sync {cluster}` to "
-        f"fetch results once it is complete."
-    )
+        console.log(
+            f"Successfully submitted job {job.job_id} on the {cluster} cluster.\n"
+            f"Use `ssh {cluster} sacct -j {job.job_id}` to view its status, and `cluv sync {cluster}` to "
+            f"fetch results once it is complete."
+        )
 
     return job
 
@@ -229,6 +235,7 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    chunking: bool,
     _skip_sync: bool = False,
 ) -> Job | None:
     """Submit the job on all clusters (and on every allocation of each cluster), and wait until one
@@ -266,7 +273,8 @@ async def submit_first(
         for config_sbatch_args in config.get_cluster_config(cluster).sbatch_args
     ]
     return await submit_and_keep_first(
-        submissions, sbatch_args=sbatch_args, program_args=program_args, git_commit=git_commit
+        submissions, sbatch_args=sbatch_args, program_args=program_args, git_commit=git_commit,
+        chunking=chunking,
     )
 
 
@@ -275,6 +283,7 @@ async def submit_and_keep_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
+    chunking: bool = False,
 ) -> Job | None:
     """Submit all the given jobs, wait until one of them starts, then cancel the others.
 
@@ -289,6 +298,7 @@ async def submit_and_keep_first(
             program_args,
             git_commit,
             submission.config_sbatch_args,
+            chunking,
         )
         for submission in submissions
     ]
@@ -301,39 +311,38 @@ async def submit_and_keep_first(
                 program_args=program_args,
                 git_commit=git_commit,
                 config_sbatch_args=submission.config_sbatch_args,
+                chunking=chunking,
             )
             for submission in submissions
         ],
         return_exceptions=True,
     )
-    submit_time = datetime.datetime.now()
 
     # `sacct` and `scancel` are run on the cluster of the job, whatever its allocation.
     cluster_to_remote = {submission.cluster: submission.remote for submission in submissions}
     # Only show the allocation of each job when some cluster has more than one.
     show_allocations = len(cluster_to_remote) < len(submissions)
 
-    submitted: list[tuple[Submission, int]] = []
+    job_to_state: dict[Job, str] = {}
     table = rich.table.Table(
         "Cluster",
         *(["Allocation"] if show_allocations else []),
         "Result",
         title="Jobs submitted on the clusters",
     )
-    for submission, sbatch_command, sbatch_result in zip(
+    for submission, sbatch_command_tuple, sbatch_result in zip(
         submissions, sbatch_commands, sbatch_results
     ):
-        if isinstance(sbatch_result, BaseException) or sbatch_result.returncode != 0:
-            error_message = (
-                str(sbatch_result)
-                if isinstance(sbatch_result, BaseException)
-                else sbatch_result.stderr.strip()
-            )
-            output_text = rich.text.Text(f"Error: {error_message}", style="red")
+        sbatch_command, _ = sbatch_command_tuple
+        if isinstance(sbatch_result, BaseException):
+            output_text = rich.text.Text(f"Error: {sbatch_result}", style="red")
         else:
-            job_id = int(sbatch_result.stdout.strip())
-            submitted.append((submission, job_id))
-            output_text = rich.text.Text(f"Job ID: {job_id}", style="green")
+            result, job = sbatch_result
+            if result.returncode != 0 or job is None:
+                output_text = rich.text.Text(f"Error: {result.stderr.strip()}", style="red")
+            else:
+                job_to_state[job] = "UNKNOWN"
+                output_text = rich.text.Text(f"Job ID: {job.job_id}", style="green")
         table.add_row(
             submission.cluster,
             *([submission.allocation] if show_allocations else []),
@@ -343,22 +352,18 @@ async def submit_and_keep_first(
             ),
             end_section=True,
         )
-
     console.print(table)
 
-    if not submitted:
+    if not job_to_state:
         console.print("No job submitted on clusters. See errors above.")
         return None
 
     # Wait for a job to start on a cluster.
     # If the wait is interrupted, cancel all jobs.
-    first_running_job: JobHandle | None = None
+    first_running_job: Job | None = None
 
     max_wait_time_seconds = 5
 
-    cluster_and_jobid_to_jobstate: dict[tuple[str, int], str] = {
-        (submission.cluster, job_id): "UNKNOWN" for submission, job_id in submitted
-    }
     cancelling = False
 
     def make_table() -> rich.table.Table:
@@ -370,16 +375,16 @@ async def submit_and_keep_first(
             if not cancelling
             else "Waiting for jobs to cancel...",
         )
-        for (cluster, job_id), job_state in cluster_and_jobid_to_jobstate.items():
+        for job, state in job_to_state.items():
             table.add_row(
-                cluster,
-                str(job_id),
+                job.cluster,
+                str(job.job_id),
                 rich.text.Text(
-                    job_state,
+                    state,
                     style="green"
-                    if job_state.startswith(("RUNNING", "COMPLETED", "CANCELLED"))
+                    if state.startswith(("RUNNING", "COMPLETED", "CANCELLED"))
                     else "yellow"
-                    if job_state.startswith(("PENDING", "UNKNOWN"))
+                    if state.startswith(("PENDING", "UNKNOWN"))
                     else "red",
                 ),
             )
@@ -387,21 +392,23 @@ async def submit_and_keep_first(
 
     try:
         with Live(get_renderable=make_table, console=console, refresh_per_second=1) as live:
-            first_running_job = await wait_for_running_job(
-                cluster_and_jobid_to_jobstate, cluster_to_remote, max_wait_time_seconds
+            wait_result = await wait_for_running_job(
+                job_to_state, cluster_to_remote, max_wait_time_seconds
             )
             live.update(make_table(), refresh=True)  # probably not entirely necessary.
-            if not first_running_job:
+            if not wait_result:
                 console.log("All submitted jobs have failed! Exiting.")
                 return None
 
+            first_running_job, first_state = wait_result
+
             console.log(
-                f"Job {first_running_job.job_id} on cluster {first_running_job.cluster} is {first_running_job.state}. "
+                f"Job {first_running_job.job_id} on cluster {first_running_job.cluster} is {first_state}. "
                 f"Cancelling the other jobs...\n",
             )
             cancelling = True
             await wait_for_jobs_to_cancel(
-                cluster_and_jobid_to_jobstate,
+                job_to_state,
                 first_running_job,
                 cluster_to_remote,
                 max_wait_time_seconds,
@@ -410,9 +417,9 @@ async def submit_and_keep_first(
 
         console.print(
             f"Successfully cancelled all other jobs except for job {first_running_job.job_id} "
-            f"on cluster {first_running_job.cluster}, which is {first_running_job.state}."
+            f"on cluster {first_running_job.cluster}, which is {first_state}."
         )
-        if first_running_job.state.startswith("RUNNING"):
+        if first_state.startswith("RUNNING"):
             console.print(
                 f"Use `ssh {first_running_job.cluster} sacct -j {first_running_job.job_id}` to view its status."
             )
@@ -422,149 +429,18 @@ async def submit_and_keep_first(
 
     except (KeyboardInterrupt, asyncio.CancelledError, Exception):
         console.log("Interrupted by user. Cancelling all jobs...")
-        to_cancel = [(submission.cluster, job_id) for submission, job_id in submitted]
+        to_cancel = list(job_to_state.keys())
         if first_running_job:
-            to_cancel.remove((first_running_job.cluster, first_running_job.job_id))
+            to_cancel.remove(first_running_job)
         await asyncio.gather(
             *[
-                cancel_job(cluster_to_remote[cluster], job_id, print=True)
-                for cluster, job_id in to_cancel
+                cancel_job(cluster_to_remote[job.cluster], job.job_id, print=True)
+                for job in to_cancel
             ]
         )
         return None
 
-    # TODO: Return the cluster and job id.
-    assert first_running_job
-    winner = next(
-        submission
-        for submission, job_id in submitted
-        if (submission.cluster, job_id) == (first_running_job.cluster, first_running_job.job_id)
-    )
-    return Job(
-        job_id=first_running_job.job_id,
-        cluster=first_running_job.cluster,
-        job_script=str(winner.job_script),
-        git_commit=git_commit,
-        sbatch_args=sbatch_args_from_dict(winner.config_sbatch_args) + sbatch_args,
-        program_args=program_args,
-        submitted_at=submit_time.isoformat(),
-    )
-
-
-@dataclasses.dataclass(frozen=True)
-class JobHandle:
-    cluster: str
-    job_id: int
-    state: str
-
-
-async def wait_for_running_job(
-    cluster_and_jobid_to_jobstate: dict[tuple[str, int], str],
-    cluster_to_remote: dict[str, Remote | None],
-    max_wait_time_seconds: int = 60,
-) -> JobHandle | None:
-    """Watch the jobs with sacct until one of them starts (or completes)."""
-
-    first_running_job: JobHandle | None = None
-    wait_time = 1
-
-    to_query = list(cluster_and_jobid_to_jobstate.keys())
-
-    while first_running_job is None and to_query:
-        # Initial sleep after sbatch to give time for job to appear in sacct.
-        await asyncio.sleep(wait_time)
-        wait_time = min(wait_time * 2, max_wait_time_seconds)
-
-        job_states = await asyncio.gather(
-            *(run_sacct(cluster_to_remote[cluster], job_id) for cluster, job_id in to_query)
-        )
-
-        for (cluster, job_id), job_state in zip(to_query.copy(), job_states):
-            if (previous_state := cluster_and_jobid_to_jobstate[(cluster, job_id)]) != job_state:
-                console.print(
-                    f"Job {job_id} on cluster {cluster}: {previous_state} -> {job_state}"
-                )
-            cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
-            if job_state.startswith(("RUNNING", "COMPLETED")):
-                return JobHandle(job_id=job_id, cluster=cluster, state=job_state)
-            if job_state in FAILED_JOB_STATES:
-                to_query.remove((cluster, job_id))
-    # If all failed, `cluster_and_jobid_to_jobstate` is empty.
-    assert not to_query
-    return None
-
-
-async def wait_for_jobs_to_cancel(
-    cluster_and_jobid_to_jobstate: dict[tuple[str, int], str],
-    first_running_job: JobHandle,
-    cluster_to_remote: dict[str, Remote | None],
-    max_wait_time_seconds: int = 60,
-) -> JobHandle | None:
-    start_wait_time = 5
-    to_cancel = list(cluster_and_jobid_to_jobstate.keys())
-    to_cancel.remove((first_running_job.cluster, first_running_job.job_id))
-
-    job_states = await asyncio.gather(
-        *(run_sacct(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
-    )
-    for (cluster, job_id), job_state in zip(to_cancel, job_states):
-        logger.info(f"Job {job_id} on cluster {cluster} state: {job_state}")
-        job_state = clean_job_state(job_state)
-        cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
-
-    to_cancel = [
-        (cluster, job_id)
-        for (cluster, job_id), job_state in zip(to_cancel, job_states)
-        if not job_state.startswith(("CANCELLED", "COMPLETED"))
-    ]
-
-    logger.info(f"Need to cancel the following jobs: {to_cancel}")
-
-    await asyncio.gather(
-        *[
-            cancel_job(cluster_to_remote[cluster], job_id, print=True)
-            for cluster, job_id in to_cancel
-        ]
-    )
-
-    wait_time = min(start_wait_time, max_wait_time_seconds)
-
-    while not all(
-        cluster_and_jobid_to_jobstate[cluster_jobid].startswith(
-            tuple(["CANCELLED"] + FAILED_JOB_STATES)
-        )
-        for cluster_jobid in to_cancel.copy()
-    ):
-        # Initial sleep after scancel to give time for job to be cancelled.
-        await asyncio.sleep(wait_time)
-        wait_time = min(wait_time * 2, max_wait_time_seconds)
-
-        job_states = await asyncio.gather(
-            *(run_sacct(cluster_to_remote[cluster], job_id) for cluster, job_id in to_cancel)
-        )
-        logger.debug(f"Job states: {job_states}")
-
-        for (cluster, job_id), job_state in zip(to_cancel, job_states):
-            logger.info(f"Job {job_id} on cluster {cluster} is in state: {job_state}")
-            if job_state.startswith("CANCELLED by"):
-                job_state = "CANCELLED"  # just to avoid confusing users.
-            if job_state == "FAILED":
-                # Cheat slightly, but it's fine because this is usually just one of the job
-                # steps that is marked "FAILED" in sacct on some clusters, while the others are
-                # marked "CANCELLED". With "FAILED" in red, users might get a bit worried.
-                job_state = "CANCELLED"
-            cluster_and_jobid_to_jobstate[(cluster, job_id)] = job_state
-            if job_state.startswith(("CANCELLED", "COMPLETED")):
-                console.print(f"Job {job_id} on cluster {cluster} is now {job_state}.")
-                to_cancel.remove((cluster, job_id))
-                # TODO: Do we remove the jobs from the table if they failed?
-                # Also remove from `cluster_to_jobid` so the ctrl+c handler below doesn't
-                # try to cancel it again.
-                # cluster_and_jobid_to_jobstate.pop((cluster, job_id))
-    console.print(
-        f"Successfully cancelled all other jobs except for job {first_running_job.job_id} on "
-        f"cluster {first_running_job.cluster}."
-    )
+    return first_running_job
 
 
 def build_submit_command(
@@ -620,8 +496,9 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
             create_submit_commit(submit_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
             console.print(
-                "[red]Working directory is dirty. Please commit your changes before submitting, "
-                "or use `--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).[/red]",
+                "Working directory is dirty. Please commit your changes before submitting, "
+                "or use `--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).",
+                style="red",
             )
             sys.exit(1)
 
@@ -642,7 +519,8 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
             if remote_head_result.returncode == 0:
                 return remote_head_result.stdout.strip()
             console.log(
-                f"[yellow]Could not resolve {remote_head_ref}. Falling back to local HEAD commit.[/yellow]"
+                f"Could not resolve {remote_head_ref}. Falling back to local HEAD commit.",
+                style="yellow",
             )
 
     # Capture current commit hash.
@@ -658,7 +536,9 @@ def get_job_script_path_from_config(cluster: str) -> Path | PurePosixPath | None
     return job_script_path
 
 
-def _check_job_script_not_none(job_script: PathT | None, cluster: str) -> PathT:
+def _check_job_script_not_none(
+    job_script: Path | PurePosixPath | None | None, cluster: str
+) -> Path | PurePosixPath:
     if job_script is None:
         raise ValueError(
             f"No job script was provided and no [tool.cluv] job_script_path is configured for {cluster}."
@@ -688,9 +568,11 @@ def get_sbatch_command(
     program_args: list[str],
     git_commit: str,
     config_sbatch_args: SbatchArgs | None = None,
-) -> str:
+    chunking: bool = False,
+) -> tuple[str, ResolvedSbatchArgs]:
     """
-    Generate the command to submit the job via sbatch on the remote cluster, with the appropriate env vars set.
+    Generate the command to submit the job via sbatch on the remote cluster, with the appropriate
+    sbatch_arguments, environment variables and paths set.
 
     `config_sbatch_args` selects which of the cluster's allocations to use. Defaults to the first
     one when not passed.
@@ -714,26 +596,32 @@ def get_sbatch_command(
     env_vars: dict[str, str] = {**config.env}
     env_vars.update(cluster_config.env)
 
+    # The sbatch args from the config are overwritten by the ones passed to the submit command.
+    if config_sbatch_args is None:
+        config_sbatch_args = cluster_config.sbatch_args[0]
+    sbatch_args = sbatch_args_from_dict(config_sbatch_args) + sbatch_args
+
     # Prefix the job name with "cluv-" so it is easy to identify cluv-submitted jobs in sacct.
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
-    in_job_chunking = False
     in_job_packing = False
-    assert not in_job_chunking and not in_job_packing, "todo"
+    assert not in_job_packing, "todo"
     # might contain unresolved env vars.
     cluster_results_path = PurePosixPath(cluster_config.results_path)
+    n_chunks = None
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
-    if not any("--output" in flag for flag in sbatch_args):
-        if in_job_chunking:
-            assert not in_job_packing, "can't do both right now."
-            env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
-        elif in_job_packing:
+    if chunking:
+        assert not in_job_packing, "can't do both right now."
+        env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
+        n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
+        sbatch_args = chunking_update_sbatch_args(n_chunks, sbatch_args)
+    elif not any("--output" in flag for flag in sbatch_args):
+        if in_job_packing:
             env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j_%t/slurm-%j_%t.out"
         else:
             env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j/slurm-%j.out"
-
     output_from_cluv = env_vars.get("SBATCH_OUTPUT")
     if (
         output_from_file := next(
@@ -755,16 +643,15 @@ def get_sbatch_command(
         )
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    if config_sbatch_args is None:
-        config_sbatch_args = cluster_config.sbatch_args[0]
-    all_sbatch_args = sbatch_args_from_dict(config_sbatch_args) + sbatch_args
-    sbatch_args_str = shlex.join(all_sbatch_args)
+    sbatch_args_str = shlex.join(sbatch_args)
     program_args_str = shlex.join(program_args)
 
-    return (
+    sbatch_command = (
         f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
         f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
+
+    return sbatch_command, ResolvedSbatchArgs(sbatch_args=sbatch_args, n_chunks=n_chunks)
 
 
 async def sbatch(
@@ -774,14 +661,15 @@ async def sbatch(
     program_args: list[str],
     git_commit: str,
     config_sbatch_args: SbatchArgs | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Submit the job via sbatch on the remote cluster, and return the job id."""
+    chunking: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], Job | None]:
+    """Submit the job via sbatch on the remote cluster, and return the command output and the job info."""
     cluster = remote.hostname if remote else current_cluster()
     # Should be set, since `remote` is None if current_cluster() is the same as the cluster argument
     # to `submit`.
     assert cluster
-    sbatch_command = get_sbatch_command(
-        cluster, job_script, sbatch_args, program_args, git_commit, config_sbatch_args
+    sbatch_command, resolved_args = get_sbatch_command(
+        cluster, job_script, sbatch_args, program_args, git_commit, config_sbatch_args, chunking
     )
 
     display = display_commands.get()
@@ -789,21 +677,27 @@ async def sbatch(
     warn = not raise_on_command_error.get()
 
     if remote:
-        return await remote.run(sbatch_command, display=display, warn=warn, hide=hide)
-    # Run the sbatch command locally.
-    return await run(tuple(shlex.split(sbatch_command)), _display=display, warn=warn, hide=hide)
-
-
-async def cancel_job(remote: Remote | None, job_id: int, print: bool = False) -> str:
-    """Cancel the job with the given id on the remote cluster."""
-    scancel_command = f"scancel {job_id}"
-    if remote:
-        output = await remote.get_output(scancel_command, hide=True)
-        if print:
-            console.print(f"Cancelled job {job_id} on cluster {remote.hostname}.")
+        result = await remote.run(sbatch_command, display=display, warn=warn, hide=hide)
     else:
-        result = await run(tuple(shlex.split(scancel_command)), hide=True)
-        if print:
-            console.print(f"Cancelled job {job_id} on the current cluster.")
-        output = result.stdout
-    return output
+        # Run the sbatch command locally.
+        result = await run(
+            tuple(shlex.split(sbatch_command)), _display=display, warn=warn, hide=hide
+        )
+
+    submit_time = datetime.datetime.now()
+
+    if result.returncode != 0:
+        return result, None
+
+    job = Job(
+        job_id=int(result.stdout.strip()),
+        cluster=cluster,
+        job_script=str(job_script),
+        git_commit=git_commit,
+        sbatch_args=resolved_args.sbatch_args,
+        program_args=program_args,
+        submitted_at=submit_time.isoformat(),
+        n_chunks=resolved_args.n_chunks,
+    )
+
+    return result, job

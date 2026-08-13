@@ -26,7 +26,7 @@ from cluv.cli.submit import (
     submit_first,
 )
 from cluv.cli.sync import sync
-from cluv.config import SbatchArgs, get_cluv_config
+from cluv.config import get_cluv_config, load_cluv_config
 from cluv.utils import current_cluster
 from tests.test_integration import IN_GITHUB_CLOUD_CI
 
@@ -178,6 +178,7 @@ class TestGetSbatchCommand:
             [tool.cluv.sbatch_args]
             time = "3:00:00"
             requeue = true
+
             [tool.cluv.clusters.mila]
             [tool.cluv.clusters.mila.sbatch_args]
             gpus = "a100:2"
@@ -186,10 +187,13 @@ class TestGetSbatchCommand:
         )
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
+        config_sbatch_args = sbatch_args_from_dict(
+            load_cluv_config(p).get_cluster_config("mila").sbatch_args[0]
+        )
         sbatch_command, submission_args = get_sbatch_command(
             cluster="mila",
             job_script=job_script,
-            sbatch_args=["--time=1:00:00"],  # CLI overrides the config time
+            sbatch_args=config_sbatch_args + ["--time=1:00:00"],  # CLI overrides the config time
             program_args=[],
             git_commit="abc123",
             chunking=False,
@@ -226,10 +230,13 @@ class TestGetSbatchCommand:
         )
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
+        config_sbatch_args = sbatch_args_from_dict(
+            load_cluv_config(p).get_cluster_config("cpu_cluster").sbatch_args[0]
+        )
         sbatch_command, submission_args = get_sbatch_command(
             cluster="cpu_cluster",
             job_script=job_script,
-            sbatch_args=[],
+            sbatch_args=config_sbatch_args + [],
             program_args=[],
             git_commit="abc123",
             chunking=False,
@@ -270,46 +277,6 @@ class TestGetSbatchCommand:
 
         assert " ".join(expected_sbatch_args) in sbatch_command
         assert submission_args == ResolvedSbatchArgs(sbatch_args=expected_sbatch_args, n_chunks=4)
-
-    def test_allocation_selects_which_config_sbatch_args_are_used(self, project_dir: Path) -> None:
-        """With multiple allocations, `config_sbatch_args` picks the one to use (first by default)."""
-        p = project_dir / "pyproject.toml"
-        p.write_text(
-            textwrap.dedent(
-                """\
-            [tool.cluv]
-            results_path = "results"
-            [tool.cluv.sbatch_args]
-            time = "3:00:00"
-            [tool.cluv.clusters.narval]
-            sbatch_args = [{ account = "rrg-bengioy-ad" }, { account = "def-bengioy" }]
-            """
-            )
-        )
-        job_script = project_dir / "job.sh"
-        job_script.touch(0o755)
-        allocations = get_cluv_config().get_cluster_config("narval").sbatch_args
-        assert allocations == [
-            {"time": "3:00:00", "account": "rrg-bengioy-ad"},
-            {"time": "3:00:00", "account": "def-bengioy"},
-        ]
-
-        def command_for(config_sbatch_args: SbatchArgs | None) -> str:
-            command, _ = get_sbatch_command(
-                cluster="narval",
-                job_script=job_script,
-                sbatch_args=[],
-                program_args=[],
-                git_commit="abc123",
-                config_sbatch_args=config_sbatch_args,
-            )
-            return command
-
-        # Defaults to the first allocation.
-        assert "--account=rrg-bengioy-ad" in command_for(None)
-        assert "--account=def-bengioy" in command_for(allocations[1])
-        assert "--account=rrg-bengioy-ad" not in command_for(allocations[1])
-        assert "--time=3:00:00" in command_for(allocations[1])
 
 
 class TestSubmitCliParsing:

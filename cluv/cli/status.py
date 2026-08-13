@@ -323,7 +323,7 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 def _gpu_bars(gpu_stats: dict[str, tuple[int, int]], name_width: int) -> Text:
     """Return one free-GPU bar per model, stacked vertically and labelled."""
     if not gpu_stats:
-        return Text("-")
+        return Text("N/A", style="dim")
 
     bars = Text()
     for i, (model, (idle, total)) in enumerate(gpu_stats.items()):

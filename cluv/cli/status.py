@@ -95,7 +95,7 @@ _SEP = "---CLUV-SEP---"
 
 SINFO_LIST_GPUS = 'sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu'
 
-# Script for DRAC clusters (partition-stats + diskusage_report, no savail/disk-quota)
+# Script for DRAC clusters (diskusage_report, no savail/disk-quota)
 _REMOTE_SCRIPT_DRAC = f"""
 {SINFO_LIST_GPUS}; echo {_SEP}
 timeout 1 diskusage_report 2>/dev/null; echo {_SEP}

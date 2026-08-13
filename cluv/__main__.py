@@ -25,6 +25,7 @@ from .cli.clean import clean
 from .cli.disable import disable, enable
 from .cli.init import init
 from .cli.login import login
+from .cli.logout import logout
 from .cli.run import run
 from .cli.status import status
 from .cli.submit import submit
@@ -74,6 +75,9 @@ def main(argv: list[str] | None = None) -> None:
 
     login_parser = add_login_args(subparsers)
     _add_v_arg(login_parser)
+
+    logout_parser = add_logout_args(subparsers)
+    _add_v_arg(logout_parser)
 
     sync_parser = add_sync_args(subparsers)
     _add_v_arg(sync_parser)
@@ -296,6 +300,21 @@ def add_login_args(subparsers: Subparsers):
     )
     login_parser.set_defaults(func=login)
     return login_parser
+
+
+def add_logout_args(subparsers: Subparsers):
+    logout_parser = subparsers.add_parser(
+        "logout",
+        help="Close existing SSH connections to the specified clusters.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    logout_parser.add_argument(
+        "clusters",
+        nargs="*",
+        help="The cluster(s) to log out of. Leave empty to log out of all clusters.",
+    )
+    logout_parser.set_defaults(func=logout)
+    return logout_parser
 
 
 def add_init_args(subparsers: Subparsers):

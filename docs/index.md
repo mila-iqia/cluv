@@ -45,6 +45,11 @@ cluv init
 cluv login
 ```
 
+### Close SSH connections to all clusters
+```console
+cluv logout
+```
+
 ### Sync your project on all clusters
 ```console
 cluv sync
@@ -99,6 +104,7 @@ cluv status
         init(<b>cluv init</b> <br> Init project)
         sync(<b>cluv sync</b> <br> Sync project on clusters)
         login(<b>cluv login</b> <br> Connect to clusters)
+        logout(<b>cluv logout</b> <br> Close connections to clusters)
         submit(<b>cluv submit</b> <br> Submit jobs to clusters)
         status(<b>cluv status</b> <br> See clusters and jobs status)
         disable(<b>cluv disable</b> <br> Disable access to clusters)
@@ -115,9 +121,11 @@ cluv status
         login ===> status
         login ===> clean
         login ===> run
+        login ===> logout
 
         click init "commands/#cluv-init"
         click login "commands/#cluv-login"
+        click logout "commands/#cluv-logout"
         click sync "commands/#cluv-sync"
         click submit "commands/#cluv-submit"
         click status "commands/#cluv-status"

@@ -17,6 +17,9 @@ cluv <command> [options]
 **[`cluv login`](#cluv-login)**
 :   Establish SSH connections to clusters.
 
+**[`cluv logout`](#cluv-logout)**
+:   Close existing SSH connections to clusters.
+
 **[`cluv sync`](#cluv-sync)**
 :   Sync your project on clusters.
 
@@ -107,6 +110,22 @@ cluv login [clusters]
 
 `clusters`
 :   The clusters to connect to. If not specified, will connect to all clusters in the config. Unreachable clusters will be skipped.
+
+---
+
+## [`cluv logout`](#cluv-logout)
+
+Close existing SSH connections (ControlMaster sockets) to the clusters, established with [`cluv login`](#cluv-login).
+
+**Usage**
+```console
+cluv logout [clusters]
+```
+
+**Arguments**
+
+`clusters`
+:   The clusters to log out of. If not specified, will log out of every cluster in the config that has an active connection.
 
 ---
 

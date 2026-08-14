@@ -17,6 +17,7 @@ nav:
       - CLI:
           - init: reference/cli/init.md
           - login: reference/cli/login.md
+          - logout: reference/cli/logout.md
           - run: reference/cli/run.md
           - submit: reference/cli/submit.md
           - status: reference/cli/status.md

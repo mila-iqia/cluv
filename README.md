@@ -1,10 +1,6 @@
 # cluv
 
-cluv — sync UV-based Python projects across HPC clusters.
-
-## Status
-
-In early development. Commands are functional, but expect bugs or missing features.
+cluv — sync and submit UV-based Python projects across HPC clusters.
 
 ## Requirements
 

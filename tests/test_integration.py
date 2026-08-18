@@ -269,6 +269,10 @@ async def test_vram_sbatch_args_are_valid(remote: Remote, dont_cache_gpu_types: 
     partition), so this only checks that the GPU request itself isn't malformed.
     """
     cluster = remote.hostname
+    available_gpu_types = await get_gpu_types(cluster, remote)
+    if not available_gpu_types:
+        pytest.skip(f"The {cluster} cluster doesn't have any GPUs.")
+
     sbatch_args_from_config = get_cluv_config().get_cluster_config(cluster).sbatch_args[0]
     submission = Submission(
         remote=remote,
@@ -276,10 +280,6 @@ async def test_vram_sbatch_args_are_valid(remote: Remote, dont_cache_gpu_types: 
         sbatch_args=sbatch_args_from_dict(sbatch_args_from_config),
         program_args=[],
     )
-
-    if not await get_gpu_types(cluster, remote):
-        pytest.skip(f"The {cluster} cluster doesn't have any GPUs.")
-
     submissions = await expand_submissions_for_vram([submission], TEST_VRAM)
     gpu_types_asked_for = [
         gpu_request.model
@@ -289,7 +289,6 @@ async def test_vram_sbatch_args_are_valid(remote: Remote, dont_cache_gpu_types: 
     assert len(gpu_types_asked_for) == len(submissions), (
         f"Every submission should ask for a specific GPU type: {submissions}"
     )
-    available_gpu_types = await get_gpu_types(cluster, remote)
     assert set(gpu_types_asked_for) <= set(available_gpu_types)
 
     separator = "---CLUV-TEST-SEP---"

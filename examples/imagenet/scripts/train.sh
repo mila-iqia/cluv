@@ -6,8 +6,7 @@
 # `[tool.cluv.clusters.<cluster>]` sections of the pyproject.toml.
 #
 # `cluv submit` runs `sbatch --chdir=<project_dir>`, so the job (and therefore this script) starts in
-# this project's folder on the cluster, and `uv run` picks up the right environment without any
-# `--directory` flag.
+# this project's folder on the cluster.
 # (Note: $SLURM_SUBMIT_DIR is *not* that folder - it is the directory sbatch itself was run from,
 # which for `cluv submit` is the home directory of the SSH session.)
 #
@@ -51,6 +50,9 @@ one_task_per_node="srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1}"
 # afterwards inherit it as their working directory), so ask a step for it when it isn't already set
 # here. The path is the same on every node of a job on all the clusters this example targets.
 slurm_tmpdir=${SLURM_TMPDIR:-$(srun --ntasks=1 --ntasks-per-node=1 bash -c 'echo "$SLURM_TMPDIR"')}
+
+# How to invoke uv for the steps below. Overridden just after this to point at the per-node clone.
+uv_run=(uv run)
 
 ## Run the code from a per-node clone of the repo, pinned to $GIT_COMMIT ##
 # The project folder on the cluster is what `cluv sync` writes into, so a later `cluv sync` (or
@@ -107,8 +109,15 @@ if [ -n "${GIT_COMMIT:-}" ]; then
         ln -s "$repo_root/.venv" "$clone/.venv"
     ' _ "$repo_root" "$GIT_COMMIT" "$slurm_tmpdir"
 
-    cd "$slurm_tmpdir/$repo_name/$project_subdir"
-    echo "Running from:  $PWD (pinned to $GIT_COMMIT)"
+    # Point uv at the clone rather than `cd`-ing into it. srun resolves the working directory it
+    # hands to a step before that step's node-local $SLURM_TMPDIR mount is visible to it, so a `cd`
+    # into the clone makes every step log a confusing
+    #   error: couldn't chdir to `...': No such file or directory: going to /tmp instead
+    # and then rely on the chdir being retried once the namespace is set up. Leaving the steps in the
+    # project folder (which is on the shared filesystem, so always resolvable) and telling uv where
+    # the project actually is avoids depending on that.
+    uv_run=(uv run --directory="$slurm_tmpdir/$repo_name/$project_subdir")
+    echo "Running from:  $slurm_tmpdir/$repo_name/$project_subdir (pinned to $GIT_COMMIT)"
     # The virtualenv is shared with the project folder, so uv must never modify it.
     export UV_NO_SYNC=1
 else
@@ -122,7 +131,7 @@ fi
 # tasks sit in `cl_sync_io_wait` for minutes. Reading them once per node first puts them in the
 # node's page cache, so the tasks below start quickly.
 echo "Warming up the virtualenv on each node..."
-$one_task_per_node uv run python -c 'import torch, torchvision; print(torch.__version__, flush=True)'
+$one_task_per_node "${uv_run[@]}" python -c 'import torch, torchvision; print(torch.__version__, flush=True)'
 
 ## Stage the dataset into $SLURM_TMPDIR ##
 # Extract the ImageNet archives onto each node's local disk, using all the CPUs of each node.
@@ -142,7 +151,7 @@ else
             echo "--use_fake_data to run without the real dataset." >&2
             exit 1
         fi
-        uv run python prepare_data.py'
+        "$@" python prepare_data.py' _ "${uv_run[@]}"
 fi
 
 # These environment variables are used by torch.distributed and should ideally be set
@@ -168,7 +177,7 @@ export WORLD_SIZE=$SLURM_NTASKS
 # the GPUs per node and let each task pick its own by local rank.
 #
 # A per-cluster wrapper can `export SRUN_EXTRA_ARGS=...` to add flags here.
-srun ${SRUN_EXTRA_ARGS-} uv run "${job_command[@]}"
+srun ${SRUN_EXTRA_ARGS-} "${uv_run[@]}" "${job_command[@]}"
 
 ## srun + torchrun version ##
 # srun --ntasks-per-node=1 bash -c "\

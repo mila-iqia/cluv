@@ -113,6 +113,10 @@ async def test_sync_only_syncs_once_but_returns_every_remote(
     fake_cache_dir: mock.Mock, monkeypatch: pytest.MonkeyPatch
 ):
     """`sync(["trillium", "trillium-gpu"])` must run the sync steps only once, but return both."""
+    # sync() skips the "is HEAD up to date" check (and thus _head_is_up_to_date) entirely when
+    # GITHUB_ACTIONS is set, which it is in CI but not locally. Force it unset so this test
+    # exercises the same branch -- and the same mock.assert_awaited_once() below -- everywhere.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     config = CluvConfig(
         results_path="/results",
         clusters={

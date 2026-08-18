@@ -29,6 +29,7 @@ from .cli.run import run
 from .cli.sh import sh
 from .cli.status import status
 from .cli.submit import submit
+from .cli.submit_utils.chunking import CHUNK_SIZE
 from .cli.sync import sync
 from .utils import console
 
@@ -183,8 +184,15 @@ def add_submit_args(subparsers: Subparsers):
     )
     submit_parser.add_argument(
         "--chunking",
-        action="store_true",
-        help="Whether to split the job up into multiple consecutive short jobs.",
+        nargs="?",
+        const=CHUNK_SIZE,
+        default=None,
+        type=int,
+        metavar="HOURS",
+        help=(
+            "Split the job into multiple consecutive short jobs of HOURS hours each. "
+            f"Defaults to {CHUNK_SIZE} hours when --chunking is used without a value."
+        ),
     )
     submit_parser.add_argument(
         "sbatch_args",

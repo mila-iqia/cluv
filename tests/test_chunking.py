@@ -47,6 +47,12 @@ class TestGetNumberOfChunks:
         job_script = Path("my_script.sh")
         assert get_n_chunks(sbatch_args, env_vars, job_script) == 4
 
+    def test_should_use_custom_chunk_size(self) -> None:
+        sbatch_args = ["--time=12:00:00"]
+        env_vars = {}
+        job_script = Path("my_script.sh")
+        assert get_n_chunks(sbatch_args, env_vars, job_script, chunk_size=6) == 2
+
 
 class TestChunkingUpdateSbatchArgs:
     @pytest.mark.parametrize(
@@ -69,3 +75,10 @@ class TestChunkingUpdateSbatchArgs:
     def test_update_sbatch_args(self, sbatch_args: list[str], expected_sbatch_args: str) -> None:
         n_chunks = get_n_chunks(sbatch_args, {}, Path("script.sh"))
         assert chunking_update_sbatch_args(n_chunks, sbatch_args) == expected_sbatch_args
+
+    def test_update_sbatch_args_with_custom_chunk_size(self) -> None:
+        sbatch_args = ["--time=12:00:00"]
+        chunk_size = 6
+        n_chunks = get_n_chunks(sbatch_args, {}, Path("script.sh"), chunk_size=chunk_size)
+        result = chunking_update_sbatch_args(n_chunks, sbatch_args, chunk_size=chunk_size)
+        assert result == ["--time=6:00:00", "--array=0-1%1"]

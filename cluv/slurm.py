@@ -130,7 +130,7 @@ async def run_sacct(
 #   gpu:h100:4(S:0-1)       → ('h100', '4')
 #   gpu:a100:8               → ('a100', '8')
 #   gpu:nvidia_h100_80gb_hbm3_3g.40gb:4(S:0-3)  → ('nvidia_h100_80gb_hbm3_3g.40gb', '4')
-_GRES_RE = re.compile(r"gpu:([^:(,]+):(\d+)")
+GRES_RE = re.compile(r"gpu:([^:(,]+):(\d+)")
 
 # Detects a MIG profile suffix like "3g.40gb" or "1g.10gb" in a GRES model name
 _MIG_PROFILE_RE = re.compile(r"(\d+)g\.\d+gb", re.IGNORECASE)
@@ -140,6 +140,23 @@ _MODEL_TOKEN_RE = re.compile(r"([a-z]+\d+[a-z]*)", re.IGNORECASE)
 
 # Node states that count as idle (sinfo uses mixed-case variants)
 _IDLE_STATES = {"idle", "idle~", "idle+"}
+
+
+def gpu_base_model(raw: str) -> str:
+    """Return the base GPU model of a raw GRES name, in lowercase.
+
+    Examples:
+        >>> gpu_base_model("h100")
+        'h100'
+        >>> gpu_base_model("nvidia_h100_80gb_hbm3_3g.40gb")
+        'h100'
+        >>> gpu_base_model("a100l")
+        'a100l'
+    """
+    # Strip optional "nvidia_" vendor prefix
+    clean = re.sub(r"^nvidia_", "", raw, flags=re.IGNORECASE)
+    m = _MODEL_TOKEN_RE.search(clean)
+    return m.group(1).lower() if m else raw.lower()
 
 
 def _normalize_gpu_model(raw: str) -> str:
@@ -154,10 +171,8 @@ def _normalize_gpu_model(raw: str) -> str:
         "a100"                              → "A100"
         "nvidia_h100_80gb_hbm3_3g.40gb"     → "H100-3g.40gb"
     """
-    # Strip optional "nvidia_" vendor prefix
     clean = re.sub(r"^nvidia_", "", raw, flags=re.IGNORECASE)
-    m = _MODEL_TOKEN_RE.search(clean)
-    base = m.group(1).upper() if m else raw.upper()
+    base = gpu_base_model(raw).upper()
 
     mig = _MIG_PROFILE_RE.search(clean)
     if mig:
@@ -197,7 +212,7 @@ def parse_sinfo_nodes(output: str) -> dict[str, tuple[int, int]]:
             continue
         _, state, gres_field = parts[0], parts[1].lower(), parts[2]
 
-        matches = _GRES_RE.findall(gres_field)
+        matches = GRES_RE.findall(gres_field)
         if not matches:
             continue
 

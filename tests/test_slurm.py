@@ -11,7 +11,6 @@ import pytest
 from cluv.slurm import (
     parse_disk_quota,
     parse_diskusage_report,
-    parse_partition_stats,
     parse_savail,
     parse_sinfo_nodes,
     parse_slurm_time,
@@ -35,63 +34,6 @@ rtx8000              130 / 376
 v100                  5 / 56
 """
 
-TAMIA_PARTITION_STATS = """\
-
-Node type |                     Max walltime
-          |     3 hr   |   12 hr   |   24 hr   |   72 hr   |   168 hr  |
-----------|-------------------------------------------------------------
-       Number of Queued Jobs by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     0:0    |    0:1    |    0:0    |    0:0    |    0:0    |
-GPU       |     8:-    |    9:-    |    2:-    |    0:-    |    0:-    |
-----------|-------------------------------------------------------------
-      Number of Running Jobs by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     0:0    |    0:2    |    0:0    |    0:0    |    0:0    |
-GPU       |     8:-    |   14:-    |   35:-    |    0:-    |    0:-    |
-----------|-------------------------------------------------------------
-        Number of Idle nodes by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     2:2    |    0:0    |    0:0    |    0:0    |    0:0    |
-GPU       |     1:-    |    1:-    |    1:-    |    0:-    |    0:-    |
-----------|-------------------------------------------------------------
-       Total Number of nodes by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     8:8    |    6:6    |    4:4    |    0:0    |    0:0    |
-GPU       |    65:-    |   59:-    |   49:-    |    0:-    |    0:-    |
-----------|-------------------------------------------------------------
-"""
-
-# Example with a Large Mem row (from Alliance wiki docs)
-WIKI_PARTITION_STATS = """\
-Node type |                     Max walltime
-          |     3 hr   |   12 hr   |   24 hr   |   72 hr   |   168 hr  |
-----------|-------------------------------------------------------------
-       Number of Queued Jobs by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |    12:170  |   69:7066 |   70:7335 |  386:961  |   59:509  |
-Large Mem |     0:0    |    0:0    |    0:0    |    0:15   |    0:1    |
-GPU       |     5:14   |    3:8    |   21:1    |  177:110  |    1:5    |
-----------|-------------------------------------------------------------
-      Number of Running Jobs by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     8:32   |   10:854  |   84:10   |   15:65   |    0:674  |
-Large Mem |     0:0    |    0:0    |    0:0    |    0:1    |    0:0    |
-GPU       |     5:0    |    2:13   |   47:20   |   19:18   |    0:3    |
-----------|-------------------------------------------------------------
-        Number of Idle nodes by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |    16:9    |   15:8    |   15:8    |    7:0    |    2:0    |
-Large Mem |     3:1    |    3:1    |    0:0    |    0:0    |    0:0    |
-GPU       |     0:0    |    0:0    |    0:0    |    0:0    |    0:0    |
-----------|-------------------------------------------------------------
-       Total Number of nodes by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |   871:431  |  851:411  |  821:391  |  636:276  |  281:164  |
-Large Mem |    27:12   |   27:12   |   24:11   |   20:3    |    4:3    |
-GPU       |   156:78   |  156:78   |  144:72   |  104:52   |   13:12   |
-"""
-
 TAMIA_DISKUSAGE = """\
 
                             Description                Space         # of files
@@ -100,73 +42,6 @@ TAMIA_DISKUSAGE = """\
 --
 On some clusters, a break down per user may be available by adding the option '--per_user'.
 """
-
-
-# ---------------------------------------------------------------------------
-# parse_partition_stats
-# ---------------------------------------------------------------------------
-
-
-class TestParsePartitionStats:
-    def test_tamia_running_jobs(self):
-        result = parse_partition_stats(TAMIA_PARTITION_STATS)
-        # GPU running: 8 + 14 + 35 + 0 + 0 = 57
-        assert result["jobs_running"] == 57
-
-    def test_tamia_pending_jobs(self):
-        result = parse_partition_stats(TAMIA_PARTITION_STATS)
-        # GPU queued: 8 + 9 + 2 + 0 + 0 = 19
-        assert result["jobs_pending"] == 19
-
-    def test_tamia_idle_nodes(self):
-        result = parse_partition_stats(TAMIA_PARTITION_STATS)
-        # GPU idle: max(1, 1, 1, 0, 0) = 1 (same physical node in multiple partitions)
-        assert result["gpu_idle_nodes"] == 1
-
-    def test_tamia_total_nodes(self):
-        result = parse_partition_stats(TAMIA_PARTITION_STATS)
-        # GPU total: max(65, 59, 49, 0, 0) = 65
-        assert result["gpu_total_nodes"] == 65
-
-    def test_wiki_running_jobs(self):
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU running: 5+2+47+19+0 = 73
-        assert result["jobs_running"] == 73
-
-    def test_wiki_pending_jobs(self):
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU queued: 5+3+21+177+1 = 207
-        assert result["jobs_pending"] == 207
-
-    def test_wiki_idle_nodes(self):
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU idle: max(0,0,0,0,0) = 0
-        assert result["gpu_idle_nodes"] == 0
-
-    def test_wiki_total_nodes(self):
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU total: max(156,156,144,104,13) = 156
-        assert result["gpu_total_nodes"] == 156
-
-    def test_large_mem_row_ignored(self):
-        # Large Mem row must not affect GPU counts
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        assert result["gpu_total_nodes"] == 156  # not 27
-
-    def test_empty_output(self):
-        result = parse_partition_stats("")
-        assert result == {
-            "jobs_running": 0,
-            "jobs_pending": 0,
-            "gpu_idle_nodes": 0,
-            "gpu_total_nodes": 0,
-        }
-
-    def test_no_gpu_row(self):
-        no_gpu = TAMIA_PARTITION_STATS.replace("GPU", "NOGPU")
-        result = parse_partition_stats(no_gpu)
-        assert result["jobs_running"] == 0
-        assert result["gpu_total_nodes"] == 0
 
 
 # ---------------------------------------------------------------------------

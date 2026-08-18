@@ -26,7 +26,7 @@ cd examples/imagenet
 |---|---|
 | `main.py` | The training script. Gets its run id and results dir from `cluv.job`. |
 | `prepare_data.py` | Extracts the ImageNet archives into `$SLURM_TMPDIR`, reading them from the `datasets_path` cluv resolved for the current cluster. |
-| `scripts/train.sh` | Shared job body: stage the data, set up the `torch.distributed` env, `srun` the training script. |
+| `scripts/train.sh` | Shared job body: clone the repo at `$GIT_COMMIT` onto each node, stage the data, set up the `torch.distributed` env, `srun` the training script. |
 | `scripts/job_<cluster>.sh` | Thin per-cluster wrappers: only `#SBATCH` directives, then `exec scripts/train.sh`. |
 | `scripts/job.sh` | Generic 1-node/1-GPU fallback for clusters without a wrapper of their own. |
 
@@ -162,11 +162,21 @@ was no SSH connection to nibi available at the time.
 
 ## Notes
 
-- The upstream version of this example ships a `safe_sbatch` script and a `code_checkpointing.sh`
-  helper to pin the code to a commit. `cluv submit` already does that job: it refuses to submit with
-  a dirty working tree, syncs the cluster to your current commit, and exports `$GIT_COMMIT` into the
-  job. If you also want the job to run from a private clone in `$SLURM_TMPDIR`, see
-  `examples/hydra_example/scripts/safe_job.sh`.
+- The job runs from a clone of the repo in each node's `$SLURM_TMPDIR`, detached onto the
+  `$GIT_COMMIT` that `cluv submit` exported. The project folder on the cluster is what `cluv sync`
+  writes into, so without this a later `cluv sync` (or another `cluv submit`) could move it to a
+  different commit while the job was still queued, and the job would train whatever happened to be
+  checked out by then. `requeue = true` widens that window further, since a requeued job re-runs the
+  job script. This replaces upstream's `safe_sbatch` / `code_checkpointing.sh` helpers.
+  - The virtualenv is *symlinked* into the clone rather than copied: it is ~7GB, it already matches
+    this commit's `uv.lock` because `cluv submit` synced it, and `UV_NO_SYNC=1` keeps uv from
+    modifying it. So only this example's own code is pinned - third-party packages, and `cluv`
+    itself, are still read from the project folder. `scripts/train.sh` says what to change if you
+    need the dependencies pinned too.
+  - Nothing is copied back out of `$SLURM_TMPDIR` at the end of the job. Everything the run produces
+    (checkpoints, profiler traces, wandb files) is written straight to the absolute `results_path`
+    that cluv resolved for the cluster, and `main.py` refuses to start if that path did not resolve
+    to an absolute one - otherwise the results would be written into the clone and deleted with it.
 - Don't add `#SBATCH --output=` to the job scripts: cluv overrides it so that results land under the
   cluster's `results_path`.
 - The per-cluster resource requests (CPUs, memory, GPU model) in `scripts/job_<cluster>.sh` match

@@ -71,6 +71,18 @@ assert SLURM_TMPDIR.exists(), f"SLURM_TMPDIR (assumed {SLURM_TMPDIR}) should exi
 RUN_INFO = current_run_info() if current_cluster() else None
 RUN_ID = RUN_INFO.run_id if RUN_INFO else JOB_ID
 RESULTS_DIR = RUN_INFO.results_path if RUN_INFO else get_results_path() / RUN_ID
+# `scripts/train.sh` runs this from a clone of the repo in $SLURM_TMPDIR, which the cluster deletes
+# when the job ends. `results_path` is expanded with the job's environment, so an unset variable in
+# it (say $SCRATCH) would stay literal and leave RESULTS_DIR *relative*: every checkpoint, profiler
+# trace and wandb file would be written inside that clone and thrown away with it. Fail now rather
+# than lose the results at the end of the job.
+if not RESULTS_DIR.is_absolute():
+    raise RuntimeError(
+        f"The results directory for this run is not an absolute path: {RESULTS_DIR}\n"
+        f"An environment variable in the `results_path` of the cluv config (usually $SCRATCH) is "
+        f"probably not set inside the job. Anything written there would end up in the copy of the "
+        f"repo in $SLURM_TMPDIR and be deleted when the job ends."
+    )
 
 # Set any missing environment variables so that `torch.distributed.init_process_group`
 # works properly, namely RANK, WORLD_SIZE, MASTER_ADDR, MASTER_PORT, (LOCAL_RANK).

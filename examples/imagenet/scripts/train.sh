@@ -10,6 +10,11 @@
 # `--directory` flag.
 # (Note: $SLURM_SUBMIT_DIR is *not* that folder - it is the directory sbatch itself was run from,
 # which for `cluv submit` is the home directory of the SSH session.)
+#
+# It then switches into a clone of the repo in each node's $SLURM_TMPDIR, checked out at the
+# $GIT_COMMIT the job was submitted with, so the code cannot change under a job that is still queued.
+# Everything after that point runs from the clone. See the "Run the code from a per-node clone"
+# section below.
 
 set -e # exit on error.
 
@@ -41,6 +46,75 @@ fi
 # Run this once per node. $SLURM_TMPDIR is set by a Slurm plugin at step launch, so it has to be
 # read inside an `srun` step rather than here in the batch script.
 one_task_per_node="srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1}"
+
+# The batch script needs the value too (to `cd` into the clone below, so that the steps launched
+# afterwards inherit it as their working directory), so ask a step for it when it isn't already set
+# here. The path is the same on every node of a job on all the clusters this example targets.
+slurm_tmpdir=${SLURM_TMPDIR:-$(srun --ntasks=1 --ntasks-per-node=1 bash -c 'echo "$SLURM_TMPDIR"')}
+
+## Run the code from a per-node clone of the repo, pinned to $GIT_COMMIT ##
+# The project folder on the cluster is what `cluv sync` writes into, so a later `cluv sync` (or
+# another `cluv submit`) can move it to a different commit while this job is still sitting in the
+# queue. The job would then train whatever happens to be checked out at that moment instead of what
+# it was submitted with - and with `requeue = true` in the config, a requeued job re-runs this
+# script, which widens that window further.
+#
+# `cluv submit` refuses to submit a dirty tree and exports the commit it synced as $GIT_COMMIT, so
+# cloning the repo onto each node and detaching onto that commit makes the code this job runs
+# immutable, whatever happens in the project folder afterwards.
+#
+# The virtualenv is *symlinked*, not copied: it is ~7GB (torch plus the CUDA libraries), it already
+# matches this commit's uv.lock because `cluv submit` synced it, and UV_NO_SYNC below stops uv from
+# ever modifying it. The trade-off is that third-party packages -- and `cluv` itself, which is
+# installed in the venv as an editable workspace member -- are still read from the project folder,
+# so only this example's own code is pinned. Replace the symlink with
+# `cp -r "$repo_root/.venv" "$clone/.venv"` followed by `uv sync` if you need the dependencies
+# pinned too, keeping in mind that this copies ~7GB onto every node.
+#
+# Note: this does not change where Slurm writes the job's own output file. `--output` is resolved
+# relative to the `--chdir` that `cluv submit` passes (the project folder), and Slurm opens that
+# file before this script starts running.
+if [ -n "${GIT_COMMIT:-}" ]; then
+    repo_root=$(git rev-parse --show-toplevel)
+    # Where this project sits inside the repo, e.g. `examples/imagenet`.
+    project_subdir=$(realpath --relative-to="$repo_root" "$PWD")
+    repo_name=$(basename "$repo_root")
+
+    if [ -z "$slurm_tmpdir" ]; then
+        echo "ERROR: could not determine \$SLURM_TMPDIR for this job, so there is nowhere" >&2
+        echo "node-local to clone the repo into. Request local disk for the job (for example with" >&2
+        echo "--tmp), or drop this section to run straight out of the project folder." >&2
+        exit 1
+    fi
+
+    # $SLURM_TMPDIR is node-local and private to this job, so each node needs its own clone.
+    echo "Cloning the repo at $GIT_COMMIT into $slurm_tmpdir on each node..."
+    $one_task_per_node bash -c '
+        set -e
+        repo_root="$1"
+        git_commit="$2"
+        clone="$3/$(basename "$repo_root")"
+        # A requeued job keeps the same $SLURM_JOB_ID, so a clone from a previous attempt can still
+        # be there if this attempt landed on the same node.
+        rm -rf "$clone"
+        git clone --quiet "$repo_root" "$clone"
+        if ! git -C "$clone" checkout --quiet --detach "$git_commit"; then
+            echo "ERROR: commit $git_commit is not present in the clone of $repo_root." >&2
+            echo "The project folder was most likely moved to an unrelated commit while this job" >&2
+            echo "was queued. Re-submit the job with cluv submit." >&2
+            exit 1
+        fi
+        ln -s "$repo_root/.venv" "$clone/.venv"
+    ' _ "$repo_root" "$GIT_COMMIT" "$slurm_tmpdir"
+
+    cd "$slurm_tmpdir/$repo_name/$project_subdir"
+    echo "Running from:  $PWD (pinned to $GIT_COMMIT)"
+    # The virtualenv is shared with the project folder, so uv must never modify it.
+    export UV_NO_SYNC=1
+else
+    echo "WARNING: \$GIT_COMMIT is not set, so this job runs straight out of $PWD, and the code" >&2
+    echo "can still change under it while it is queued. Submit with \`cluv submit\` instead." >&2
+fi
 
 ## Warm up the virtualenv on each node ##
 # `import torch` pulls in ~2GB of shared libraries. Faulting those in from a networked filesystem

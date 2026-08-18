@@ -163,7 +163,9 @@ def add_submit_args(subparsers: Subparsers):
         help=(
             "The cluster to submit the job on. "
             "Set at 'first' to submit a job on all clusters, and wait until one of them starts. "
-            "Once one starts, cancel the others."
+            "Once one starts, cancel the others. "
+            "This also happens when more than one allocation is configured for the cluster: one "
+            "job is submitted per allocation, and only the first one to start is kept."
         ),
     )
     submit_parser.add_argument(

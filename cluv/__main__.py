@@ -125,6 +125,11 @@ def main(argv: list[str] | None = None) -> None:
                     a for a in args_dict["sbatch_args"] if a != f"--{flag}"
                 ]
                 args_dict[flag] = True
+        # Same thing for `--vram`, which takes a value ("--vram=10GB" or "--vram 10GB").
+        args_dict["sbatch_args"], vram = _extract_flag_with_value(
+            args_dict["sbatch_args"], "--vram"
+        )
+        args_dict["vram"] = vram or args_dict["vram"]
         args_dict["program_args"] = submit_program_args
 
     if subcommand == "status" and quiet:
@@ -148,6 +153,31 @@ def main(argv: list[str] | None = None) -> None:
         else:
             logger.error("No standard error.")
         sys.exit(err.returncode)
+
+
+def _extract_flag_with_value(args: list[str], flag: str) -> tuple[list[str], str | None]:
+    """Remove `flag` and its value from `args`, and return the remaining args and that value.
+
+    >>> _extract_flag_with_value(["--gpus=1", "--vram=10GB"], "--vram")
+    (['--gpus=1'], '10GB')
+    >>> _extract_flag_with_value(["--vram", "10GB", "--gpus=1"], "--vram")
+    (['--gpus=1'], '10GB')
+    >>> _extract_flag_with_value(["--gpus=1"], "--vram")
+    (['--gpus=1'], None)
+    """
+    remaining: list[str] = []
+    value: str | None = None
+    args_iter = iter(range(len(args)))
+    for index in args_iter:
+        arg = args[index]
+        if arg == flag:
+            value = args[index + 1] if index + 1 < len(args) else None
+            next(args_iter, None)  # Also skip the value.
+        elif arg.startswith(f"{flag}="):
+            value = arg.removeprefix(f"{flag}=")
+        else:
+            remaining.append(arg)
+    return remaining, value
 
 
 def add_submit_args(subparsers: Subparsers):
@@ -185,6 +215,16 @@ def add_submit_args(subparsers: Subparsers):
         "--chunking",
         action="store_true",
         help="Whether to split the job up into multiple consecutive short jobs.",
+    )
+    submit_parser.add_argument(
+        "--vram",
+        metavar="<amount>",
+        default=None,
+        help=(
+            "Amount of GPU memory needed by the job, e.g. '--vram=10GB'. One job is submitted "
+            "for each GPU type of the cluster that has at least that much VRAM (including the "
+            "MIG slices, which are often idle), and only the first one to start is kept."
+        ),
     )
     submit_parser.add_argument(
         "sbatch_args",

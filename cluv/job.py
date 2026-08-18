@@ -115,7 +115,7 @@ def current_run_info() -> RunInfo | None:
     """
     if not SLURM_JOB_ID:
         return None  # not in a Slurm job.
-    if SLURM_JOB_ID and not SLURM_PROCID:
+    if SLURM_JOB_ID and SLURM_PROCID is None:
         # Inside a job, but we don't have all the Slurm environment variables set.
         # This happens when using `python main.py -m launcher=cluv` in the Hydra example.
         warnings.warn(

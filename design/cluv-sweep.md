@@ -14,8 +14,10 @@ There's already a **dead stub** for exactly this packing mechanism in `cluv/cli/
 
 This is split into two phases, confirmed with the user:
 
-- **Phase 1** — the core mechanism, no `--vram`. The user manually passes whatever `--ntasks`/`--gpus`/`--ntasks-per-gpu` sbatch args they want for a *single job's* footprint; cluv computes that job's task capacity from those args (or defaults to capacity=1, i.e. one job per combo, if none are given — this subsumes today's "one job per command" behavior as the simple default), then submits `ceil(n_combos / capacity)` identically-shaped jobs, each offset differently. Ships the full runtime API (`patch_argv()`, `current_sweep_run_info()`) with sweep-name-based resumable run dirs. Fully useful and shippable alone.
+- **Phase 1** — the core mechanism, no `--vram`. The user manually passes whatever `--ntasks`/`--gpus`/`--ntasks-per-gpu` sbatch args they want for a *single job's* footprint; cluv computes that job's task capacity from those args (or defaults to capacity=1, i.e. one job per combo, if none are given — this subsumes today's "one job per command" behavior as the simple default), then submits `ceil(n_combos / capacity)` identically-shaped jobs, each offset differently. Ships the runtime API (`patch_argv()`), with sweep-name-based resumable run dirs computed by the *existing* `cluv.job.current_run_info()` — no new parallel run-info type. Fully useful and shippable alone.
 - **Phase 2** — adds `--vram <gb>`: instead of the user picking one job's `--ntasks`/`--gpus`/`--ntasks-per-gpu` by hand, cluv derives them from `--vram` + a GPU type the user still must specify explicitly (e.g. `--gres=gpu:h100:1`) + a GPU VRAM lookup (hardcoded table + a per-cluster GPU inventory fetched over SSH and cached ~monthly), **and** decides the per-job granularity itself: one GPU per job normally, or one full node per job when the target cluster's new `full_node_allocations` config flag is set (using the same cached inventory to learn GPUs-per-node). Phase 2 requires no changes to the Phase 1 runtime module — it only changes how `cluv/cli/sweep.py` computes one job's sbatch args/capacity before replicating it across `num_jobs`.
+
+Each phase ships as its own PR — Phase 1's PR lands and is usable on its own (see above) before Phase 2's work starts.
 
 ---
 
@@ -23,7 +25,7 @@ This is split into two phases, confirmed with the user:
 
 ### 1. New file `cluv/sweep.py` — SSH-free runtime module
 
-Imports only stdlib + `cluv.config` + `cluv.utils` (never `cluv.remote`/`cluv.cli.*`/`milatools` — this gets imported inside users' training scripts). Mirrors `cluv/job.py:current_run_info()`/`RunInfo`'s shape and the `if job_info:` fallback idiom already used in `examples/pytorch-example/main.py:48-51`.
+Imports only stdlib + `cluv.config` + `cluv.utils` (never `cluv.remote`/`cluv.cli.*`/`milatools` — this gets imported inside users' training scripts). Deliberately exposes no run-info type of its own — it only computes and stashes the raw ingredients (sweep name, slug, resolved combo) that `cluv/job.py:current_run_info()` reads (see §2 below).
 
 ```python
 CLUV_SWEEP_NAME_ENV_VAR = "CLUV_SWEEP_NAME"
@@ -43,41 +45,64 @@ def patch_argv() -> None:
     the *only* place "out of work" is detected, and it naturally covers both "this job's
     own leftover slots" and any other padding, since it's computed against the full global
     combo list every time). Otherwise mutate sys.argv[1:] in place to combos[global_index],
-    and stash the resolved combo + its slug in module globals for current_sweep_run_info()."""
+    and stash the resolved combo + its slug for `_current_sweep_context()` below."""
 
 def _slugify_combo(combo: list[str]) -> str:
     """Filesystem-safe, readable slug: sanitized '--key=value' tokens joined by '-'
     (order preserved), truncated to a sane length, with a short content hash suffix for
     uniqueness/stability under truncation."""
 
-@dataclass(frozen=True)
-class SweepRunInfo:
-    cluster: str
-    sweep_name: str
-    run_id: str          # f"{cluster}_sweep-{sweep_name}_{slug}"
-    results_path: Path   # cluster_config.results_path / "sweeps" / sweep_name / slug
-    command: list[str]   # the resolved combo for this task
-
-def current_sweep_run_info() -> SweepRunInfo | None:
-    """Must be called after patch_argv(). Returns None if patch_argv() was a no-op or
-    exited. Otherwise builds SweepRunInfo purely from $CLUV_SWEEP_NAME + the stashed
-    combo's slug — NOT from job_id/task_index/array_job_id/the offset — so resubmitting
-    the identical sweep resumes matching combos into the same directory regardless of
-    which job/task they land on this time."""
+def _current_sweep_context() -> tuple[str, str, list[str]] | None:
+    """Private accessor used only by `cluv.job.current_run_info()` (§2). Returns
+    `(sweep_name, slug, resolved_combo)` if `patch_argv()` has run in this process and
+    resolved a combo (i.e. it wasn't a no-op and didn't idle-exit); `None` otherwise
+    (not a sweep, or `patch_argv()` hasn't been called yet)."""
 ```
 
 Correctness notes to document clearly:
 - **Index agreement across processes**: the CLI counts combos over `program_args` (which includes the fixed `python main.py` prefix from the example), while the runtime counts over its own `sys.argv[1:]` (which never includes that prefix — it's consumed before the script's own argv starts). Neither prefix token has a comma, so `expand_sweep_args` treats them as fixed on both sides — combo count and ordering agree either way, so a given global index picks the matching combo on both sides even though the two input lists differ by that constant prefix.
 - **Why the offset is required, not optional**: with multiple small jobs, `$SLURM_PROCID` alone only tells a task its position *within its own job*. Two different jobs both have a task with `SLURM_PROCID=2`, but (absent the offset) there'd be no way to tell those two apart or map either to the right global combo — this is exactly the ambiguity flagged during design ("the third task of the second job"). The offset is what disambiguates it: it's a plain integer baked in as an env var at submit time for that one job, computed by `cluv/cli/sweep.py` from `job_index * job_capacity`, so no file or cross-job coordination is ever needed at runtime.
+- **One run-info API, not two**: `cluv/job.py`'s existing `current_run_info()`/`RunInfo` — already used by `cluv submit` job scripts, e.g. `examples/pytorch-example/main.py` — is *extended* rather than duplicated (§2). A script written for `cluv submit` needs exactly one added line, a `cluv.sweep.patch_argv()` call before its own arg-parsing, to also work verbatim under `cluv sweep`; that call is a no-op outside a sweep, so the same script keeps working under `cluv submit`/locally too.
 
-### 2. Changes to `cluv/cli/submit.py` — activate the packing stub
+### 2. Changes to `cluv/job.py` — extend `current_run_info()` for sweeps
+
+No new dataclass, no new public function. `RunInfo` is unchanged; `current_run_info()` gains one new branch, checked *before* today's job-id-based path:
+
+```python
+def current_run_info() -> RunInfo | None:
+    if not SLURM_JOB_ID:
+        return None
+    if SLURM_JOB_ID and not SLURM_PROCID:
+        ...  # unchanged: warn, return None
+
+    if sweep_context := cluv.sweep._current_sweep_context():
+        sweep_name, slug, combo = sweep_context
+        cluster = current_cluster()
+        assert cluster, "Example must be run on a cluster."
+        cluster_config = cluv.config.current_cluster_config()
+        assert cluster_config, "Example must be run on a cluster."
+        return RunInfo(
+            cluster=cluster,
+            run_id=f"{cluster}_sweep-{sweep_name}_{slug}",
+            results_path=cluster_config.results_path / "sweeps" / sweep_name / slug,
+            command=combo,
+        )
+
+    # ...unchanged job-id-based path (current_run_id(), etc.) falls through here
+```
+
+`cluv/job.py` gains a plain `import cluv.sweep` at the top — safe, since `cluv/sweep.py` has the same zero-SSH-dependency constraint `cluv/job.py` already has (§1), so there's no import-cycle or remote-plumbing concern.
+
+Note this also finally gives the long-unused `RunInfo.command: list[str]` field (currently always `[]` in `current_run_info()`) real content for the sweep case; the non-sweep path is left exactly as-is (still `command=[]`) since populating it there is out of scope for this design.
+
+### 3. Changes to `cluv/cli/submit.py` — activate the packing stub
 
 - `get_sbatch_command()` (`cluv/cli/submit.py:472-479`): add params `in_job_packing: bool = False, extra_env: dict[str, str] | None = None`. Delete the dead lines at `512-513`; use the `in_job_packing` param instead. The output-path branch at `523-527` (`%j_%t` naming) becomes reachable as-is — `%j`/`%t` are per-job/per-task-within-that-job placeholders, which is exactly right since each sweep job's own stdout/output files only need to be unique *within that job*.
 - New warning next to the existing `#SBATCH --output` conflict warning (`528-546`): when `in_job_packing`, scan the job script for `#SBATCH` lines mentioning `--ntasks`/`--gpus`/`--ntasks-per-gpu`/`--nodes` and warn that `cluv sweep`'s computed values for that job override them.
 - After building `env_vars` (`500-501`), add `env_vars.update(extra_env or {})` so `CLUV_SWEEP_NAME`/`CLUV_SWEEP_TASK_OFFSET` flow into the `bash --login -c '<env> sbatch ...'` command (`548-555`) — same mechanism `GIT_COMMIT` already uses.
 - `submit()` (`84-92`) and `sbatch()` (`560-567`): add the same two params, thread through to their `get_sbatch_command()` calls. `submit_first()` and `Job` are **not** touched — `cluv sweep first` is out of scope (raise `NotImplementedError` in `cluv/cli/sweep.py` if `cluster == "first"`).
 
-### 3. New file `cluv/cli/sweep.py` — CLI orchestration, multi-job fan-out
+### 4. New file `cluv/cli/sweep.py` — CLI orchestration, multi-job fan-out
 
 ```python
 _NTASKS_RE = re.compile(r"^--ntasks=(\d+)$")
@@ -160,7 +185,7 @@ Notes:
 - `ensure_clean_git_state()` (called inside every `submit()`) runs once per job, but after the first run the tree is already clean/committed, so subsequent calls just re-verify and reuse the same commit hash — cheap, and this is the same repeated-call pattern `cluv_launcher.py`'s `run_sweep()` already relies on.
 - Concurrency throttling (`max_concurrent_submissions`) reuses/adapts the `cluv.utils.batched()` pattern already used in `hydra_plugins/cluv/cluv_launcher.py` (`array_parallelism`) rather than firing all `sbatch` calls at once — implementer should check whether a ready-made `run_tasks_with_progress_bar`/similar helper from `milatools.utils.parallel_progress` (already used in `cluv/cli/sync.py`) fits better than hand-rolling a batched-gather.
 
-### 4. Changes to `cluv/__main__.py`
+### 5. Changes to `cluv/__main__.py`
 
 - Generalize the `"submit"`-only argv-surgery at `cluv/__main__.py:44-53` to also handle `"sweep"` (loop over both subcommand names, first match wins).
 - Register `add_sweep_args()` in `main()` next to `submit_parser` (`88-89`).
@@ -179,22 +204,23 @@ Notes:
   (Mirrors the exact rationale already documented at `cluv/__main__.py:119-121` for why `REMAINDER`-swallowed flags need this kind of post-hoc recovery.)
 - Dispatch needs no change — `inspect.iscoroutinefunction()` (line 136) already handles async `sweep()` like async `submit()`.
 
-### 5. Tests (Phase 1)
+### 6. Tests (Phase 1)
 
-- **`tests/test_sweep.py`** (new, pure, no I/O): `expand_sweep_args` (passthrough, one/two swept flags, cartesian order, non-`=`/positional tokens ignored); `_slugify_combo` (determinism, sanitization, stable truncation); `patch_argv()` via `monkeypatch` on env + `sys.argv`, covering both no-op cases, a normal patch, **and the offset arithmetic specifically** (e.g. `SLURM_PROCID=2` + `CLUV_SWEEP_TASK_OFFSET=4` picks combo index 6), plus the out-of-range `SystemExit(0)` case computed against the *global* index; `current_sweep_run_info()` returning `None`/a stable `SweepRunInfo`, including a case showing the same combo yields the same `run_id`/`results_path` under two different offset/procid pairs that resolve to the same global index (simulating a resubmission where a combo lands on a different job/task).
+- **`tests/test_sweep.py`** (new, pure, no I/O): `expand_sweep_args` (passthrough, one/two swept flags, cartesian order, non-`=`/positional tokens ignored); `_slugify_combo` (determinism, sanitization, stable truncation); `patch_argv()` via `monkeypatch` on env + `sys.argv`, covering both no-op cases, a normal patch, **and the offset arithmetic specifically** (e.g. `SLURM_PROCID=2` + `CLUV_SWEEP_TASK_OFFSET=4` picks combo index 6), plus the out-of-range `SystemExit(0)` case computed against the *global* index; `_current_sweep_context()` returning `None` before `patch_argv()` runs / after a no-op / after an idle-exit, and returning `(sweep_name, slug, combo)` after a normal patch.
+- **`tests/test_job.py`** (new — `current_run_info()`/`RunInfo`/`get_run_id()` have no dedicated test file today; add one here rather than growing `test_sweep.py` into job.py's territory): the sweep branch of `current_run_info()`, driven by `monkeypatch` calling `cluv.sweep.patch_argv()` first — asserts `run_id`/`results_path`/`command` for a resolved combo, **and** that the same combo yields the same `run_id`/`results_path` under two different offset/procid pairs that resolve to the same global index (simulating a resubmission where a combo lands on a different job/task). Also lock in today's non-sweep behavior (packing/chunking/plain-job `run_id` shapes) as regression coverage, since none exists yet.
 - **`tests/test_submit.py`**: extend `get_sbatch_command()` tests with `in_job_packing=True` (assert `%j_%t` output path, `extra_env` present in the generated command string) and the new job-script-header conflict warning.
 - **`tests/test_sweep_cli.py`** (new): `compute_job_capacity` (no flags → 1; `--ntasks=N` → N; `--ntasks-per-gpu=K` alone → K; `--ntasks-per-gpu=K` + `--gres=gpu:h100:3` → 3K); `default_sweep_name`; an end-to-end `sweep(...)` test with `submit` monkeypatched to a recording stub, asserting: the right **number** of `submit()` calls for a few `(n_combos, job_capacity)` cases, each call's `extra_env` offset (`0, job_capacity, 2*job_capacity, ...`), and that `sbatch_args`/`program_args` are identical across all calls. `sweep(cluster="first", ...)` raises `NotImplementedError`.
 - Extend wherever `__main__.py`'s submit argv-surgery is already tested with a `cluv sweep <cluster> job.sh --name x --ntasks-per-gpu=2 --gres=gpu:h100:1 -- python main.py --foo=1,2` case, asserting the right `args_dict`.
 
-### 6. Docs (Phase 1)
+### 7. Docs (Phase 1)
 
-Add `docs/sweep.md` (mirrors `docs/hydra-launcher.md`'s structure): the `--flag=v1,v2` expansion rule, how one job's capacity is derived from `--ntasks`/`--ntasks-per-gpu`, **the one-job-per-GPU submission model and why** (small jobs schedule more easily; a failed GPU only costs one job), the `patch_argv()` → `current_sweep_run_info()` call-order requirement, and a full worked example. Extend `docs/commands.md` with a `## cluv sweep` section (same format as `## cluv submit`). Register `docs/sweep.md` in `mkdocs.yaml`'s `nav:`. Add `docs/reference/cli/sweep.md` (`::: cluv.cli.sweep`) and `docs/reference/sweep.md` (`::: cluv.sweep`).
+Add `docs/sweep.md` (mirrors `docs/hydra-launcher.md`'s structure): the `--flag=v1,v2` expansion rule, how one job's capacity is derived from `--ntasks`/`--ntasks-per-gpu`, **the one-job-per-GPU submission model and why** (small jobs schedule more easily; a failed GPU only costs one job), the `patch_argv()` → `current_run_info()` call-order requirement (the same `current_run_info()` already used by `cluv submit` scripts, e.g. `examples/pytorch-example/main.py`), and a full worked example. Extend `docs/commands.md` with a `## cluv sweep` section (same format as `## cluv submit`). Register `docs/sweep.md` in `mkdocs.yaml`'s `nav:`. Add `docs/reference/cli/sweep.md` (`::: cluv.cli.sweep`) and `docs/reference/sweep.md` (`::: cluv.sweep`).
 
 ---
 
 ## Phase 2 — `--vram`-driven automatic sizing (additive)
 
-Nothing here changes `cluv/sweep.py` (the runtime module) — `patch_argv`/`current_sweep_run_info`/`expand_sweep_args`/`SweepRunInfo`/`_slugify_combo`/the offset mechanism are all reused byte-for-byte. Phase 2 only changes how `cluv/cli/sweep.py` decides **one job's** capacity and sbatch args before replicating it, plus new supporting modules/config for GPU VRAM/inventory lookup.
+Nothing here changes `cluv/sweep.py` or `cluv/job.py`'s sweep branch (the runtime modules) — `patch_argv`/`_current_sweep_context`/`expand_sweep_args`/`_slugify_combo`/the offset mechanism/`current_run_info()`'s sweep path are all reused byte-for-byte. Phase 2 only changes how `cluv/cli/sweep.py` decides **one job's** capacity and sbatch args before replicating it, plus new supporting modules/config for GPU VRAM/inventory lookup.
 
 ### 1. New file `cluv/gpu_info.py`
 
@@ -313,4 +339,4 @@ Extend `docs/sweep.md` with the `--vram` section: the GPU-type-must-be-explicit 
 ## Verification
 
 - `uv run pytest` after each phase — all new/extended tests above should pass, plus the full existing suite (esp. `tests/test_submit.py`, `tests/test_config.py`) should still pass unchanged given the added-but-defaulted params/fields.
-- Manual end-to-end check (needs real cluster access): a tiny throwaway script that calls `cluv.sweep.patch_argv()` then prints `sys.argv` and `cluv.sweep.current_sweep_run_info()`. Run e.g. `cluv sweep mila scripts/job.sh --name smoke-test --ntasks-per-gpu=2 --gres=gpu:rtx8000:1 -- python -c "..." --x=1,2,3,4,5` (5 combos, capacity 2 → 3 jobs, last job idle-exits one slot). Confirm: each job's two tasks print different `--x=` values consistent with `offset + SLURM_PROCID`, all 5 combos are covered exactly once across the 3 jobs, and `results_path` is stable and distinct per combo. Resubmit with the same `--name` and confirm the same `results_path` values reappear regardless of which job/task a given combo lands on this time. For Phase 2, repeat with `--vram` instead of manual `--ntasks*`/`--gres`, on a cluster with a known GPU type/VRAM (and separately on a `full_node_allocations` cluster), and confirm the computed `job_capacity`/`--nodes`/number of jobs match hand-computed expectations.
+- Manual end-to-end check (needs real cluster access): a tiny throwaway script that calls `cluv.sweep.patch_argv()` then prints `sys.argv` and `cluv.job.current_run_info()`. Run e.g. `cluv sweep mila scripts/job.sh --name smoke-test --ntasks-per-gpu=2 --gres=gpu:rtx8000:1 -- python -c "..." --x=1,2,3,4,5` (5 combos, capacity 2 → 3 jobs, last job idle-exits one slot). Confirm: each job's two tasks print different `--x=` values consistent with `offset + SLURM_PROCID`, all 5 combos are covered exactly once across the 3 jobs, and `results_path` is stable and distinct per combo. Resubmit with the same `--name` and confirm the same `results_path` values reappear regardless of which job/task a given combo lands on this time. For Phase 2, repeat with `--vram` instead of manual `--ntasks*`/`--gres`, on a cluster with a known GPU type/VRAM (and separately on a `full_node_allocations` cluster), and confirm the computed `job_capacity`/`--nodes`/number of jobs match hand-computed expectations.

@@ -50,3 +50,7 @@ Run tests with `uv run pytest`.
 
 - Make small, clean commits regularly. Each commit should only contain changes related to a single "action" or "theme".
 - Write minimalist, clean, pythonic code. Avoid being overly general or abstract.
+
+## Claude Code session conventions
+
+- **Isolate in a worktree before editing.** This repo regularly has multiple Claude sessions (and humans) working on it at once. Before making any file changes, isolate into a git worktree — the `EnterWorktree` tool if available, otherwise `git worktree add` — instead of editing the shared checkout directly. Commit (and push, if the task calls for it) from the worktree so the work survives after it's cleaned up.

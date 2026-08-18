@@ -150,6 +150,9 @@ results_path = "$HOME/logs/cluv"
 
 [tool.cluv.clusters.rorqual]
 sbatch_args = { account = "rrg-bengioy-ad" }
+# With more than one allocation on a cluster, `cluv submit rorqual` submits one job per allocation
+# and keeps the first one that starts, cancelling the others:
+# sbatch_args = [{ account = "rrg-bengioy-ad" }, { account = "def-bengioy" }]
 
 [tool.cluv.clusters.fir]
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }

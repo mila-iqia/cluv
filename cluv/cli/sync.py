@@ -70,10 +70,8 @@ async def sync(
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
     here = current_cluster()
-    if clusters:
-        if here in clusters:
-            clusters.remove(here)
-        clusters = _dedupe_clusters_sharing_a_filesystem(clusters)
+    if clusters and here in clusters:
+        clusters.remove(here)
 
     config = get_cluv_config()
 
@@ -105,9 +103,23 @@ async def sync(
     # TODO: Add an --ignore flag to ignore some clusters?
     console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
+    # A cluster that shares a filesystem with another one already being synced (see
+    # `CLUSTERS_SHARING_A_FILESYSTEM`) is the exact same on-disk checkout, so syncing it a second
+    # time would be redundant, and unsafe to do concurrently. It's still kept in `remotes` (the
+    # return value of this function), since it can be a genuinely different Slurm cluster to
+    # submit jobs to (e.g. `trillium`/`trillium-gpu` are the CPU and GPU partitions of the same
+    # cluster) -- only the sync step itself is skipped for it.
+    remotes_to_sync = _remotes_to_actually_sync(remotes)
+    skipped = [r.hostname for r in remotes if r not in remotes_to_sync]
+    if skipped:
+        console.log(
+            f"[yellow]Not syncing separately with {skipped}: shares a filesystem with a cluster "
+            "already being synced.[/yellow]"
+        )
+
     tasks: list[AsyncTaskFn] = []
     task_descriptions: list[str] = []
-    for remote in remotes:
+    for remote in remotes_to_sync:
         tasks.append(functools.partial(sync_task_function, remote=remote))
         task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
 
@@ -146,7 +158,7 @@ async def sync(
 
     # Display a consolidated summary of all newly-synced runs across all clusters.
     cwd = Path.cwd()
-    for remote, new_runs in zip(remotes, per_cluster_new_runs):
+    for remote, new_runs in zip(remotes_to_sync, per_cluster_new_runs):
         if new_runs:
             console.print(f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]")
             for run_path in sorted(new_runs):
@@ -169,36 +181,37 @@ CLUSTERS_SHARING_A_FILESYSTEM: list[frozenset[str]] = [
 ]
 
 
-def _dedupe_clusters_sharing_a_filesystem(clusters: list[str]) -> list[str]:
-    """Drops clusters that are just another login node for one already in the list.
+def _remotes_to_actually_sync(remotes: list[Remote]) -> list[Remote]:
+    """Drops remotes that are just another login node for one already in the list.
 
-    See `CLUSTERS_SHARING_A_FILESYSTEM`. Keeps the first cluster seen from each group and
-    preserves the order of `clusters` otherwise.
+    See `CLUSTERS_SHARING_A_FILESYSTEM`. Keeps the first remote seen from each group and
+    preserves the order of `remotes` otherwise.
     """
     seen_groups: set[frozenset[str]] = set()
-    deduped: list[str] = []
-    for cluster in clusters:
-        group = next((g for g in CLUSTERS_SHARING_A_FILESYSTEM if cluster in g), None)
+    to_sync: list[Remote] = []
+    for remote in remotes:
+        group = next((g for g in CLUSTERS_SHARING_A_FILESYSTEM if remote.hostname in g), None)
         if group is not None:
             if group in seen_groups:
                 continue
             seen_groups.add(group)
-        deduped.append(cluster)
-    return deduped
+        to_sync.append(remote)
+    return to_sync
 
 
 async def get_active_remotes() -> list[Remote]:
     """Returns the Remotes for each cluster which has an active SSH connection.
 
-    Disabled clusters (see `cluv disable`) and clusters sharing a filesystem with one already
-    included (see `CLUSTERS_SHARING_A_FILESYSTEM`) are excluded.
+    Disabled clusters (see `cluv disable`) are excluded. Note that this can include more than one
+    cluster from the same `CLUSTERS_SHARING_A_FILESYSTEM` group (e.g. both `trillium` and
+    `trillium-gpu`): they're genuinely different Slurm clusters to submit jobs to, even though
+    `sync()` only syncs the underlying (shared) checkout once.
     """
     clusters = get_cluv_config().clusters_names
     if (this_cluster := current_cluster()) and this_cluster in clusters:
         clusters.remove(this_cluster)
     disabled = get_disabled_clusters()
     clusters = [c for c in clusters if c not in disabled]
-    clusters = _dedupe_clusters_sharing_a_filesystem(clusters)
     connections = await asyncio.gather(
         *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
     )

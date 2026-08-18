@@ -88,6 +88,8 @@ async def submit(
     program_args: list[str],
     autocommit: bool = False,
     chunking: bool = False,
+    in_job_packing: bool = False,
+    extra_env: dict[str, str] | None = None,
     _skip_sync: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
@@ -108,6 +110,11 @@ async def submit(
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
         chunking: Whether to split the job up into multiple consecutive short jobs.
+        in_job_packing: Whether this job's `sbatch_args` pack multiple tasks per GPU
+            (`--ntasks-per-gpu`), as `cluv sweep` does. Used to activate the `%j_%t`
+            output path convention.
+        extra_env: Extra environment variables merged into the generated `sbatch` command,
+            e.g. the `CLUV_SWEEP_NAME`/`CLUV_SWEEP_TASK_OFFSET` variables `cluv sweep` sets.
         _skip_sync: If True, skip the synchronization step before submitting.
 
     Returns:
@@ -164,7 +171,16 @@ async def submit(
         # Submitting to the current cluster. The sbatch command will run locally.
         remote = None
 
-    result, job = await sbatch(remote, job_script, sbatch_args, program_args, git_commit, chunking)
+    result, job = await sbatch(
+        remote,
+        job_script,
+        sbatch_args,
+        program_args,
+        git_commit,
+        chunking,
+        in_job_packing=in_job_packing,
+        extra_env=extra_env,
+    )
 
     if result.returncode != 0 or job is None:
         console.print(f"[red] Error during sbatch : {result.stderr}[/red]")
@@ -476,10 +492,17 @@ def get_sbatch_command(
     program_args: list[str],
     git_commit: str,
     chunking: bool,
+    in_job_packing: bool = False,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[str, ResolvedSbatchArgs]:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate
     sbatch_arguments, environment variables and paths set.
+
+    `in_job_packing` is set by `cluv sweep` for a job whose `sbatch_args` size it to pack
+    multiple tasks per GPU (`--ntasks-per-gpu`); it changes the output path to include the
+    per-task placeholder `%t` alongside the per-job `%j`. `extra_env` is merged into the
+    generated env vars (`cluv sweep` uses it to pass `CLUV_SWEEP_NAME`/`CLUV_SWEEP_TASK_OFFSET`).
     """
     # Resolve remote job script path.
     local_job_script = job_script
@@ -499,6 +522,7 @@ def get_sbatch_command(
     cluster_config = config.get_cluster_config(cluster)
     env_vars: dict[str, str] = {**config.env}
     env_vars.update(cluster_config.env)
+    env_vars.update(extra_env or {})
 
     # The sbatch args from the config are overwritten by the ones passed to the submit command.
     config_sbatch_args = sbatch_args_from_dict(cluster_config.sbatch_args)
@@ -509,8 +533,6 @@ def get_sbatch_command(
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
-    in_job_packing = False
-    assert not in_job_packing, "todo"
     # might contain unresolved env vars.
     cluster_results_path = PurePosixPath(cluster_config.results_path)
     n_chunks = None
@@ -545,6 +567,23 @@ def get_sbatch_command(
             )
         )
 
+    if in_job_packing:
+        _PACKING_SBATCH_FLAGS = ("--ntasks", "--gpus", "--ntasks-per-gpu", "--nodes")
+        conflicting_lines = [
+            line.strip()
+            for line in job_script.read_text().splitlines()
+            if line.strip().startswith("#SBATCH")
+            and any(flag in line for flag in _PACKING_SBATCH_FLAGS)
+        ]
+        if conflicting_lines:
+            logger.warning(
+                UserWarning(
+                    f"[yellow]⚠️ The job script {job_script} sets {', '.join(conflicting_lines)}, "
+                    f"which will be overridden by cluv sweep's computed job sizing "
+                    f"(--ntasks/--gpus/--ntasks-per-gpu/--nodes).[/yellow]"
+                )
+            )
+
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     sbatch_args_str = shlex.join(sbatch_args)
     program_args_str = shlex.join(program_args)
@@ -564,6 +603,8 @@ async def sbatch(
     program_args: list[str],
     git_commit: str,
     chunking: bool,
+    in_job_packing: bool = False,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[subprocess.CompletedProcess[str], Job | None]:
     """Submit the job via sbatch on the remote cluster, and return the command output and the job info."""
     cluster = remote.hostname if remote else current_cluster()
@@ -571,7 +612,14 @@ async def sbatch(
     # to `submit`.
     assert cluster
     sbatch_command, resolved_args = get_sbatch_command(
-        cluster, job_script, sbatch_args, program_args, git_commit, chunking
+        cluster,
+        job_script,
+        sbatch_args,
+        program_args,
+        git_commit,
+        chunking,
+        in_job_packing=in_job_packing,
+        extra_env=extra_env,
     )
     display = display_commands.get()
     hide = not display

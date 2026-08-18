@@ -167,7 +167,7 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 :   The cluster to submit the job on. Can be set to `first` to submit the job to every cluster and
     wait until one of them starts; once one starts, the others are automatically cancelled.
     The same happens when the target cluster has
-    [more than one job configuration](guides/submit-config.md#multiple-job-configurations-on-the-same-cluster)
+    [more than one job configuration](guides/submit/config.md#multiple-job-configurations-on-the-same-cluster)
     configured: one job is submitted per configuration, and only the first one to start is kept.
 
 `job.sh`

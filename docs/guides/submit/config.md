@@ -93,7 +93,7 @@ by every entry of a cluster are best kept in the global section (there is no per
 section: a `sbatch_args` list *replaces* the single-flag-set form).
 
 `cluv submit narval` then submits **one job per entry**, waits until one of them starts, and
-cancels the others - exactly what [`cluv submit first`](../commands.md#cluv-submit) does across
+cancels the others - exactly what [`cluv submit first`](../../commands.md#cluv-submit) does across
 clusters. This is useful whenever you can't predict which configuration will be scheduled first: a
 `def-` allocation often starts sooner when the group has been using a lot of compute recently, and
 the same reasoning applies to a less-requested GPU type or a shorter walltime bucket.

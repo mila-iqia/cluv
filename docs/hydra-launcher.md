@@ -1,16 +1,17 @@
 # Using Cluv with Hydra
 
 The Cluv Hydra Launcher lets you run [Hydra](https://hydra.cc/) multi-run sweeps directly on
-remote Slurm clusters, using the same `pyproject.toml`-based config that drives `cluv submit`.
+remote Slurm clusters, using the same `pyproject.toml`-based config that drives
+[`cluv submit`](commands.md/#cluv-submit).
 
 It is a drop-in replacement for the
-[Submitit launcher plugin](https://hydra.cc/docs/plugins/submitit_launcher/) — the same
-`gpus_per_node`, `cpus_per_task`, `mem_gb`, `timeout_min`, etc. parameters all work as-is.
+[Submitit launcher plugin](https://hydra.cc/docs/plugins/submitit_launcher/) (the same
+`gpus_per_node`, `cpus_per_task`, `mem_gb`, `timeout_min`, etc. parameters all work as-is).
 
 What it adds on top of Submitit:
 
 - **Allows using _remote_ clusters**: Cluv allows you to launch jobs on the current cluster as well as remote clusters.
-- **Automatic sync**: the project is synced to the target cluster before submission (via `cluv sync`).
+- **Automatic sync**: the project is synced to the target cluster before submission (via [`cluv sync`](commands.md/#cluv-sync)).
 - **Automatic result fetch**: results are rsynced back locally once jobs finish.
 - **Cluster selection**: set `cluster: mila` (or any cluster in your config) to pick the target. Default is 'first' to use the first cluster that runs the job.
 <div class="annotate" markdown>
@@ -32,7 +33,7 @@ uv add cluster-uv[hydra]
 ## Configure your project
 
 Your `pyproject.toml` needs a `[tool.cluv]` section with at least a `results_path` and
-the clusters you want to target. A minimal setup can be obtained by running `cluv init`.
+the clusters you want to target. A minimal setup can be obtained by running [`cluv init`](commands.md/#cluv-init).
 
 Take a look at the pyproject.toml file of this example:
 

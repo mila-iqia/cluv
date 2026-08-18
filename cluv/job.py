@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 import functools
 import os
@@ -76,41 +78,14 @@ class RunInfo:
         return cluv.config.get_cluv_config().get_cluster_config(self.cluster)
 
 
-@dataclass(frozen=True)
+@dataclass()
 class JobInfo:
     """Information about a job, which contains one or more tasks/"runs"."""
 
     cluster: str
-    job_id: int
-    array_job_id: int | None
+    job_id: str
     tasks: list[RunInfo]
-
-    @property
-    def state(self):
-        """Reuse the state polling logic from submitit to get the state of the job.
-
-        Note: This doesn't call sacct too often, there is a caching mechanism in submitit.
-        """
-
-        if self.cluster == current_cluster():
-            from submitit.slurm.slurm import SlurmJob
-
-            return SlurmJob(
-                # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
-                folder=self.tasks[0].results_path,
-                job_id=str(self.job_id),
-                tasks=list(range(len(self.tasks))),
-            ).state
-        from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-
-        return RemoteSlurmJob(
-            self.cluster,
-            # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
-            folder=self.tasks[0].results_path,
-            job_id=str(self.job_id),
-            tasks=list(range(len(self.tasks))),
-            remote_dir_sync=None,  # type: ignore
-        ).state
+    n_chunks: int | None = None
 
 
 def get_results_path() -> Path:
@@ -228,7 +203,7 @@ def get_run_id(
     cluster: str,
     job_id: int | str,
     task_index: int | str = 0,
-    array_job_id: str | None = None,
+    array_job_id: int | str | None = None,
     doing_job_packing: bool = False,
     doing_job_chunking: bool = False,
 ) -> str:

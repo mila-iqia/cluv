@@ -1,6 +1,6 @@
 # Configuring job submission
 
-[`cluv submit`](../commands.md#cluv-submit) reads your `pyproject.toml` to build the final `sbatch` command.
+[`cluv submit`](../../commands.md#cluv-submit) reads your `pyproject.toml` to build the final `sbatch` command.
 This guide explains which config fields are used, how global and per-cluster values are merged, and what is injected automatically.
 
 ## Config fields used by `cluv submit`
@@ -103,5 +103,6 @@ cluv submit narval              # uses scripts/job_narval.sh
 cluv submit narval new_job.sh   # uses new_job.sh, ignoring config
 ```
 
-If neither a CLI script nor a configured `job_script_path` exists for the target cluster, `cluv
-submit` exits with an error.
+If neither a CLI script nor a configured `job_script_path` exists for the target cluster, [`cluv
+submit`](../../commands.md) exits with an error. See the page ["Writing a job script"](job-scripts.md) for what the
+script should contain.

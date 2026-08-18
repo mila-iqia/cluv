@@ -185,6 +185,14 @@ def add_submit_args(subparsers: Subparsers):
         help="Whether to split the job up into multiple consecutive short jobs.",
     )
     submit_parser.add_argument(
+        "--parsable",
+        action="store_true",
+        help=(
+            "Output only the job ID (or '<cluster>:<job_id>' when cluster is 'first'), "
+            "for programmatic use."
+        ),
+    )
+    submit_parser.add_argument(
         "sbatch_args",
         nargs=argparse.REMAINDER,
         metavar="...",

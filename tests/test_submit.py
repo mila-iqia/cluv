@@ -291,6 +291,7 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": False,
+                "parsable": False,
             }
         )
 
@@ -311,6 +312,7 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": False,
+                "parsable": False,
             }
         )
 
@@ -334,6 +336,28 @@ class TestSubmitCliParsing:
                 "program_args": [],
                 "autocommit": False,
                 "chunking": False,
+                "parsable": False,
+            }
+        )
+
+    def test_parsable_flag_is_forwarded_to_submit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--parsable", "--", "python", "main.py"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "chunking": False,
+                "parsable": True,
             }
         )
 

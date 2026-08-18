@@ -23,7 +23,6 @@ from cluv.slurm import (
     clean_job_state,
     parse_disk_quota,
     parse_diskusage_report,
-    parse_partition_stats,
     parse_savail,
     parse_sinfo_nodes,
     parse_slurm_time,
@@ -99,9 +98,8 @@ _SEP = "---CLUV-SEP---"
 
 SINFO_LIST_GPUS = 'sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu'
 
-# Script for DRAC clusters (partition-stats + diskusage_report, no savail/disk-quota)
+# Script for DRAC clusters (diskusage_report, no savail/disk-quota)
 _REMOTE_SCRIPT_DRAC = f"""
-partition-stats 2>/dev/null; echo {_SEP}
 {SINFO_LIST_GPUS}; echo {_SEP}
 timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
 echo {_SEP}
@@ -110,7 +108,6 @@ echo {_SEP}
 
 # Script for the Mila cluster (savail + disk-quota, no partition-stats/diskusage_report)
 _REMOTE_SCRIPT_MILA = f"""
-echo {_SEP}
 {SINFO_LIST_GPUS}; echo {_SEP}
 echo {_SEP}
 savail 2>/dev/null; echo {_SEP}
@@ -239,20 +236,10 @@ async def get_cluster_status(
         return get_default_cluster_status(cluster)
 
     parts = raw.split(_SEP)
-    partition_stats_out, sinfo_out, diskusage_out, savail_out, disk_quota_out = parts[:5]
+    sinfo_out, diskusage_out, savail_out, disk_quota_out = parts[:4]
 
     # --- GPU info: prefer savail (Mila) over sinfo (DRAC) ---
     gpu_stats = parse_savail(savail_out) or parse_sinfo_nodes(sinfo_out)
-
-    # --- Partition stats can give us node counts which are a useful
-    #     fallback when GPU counts aren't available --
-    has_partition_stats = bool(partition_stats_out.strip())
-    if has_partition_stats:
-        ps = parse_partition_stats(partition_stats_out)
-        # If neither savail nor sinfo gave us GPU counts, fall back to
-        # partition-stats node counts (less precise but better than nothing).
-        if not gpu_stats:
-            gpu_stats = {"GPU": (ps["gpu_idle_nodes"], ps["gpu_total_nodes"])}
 
     # --- Storage: prefer diskusage_report (DRAC, per-user quotas);
     #     fall back to disk-quota (Mila: lfs for $HOME, beegfs for $SCRATCH) ---
@@ -339,7 +326,7 @@ def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:
 def _gpu_bars(gpu_stats: dict[str, tuple[int, int]], name_width: int) -> Text:
     """Return one free-GPU bar per model, stacked vertically and labelled."""
     if not gpu_stats:
-        return Text("-")
+        return Text("N/A", style="dim")
 
     bars = Text()
     for i, (model, (idle, total)) in enumerate(gpu_stats.items()):

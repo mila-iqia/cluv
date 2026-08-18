@@ -547,12 +547,23 @@ def get_sbatch_command(
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     sbatch_args_str = shlex.join(sbatch_args)
-    program_args_str = shlex.join(program_args)
 
-    sbatch_command = (
-        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
-        f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
-    )
+    # Pass program_args as positional parameters to `bash -c` via `"$@"` so that special values
+    # like empty strings are preserved correctly (they cannot be represented inside single quotes).
+    if program_args:
+        inner_cmd = (
+            f"{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
+            f'{sbatch_args_str} {remote_job_script} "$@"'
+        )
+        extra_args = " " + " ".join(shlex.quote(a) for a in program_args)
+    else:
+        inner_cmd = (
+            f"{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
+            f"{sbatch_args_str} {remote_job_script}"
+        )
+        extra_args = ""
+
+    sbatch_command = f"bash --login -c {shlex.quote(inner_cmd)} --{extra_args}"
 
     return sbatch_command, ResolvedSbatchArgs(sbatch_args=sbatch_args, n_chunks=n_chunks)
 

@@ -26,6 +26,7 @@ from .cli.disable import disable, enable
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run
+from .cli.sh import sh
 from .cli.status import status
 from .cli.submit import submit
 from .cli.sync import sync
@@ -71,6 +72,9 @@ def main(argv: list[str] | None = None) -> None:
 
     run_parser = add_run_args(subparsers)
     _add_v_arg(run_parser)
+
+    sh_parser = add_sh_args(subparsers)
+    _add_v_arg(sh_parser)
 
     login_parser = add_login_args(subparsers)
     _add_v_arg(login_parser)
@@ -206,6 +210,11 @@ def add_status_args(subparsers: Subparsers):
         metavar="<table>",
         help="Which table to display: cluster overview, jobs overview, or both (default: all).",
     )
+    status_parser.add_argument(
+        "--all-jobs",
+        action="store_true",
+        help="Show all jobs instead of only the 10 most recent.",
+    )
     status_parser.set_defaults(func=status)
     return status_parser
 
@@ -338,6 +347,24 @@ def add_run_args(subparsers: Subparsers):
     )
     run_parser.set_defaults(func=run)
     return run_parser
+
+
+def add_sh_args(subparsers: Subparsers):
+    sh_parser = subparsers.add_parser(
+        "sh",
+        help="Run a raw command on every currently-connected cluster (and locally, if applicable) via clush.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+        usage="cluv sh <command...>",
+    )
+    sh_parser.add_argument(
+        "command",
+        type=str,
+        metavar="<command>",
+        help="The command to run on every currently-connected cluster.",
+        nargs=argparse.REMAINDER,
+    )
+    sh_parser.set_defaults(func=sh)
+    return sh_parser
 
 
 def add_disable_args(subparsers: Subparsers):

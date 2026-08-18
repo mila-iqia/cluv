@@ -38,6 +38,9 @@ cluv <command> [options]
 **[`cluv run`](#cluv-run)**
 :   Run a command on a specific cluster.
 
+**[`cluv sh`](#cluv-sh)**
+:   Run a raw shell command on every connected cluster.
+
 **Options**
 
 Available for all commands.
@@ -227,13 +230,18 @@ Requires an active connection (see [`cluv login`](#cluv-login)) to fetch live da
 
 **Usage**
 ```console
-cluv status [table]
+cluv status [table] [options]
 ```
 
 **Arguments**
 
 `table`
 :   Which table to display in the status output. Can be one of `jobs`, `clusters`, or `all`. Defaults to `all`.
+
+**Options**
+
+`--all-jobs`
+:   Show all jobs instead of only the 10 most recent. By default, only the 10 most recent jobs are shown.
 
 ---
 
@@ -294,6 +302,28 @@ cluv run <cluster> <command>
 
 `cluster`
 :   The cluster to run the command on.
+
+`command`
+:   The command to run, along with any of its arguments.
+
+---
+
+## [`cluv sh`](#cluv-sh)
+
+Run a raw shell command on every cluster you currently have an active SSH connection to, via
+[`clush`](https://clustershell.readthedocs.io/). If run from a cluster (i.e. inside a job or on a
+login node), also runs the command locally first.
+
+Unlike [`cluv run`](#cluv-run), this does not sync the project or wrap the command in `uv run` —
+it just runs the given command as-is. It also never tries to connect to clusters you aren't
+already connected to, so it never triggers a 2FA prompt.
+
+**Usage**
+```console
+cluv sh <command...>
+```
+
+**Arguments**
 
 `command`
 :   The command to run, along with any of its arguments.

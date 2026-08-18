@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 __all__ = ["status"]
 
 
+DEFAULT_SHOW_JOBS = 10
+
+
 @dataclass
 class ClusterJobStats:
     running: int
@@ -412,7 +415,9 @@ def _build_cluster_table(
     return table
 
 
-def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobInfo]) -> Table:
+def _build_cluv_jobs_table(
+    cached_jobs: list[Job], live_info: dict[int, LiveJobInfo], max_jobs: int | None
+) -> Table:
     """Build the jobs overview table with one row per cached job, enriched with live status info."""
     table = Table(
         title="Cluv Jobs Overview",
@@ -430,7 +435,8 @@ def _build_cluv_jobs_table(cached_jobs: list[Job], live_info: dict[int, LiveJobI
     table.add_column("Waiting time")
     table.add_column("Elapsed time")
 
-    for job in cached_jobs:
+    # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
+    for job in list(reversed(cached_jobs))[:max_jobs]:
         info = live_info.get(job.job_id)
 
         try:
@@ -483,7 +489,7 @@ def _count_states(tasks: list[ArrayTaskInfo]) -> Text:
     return total
 
 
-def _build_legend() -> Panel:
+def _build_cluster_table_legend() -> Panel:
     legend = (
         "[green]●[/green] connected  "
         "[red]⚠[/red] disconnected  "
@@ -494,15 +500,22 @@ def _build_legend() -> Panel:
     return Panel(legend, title="Legend", border_style="dim", padding=(0, 1))
 
 
+def _build_job_table_legend(max_jobs: int | None, total_jobs: int) -> Panel:
+    if max_jobs is None or max_jobs >= total_jobs:
+        return Panel(f"Showing {total_jobs} / {total_jobs} cluv jobs.", border_style="dim")
+
+    return Panel(
+        f"Showing {max_jobs} / {total_jobs} cluv jobs. Use --all-jobs to show all jobs.",
+        border_style="dim",
+    )
+
+
 async def get_job_infos(
     cached_jobs: list[Job],
     clusters: list[str],
     disabled_clusters: dict[str, DisabledCluster],
 ) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
     """Fetch live job info for all cached jobs, and count job statuses per cluster."""
-    # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
-    cached_jobs = list(reversed(cached_jobs))
-
     # Regroup jobs by cluster
     cluster_jobs: dict[str, list[int]] = {}
     for job in cached_jobs:
@@ -545,7 +558,7 @@ async def get_job_infos(
     return live_info, clusters_job_stats
 
 
-async def status(table: Literal["clusters", "jobs", "all"]) -> None:
+async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> None:
     """Show status of clusters and jobs.
 
     Parameters:
@@ -589,15 +602,18 @@ async def status(table: Literal["clusters", "jobs", "all"]) -> None:
         if clusters_status and all(not c.online for c in clusters_status):
             console.print(
                 (
-                    "[yellow]No active connections to any clusters found. "
-                    "Run [bold]cluv login[/bold] first.[/yellow]"
-                )
+                    "No active connections to any clusters found. "
+                    "Run [bold]cluv login[/bold] first."
+                ),
+                style="yellow",
             )
 
         console.print(_build_cluster_table(clusters_status, clusters_job_stats, disabled_clusters))
-        console.print(_build_legend())
+        console.print(_build_cluster_table_legend())
         console.print()
 
     if table in ("jobs", "all"):
-        console.print(_build_cluv_jobs_table(cached_jobs, jobs_status))
+        max_jobs = None if all_jobs else DEFAULT_SHOW_JOBS
+        console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, max_jobs))
+        console.print(_build_job_table_legend(max_jobs, len(cached_jobs)))
         console.print()

@@ -92,6 +92,11 @@ cluv run mila -- ls logs
 cluv status
 ```
 
+### Run a raw shell command on every connected cluster
+```console
+cluv sh -- squeue --me
+```
+
 ### How the commands are used together
 
 ``` mermaid
@@ -105,6 +110,7 @@ cluv status
         enable(<b>cluv enable</b> <br> Enable access to clusters)
         clean(<b>cluv clean</b> <br> Clean old logs on clusters)
         run(<b>cluv run</b> <br> Run commands on clusters)
+        sh(<b>cluv sh</b> <br> Run raw shell commands on clusters)
 
         init ===> login
         init ==> disable
@@ -115,6 +121,7 @@ cluv status
         login ===> status
         login ===> clean
         login ===> run
+        login ===> sh
 
         click init "commands/#cluv-init"
         click login "commands/#cluv-login"
@@ -125,4 +132,5 @@ cluv status
         click enable "commands/#cluv-enable"
         click clean "commands/#cluv-clean"
         click run "commands/#cluv-run"
+        click sh "commands/#cluv-sh"
 ```

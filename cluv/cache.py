@@ -2,7 +2,7 @@ import dataclasses
 import json
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import platformdirs
@@ -61,9 +61,42 @@ class DisabledCluster:
 
 
 @dataclass(frozen=True)
+class CachedGpuTypes:
+    """The GPU types (and their VRAM in GB) available on a cluster, as of `fetched_at`."""
+
+    fetched_at: datetime
+    gpu_types: dict[str, float | None]
+
+
+@dataclass(frozen=True)
 class CacheContent:
     project_states: dict[str, ProjectStateOnCluster] = dataclasses.field(default_factory=dict)
     disabled_clusters: dict[str, DisabledCluster] = dataclasses.field(default_factory=dict)
+    gpu_types: dict[str, CachedGpuTypes] = dataclasses.field(default_factory=dict)
+
+
+GPU_TYPES_CACHE_DURATION = timedelta(days=7)
+"""How long the GPU types of a cluster are cached: new GPUs don't show up very often."""
+
+
+def get_cached_gpu_types(cluster: str) -> dict[str, float | None] | None:
+    """Return the cached GPU types of a cluster, or None if there aren't any (recent) ones."""
+    cached = read_cache().gpu_types.get(cluster)
+    if cached is None:
+        return None
+    if datetime.now(tz=timezone.utc) - _ensure_utc(cached.fetched_at) > GPU_TYPES_CACHE_DURATION:
+        logger.debug("The cached GPU types of %s are too old.", cluster)
+        return None
+    return cached.gpu_types
+
+
+def save_gpu_types(cluster: str, gpu_types: dict[str, float | None]) -> None:
+    """Save the GPU types of a cluster to the cache."""
+    cache = read_cache()
+    cache.gpu_types[cluster] = CachedGpuTypes(
+        fetched_at=datetime.now(tz=timezone.utc), gpu_types=gpu_types
+    )
+    write_cache(cache)
 
 
 def save_job(job: Job) -> None:

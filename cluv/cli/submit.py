@@ -17,6 +17,14 @@ from rich.live import Live
 
 from cluv.cache import Job, Submission, save_job
 from cluv.cli.submit_utils.chunking import apply_chunking
+from cluv.cli.submit_utils.vram import (
+    GpuRequest,
+    compatible_gpu_types,
+    find_gpu_request,
+    get_gpu_types,
+    parse_vram,
+    sbatch_args_for_gpu_type,
+)
 from cluv.cli.sync import get_cluster_to_remote, sync_common_part, sync_per_cluster_part
 from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
@@ -127,10 +135,14 @@ async def submit(
     program_args: list[str],
     autocommit: bool = False,
     chunking: int | None = None,
+    vram: str | None = None,
     _skip_sync: bool = False,
 ) -> Job | None:
     """Submit a job to the given cluster (or all clusters if `cluster=="first"`),
     and return the Job object if successful.
+
+    When `vram` is set, one job is submitted per GPU type of each cluster that has at least
+    that much VRAM (including MIG slices), racing them the same way as multiple allocations.
 
     Returns None if the submission failed.
     """
@@ -140,18 +152,25 @@ async def submit(
     git_commit = ensure_clean_git_state(autocommit=autocommit, submit_command=submit_command)
     cluster_to_remote = await get_cluster_to_remote(cluster)
 
+    submissions_per_cluster = await asyncio.gather(
+        *(
+            get_submissions(
+                cluster_name,
+                remote,
+                job_script=job_script,
+                sbatch_args=sbatch_args,
+                program_args=program_args,
+                chunking=chunking,
+                vram=vram,
+                git_commit=git_commit,
+            )
+            for cluster_name, remote in cluster_to_remote.items()
+        )
+    )
     job_submissions = [
         SubmissionProgress(submission=submission)
-        for cluster_name, remote in cluster_to_remote.items()
-        for submission in get_submissions(
-            cluster_name,
-            remote,
-            job_script=job_script,
-            sbatch_args=sbatch_args,
-            program_args=program_args,
-            chunking=chunking,
-            git_commit=git_commit,
-        )
+        for submissions in submissions_per_cluster
+        for submission in submissions
     ]
 
     if not _skip_sync:
@@ -379,7 +398,7 @@ async def submit_to_cluster(
             raise result
 
 
-def get_submissions(
+async def get_submissions(
     cluster: str,
     remote: Remote | None,
     *,
@@ -388,8 +407,13 @@ def get_submissions(
     program_args: list[str],
     chunking: int | None,
     git_commit: str,
+    vram: str | None = None,
 ) -> list[Submission]:
     """Expand the possible job configurations for a cluster. Returns a list of `Submission` objects.
+
+    One `Submission` is produced per allocation configured for `cluster` (see
+    `[tool.cluv.clusters.<name>].sbatch_args`), times one per compatible GPU type when `vram`
+    is set (see `expand_for_vram`).
 
     Does *not* do the actual job submission with `sbatch`.
     """
@@ -417,25 +441,28 @@ def get_submissions(
         n_chunks, job_resources = apply_chunking(
             job_resources, job_script=job_script, chunking=chunking
         )
-        sbatch_command = get_sbatch_command(
-            cluster,
-            job_script=job_script,
-            sbatch_args=job_resources,
-            program_args=program_args,
-            git_commit=git_commit,
-        )
-        submissions.append(
-            Submission(
-                cluster=cluster,
-                remote=remote,
+        for expanded_resources in await expand_for_vram(
+            cluster, remote, job_resources, job_script=job_script, vram=vram
+        ):
+            sbatch_command = get_sbatch_command(
+                cluster,
                 job_script=job_script,
-                sbatch_args=job_resources,
+                sbatch_args=expanded_resources,
                 program_args=program_args,
-                sbatch_command=sbatch_command,
-                n_chunks=n_chunks,
                 git_commit=git_commit,
             )
-        )
+            submissions.append(
+                Submission(
+                    cluster=cluster,
+                    remote=remote,
+                    job_script=job_script,
+                    sbatch_args=expanded_resources,
+                    program_args=program_args,
+                    sbatch_command=sbatch_command,
+                    n_chunks=n_chunks,
+                    git_commit=git_commit,
+                )
+            )
     return submissions
 
 
@@ -610,6 +637,55 @@ def get_sbatch_command(
         f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
         f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
+
+
+async def expand_for_vram(
+    cluster: str,
+    remote: Remote | None,
+    sbatch_args: SbatchArgs,
+    *,
+    job_script: Path,
+    vram: str | None,
+) -> list[SbatchArgs]:
+    """Turn one set of sbatch args into one per GPU type of `cluster` that has enough VRAM.
+
+    Racing between the GPU types that are big enough (in particular the MIG slices of the DRAC
+    clusters, which are under-used) makes the job start sooner. When a GPU model is already
+    requested (e.g. `--gpus=h100:1`), only that model and its MIG slices are considered.
+
+    Returns `[sbatch_args]` unchanged when `vram` isn't set, when the job asks for more than one
+    GPU (MIG slices can't be used for multi-GPU jobs), or when no GPU type on `cluster` has
+    enough VRAM.
+    """
+    if not vram:
+        return [sbatch_args]
+
+    sbatch_args_list = sbatch_args_from_dict(sbatch_args)
+    gpu_request = find_gpu_request(sbatch_args_list, job_script)
+    if gpu_request and gpu_request.count > 1:
+        console.print(
+            f"[yellow]Ignoring --vram on {cluster}: the job asks for {gpu_request.count} GPUs, "
+            "and MIG slices can only be used one at a time.[/yellow]"
+        )
+        return [sbatch_args]
+
+    gpu_request = gpu_request or GpuRequest()
+    gpu_types = compatible_gpu_types(
+        await get_gpu_types(cluster, remote), parse_vram(vram), gpu_request.model
+    )
+    if not gpu_types:
+        console.print(
+            f"[yellow]Ignoring --vram on {cluster}: no GPU type with at least {vram} of VRAM"
+            + (f" for the {gpu_request.model} model" if gpu_request.model else "")
+            + ".[/yellow]"
+        )
+        return [sbatch_args]
+
+    logger.info("GPU types with at least %s of VRAM on %s: %s", vram, cluster, gpu_types)
+    return [
+        sbatch_args_from_args_list(sbatch_args_for_gpu_type(sbatch_args_list, gpu_request, gpu_type))
+        for gpu_type in gpu_types
+    ]
 
 
 async def submit_job(submission: Submission) -> Job:

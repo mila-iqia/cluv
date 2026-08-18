@@ -10,8 +10,7 @@ from unittest import mock
 import pytest
 
 import cluv.cli.submit
-from cluv.__main__ import _extract_flag_with_value
-from cluv.cli.submit import Submission, expand_submissions_for_vram
+from cluv.cli.submit import expand_for_vram
 from cluv.cli.submit_utils.vram import (
     GpuRequest,
     compatible_gpu_types,
@@ -280,32 +279,12 @@ class TestSbatchArgsForGpuType:
         ]
 
 
-class TestExtractVramFlag:
-    @pytest.mark.parametrize(
-        ("args", "expected"),
-        [
-            (["--gpus=1", "--vram=10GB"], (["--gpus=1"], "10GB")),
-            (["--vram", "10GB", "--gpus=1"], (["--gpus=1"], "10GB")),
-            (["--gpus=1"], (["--gpus=1"], None)),
-            ([], ([], None)),
-        ],
-    )
-    def test_extract(self, args: list[str], expected: tuple[list[str], str | None]):
-        assert _extract_flag_with_value(args, "--vram") == expected
-
-
-class TestExpandSubmissionsForVram:
+class TestExpandForVram:
     @pytest.fixture
-    def submission(self, tmp_path: Path) -> Submission:
+    def job_script(self, tmp_path: Path) -> Path:
         job_script = tmp_path / "job.sh"
         job_script.write_text("#!/bin/bash\n#SBATCH --time=1:00:00\n")
-        remote = mock.Mock(hostname="rorqual")
-        return Submission(
-            remote=remote,
-            job_script=job_script,
-            sbatch_args=["--account=rrg-bengioy-ad", "--gpus=1"],
-            program_args=[],
-        )
+        return job_script
 
     @pytest.fixture(autouse=True)
     def gpu_types(self, monkeypatch: pytest.MonkeyPatch):
@@ -316,10 +295,17 @@ class TestExpandSubmissionsForVram:
         )
         return gpu_types
 
-    async def test_one_submission_per_compatible_gpu_type(self, submission: Submission):
-        expanded = await expand_submissions_for_vram([submission], "10GB")
-        assert [s.sbatch_args for s in expanded] == [
-            ["--account=rrg-bengioy-ad", f"--gpus={gpu_type}:1"]
+    async def test_one_expansion_per_compatible_gpu_type(self, job_script: Path):
+        sbatch_args = {"account": "rrg-bengioy-ad", "gpus": "1"}
+        expanded = await expand_for_vram(
+            "rorqual",
+            mock.Mock(hostname="rorqual"),
+            sbatch_args,
+            job_script=job_script,
+            vram="10GB",
+        )
+        assert expanded == [
+            {"account": "rrg-bengioy-ad", "gpus": f"{gpu_type}:1"}
             for gpu_type in [
                 "nvidia_h100_80gb_hbm3_1g.10gb",
                 "nvidia_h100_80gb_hbm3_2g.20gb",
@@ -328,34 +314,46 @@ class TestExpandSubmissionsForVram:
             ]
         ]
 
-    async def test_gpu_type_is_added_when_the_job_doesnt_ask_for_a_gpu(
-        self, submission: Submission
-    ):
-        submission = submission._replace(sbatch_args=["--account=rrg-bengioy-ad"])
-        expanded = await expand_submissions_for_vram([submission], "40GB")
-        assert [s.sbatch_args for s in expanded] == [
-            ["--account=rrg-bengioy-ad", "--gpus=nvidia_h100_80gb_hbm3_3g.40gb:1"],
-            ["--account=rrg-bengioy-ad", "--gpus=h100:1"],
+    async def test_gpu_type_is_added_when_the_job_doesnt_ask_for_a_gpu(self, job_script: Path):
+        sbatch_args = {"account": "rrg-bengioy-ad"}
+        expanded = await expand_for_vram(
+            "rorqual",
+            mock.Mock(hostname="rorqual"),
+            sbatch_args,
+            job_script=job_script,
+            vram="40GB",
+        )
+        assert expanded == [
+            {"account": "rrg-bengioy-ad", "gpus": "nvidia_h100_80gb_hbm3_3g.40gb:1"},
+            {"account": "rrg-bengioy-ad", "gpus": "h100:1"},
         ]
 
-    async def test_multi_gpu_jobs_are_left_alone(self, submission: Submission):
-        submission = submission._replace(sbatch_args=["--gpus=2"])
-        assert await expand_submissions_for_vram([submission], "10GB") == [submission]
+    async def test_multi_gpu_jobs_are_left_alone(self, job_script: Path):
+        sbatch_args = {"gpus": "2"}
+        assert await expand_for_vram(
+            "rorqual",
+            mock.Mock(hostname="rorqual"),
+            sbatch_args,
+            job_script=job_script,
+            vram="10GB",
+        ) == [sbatch_args]
 
-    async def test_submission_is_left_alone_when_no_gpu_type_is_big_enough(
-        self, submission: Submission
-    ):
-        assert await expand_submissions_for_vram([submission], "200GB") == [submission]
+    async def test_left_alone_when_no_gpu_type_is_big_enough(self, job_script: Path):
+        sbatch_args = {"account": "rrg-bengioy-ad", "gpus": "1"}
+        assert await expand_for_vram(
+            "rorqual",
+            mock.Mock(hostname="rorqual"),
+            sbatch_args,
+            job_script=job_script,
+            vram="200GB",
+        ) == [sbatch_args]
 
-    async def test_each_allocation_is_expanded(self, submission: Submission):
-        allocations = [
-            submission,
-            submission._replace(sbatch_args=["--account=def-bengioy", "--gpus=1"]),
-        ]
-        expanded = await expand_submissions_for_vram(allocations, "40GB")
-        assert [s.sbatch_args for s in expanded] == [
-            ["--account=rrg-bengioy-ad", "--gpus=nvidia_h100_80gb_hbm3_3g.40gb:1"],
-            ["--account=rrg-bengioy-ad", "--gpus=h100:1"],
-            ["--account=def-bengioy", "--gpus=nvidia_h100_80gb_hbm3_3g.40gb:1"],
-            ["--account=def-bengioy", "--gpus=h100:1"],
-        ]
+    async def test_left_alone_when_vram_not_set(self, job_script: Path):
+        sbatch_args = {"account": "rrg-bengioy-ad", "gpus": "1"}
+        assert await expand_for_vram(
+            "rorqual",
+            mock.Mock(hostname="rorqual"),
+            sbatch_args,
+            job_script=job_script,
+            vram=None,
+        ) == [sbatch_args]

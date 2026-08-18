@@ -124,7 +124,7 @@ def test_bug_with_t_flag_and_time_in_config():
 
 
 @pytest.mark.parametrize("chunking", [None, 5])
-def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
+async def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
     chunking: int | None, monkeypatch: pytest.MonkeyPatch
 ):
     """Test that if we pass some unknown args as sbatch args, their order is preserved in the final sbatch command.
@@ -173,7 +173,7 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
             ),
         ),
     )
-    submissions = get_submissions(
+    submissions = await get_submissions(
         cluster=cluster,
         remote=unittest.mock.AsyncMock(Remote, hostname=cluster),
         chunking=chunking,
@@ -399,6 +399,7 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
             }
         )
 
@@ -419,6 +420,26 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
+            }
+        )
+
+    def test_vram_is_not_passed_along_to_sbatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--gpus=1", "--vram=10GB", "--", "python", "main.py"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--gpus=1"],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "chunking": None,
+                "vram": "10GB",
             }
         )
 
@@ -442,6 +463,7 @@ class TestSubmitCliParsing:
                 "program_args": [],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
             }
         )
 
@@ -465,6 +487,7 @@ class TestSubmitCliParsing:
                 "program_args": ["sleep", "10"],
                 "autocommit": False,
                 "chunking": 6,
+                "vram": None,
             }
         )
 
@@ -487,6 +510,7 @@ class TestSubmitCliParsing:
                 "program_args": ["sleep", "10"],
                 "autocommit": False,
                 "chunking": CHUNK_SIZE,
+                "vram": None,
             }
         )
 

@@ -14,9 +14,18 @@ following the test order in `tests/test_sweep.py`.
 
 from __future__ import annotations
 
+import hashlib
+import itertools
+import os
+import re
+import sys
+
 CLUV_SWEEP_NAME_ENV_VAR = "CLUV_SWEEP_NAME"
 CLUV_SWEEP_TASK_OFFSET_ENV_VAR = "CLUV_SWEEP_TASK_OFFSET"
 """Set per-job by `cluv sweep` (`job_index * job_capacity`); defaults to "0" when absent."""
+
+_current_sweep_state: tuple[str, str, list[str]] | None = None
+"""Stashed (sweep_name, slug, resolved_combo) for this task, set by `patch_argv()`."""
 
 
 def expand_sweep_args(args: list[str]) -> list[list[str]]:
@@ -25,7 +34,23 @@ def expand_sweep_args(args: list[str]) -> list[list[str]]:
     product over all swept flags, in the order they appear. Returns `[list(args)]` if
     nothing is swept.
     """
-    raise NotImplementedError
+    swept: list[tuple[int, str, list[str]]] = []
+    for i, arg in enumerate(args):
+        if arg.startswith("--") and "=" in arg:
+            key, _, value = arg.partition("=")
+            values = value.split(",")
+            if len(values) >= 2:
+                swept.append((i, key, values))
+    if not swept:
+        return [list(args)]
+
+    combos = []
+    for combo_values in itertools.product(*(values for _, _, values in swept)):
+        combo = list(args)
+        for (i, key, _), value in zip(swept, combo_values, strict=True):
+            combo[i] = f"{key}={value}"
+        combos.append(combo)
+    return combos
 
 
 def patch_argv() -> None:
@@ -37,7 +62,32 @@ def patch_argv() -> None:
     index is out of range for the expanded combos, idle-exits (prints a message and
     `sys.exit(0)`) rather than raising.
     """
-    raise NotImplementedError
+    global _current_sweep_state
+    _current_sweep_state = None
+
+    sweep_name = os.environ.get(CLUV_SWEEP_NAME_ENV_VAR)
+    procid = os.environ.get("SLURM_PROCID")
+    if not sweep_name or procid is None:
+        return
+
+    combos = expand_sweep_args(sys.argv[1:])
+    offset = int(os.environ.get(CLUV_SWEEP_TASK_OFFSET_ENV_VAR, "0"))
+    global_index = offset + int(procid)
+    if global_index >= len(combos):
+        print(
+            f"[cluv sweep {sweep_name!r}] task index {global_index} has no combo to run "
+            f"({len(combos)} combo(s) total) - exiting idle."
+        )
+        sys.exit(0)
+
+    combo = combos[global_index]
+    sys.argv[1:] = combo
+    _current_sweep_state = (sweep_name, _slugify_combo(combo), combo)
+
+
+_SLUG_UNSAFE_CHARS_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+_SLUG_MAX_LEN = 80
+_SLUG_HASH_LEN = 8
 
 
 def _slugify_combo(combo: list[str]) -> str:
@@ -45,7 +95,11 @@ def _slugify_combo(combo: list[str]) -> str:
     joined by `-` (order preserved), truncated to a sane length, with a short content-hash
     suffix so truncation can't collide two different combos onto the same slug.
     """
-    raise NotImplementedError
+    raw = "-".join(combo)
+    safe = _SLUG_UNSAFE_CHARS_RE.sub("-", raw).strip("-") or "combo"
+    digest = hashlib.sha256(raw.encode()).hexdigest()[:_SLUG_HASH_LEN]
+    truncated = safe[: _SLUG_MAX_LEN - _SLUG_HASH_LEN - 1]
+    return f"{truncated}-{digest}"
 
 
 def _current_sweep_context() -> tuple[str, str, list[str]] | None:
@@ -53,4 +107,4 @@ def _current_sweep_context() -> tuple[str, str, list[str]] | None:
     has run in this process and resolved a combo (i.e. it wasn't a no-op and didn't
     idle-exit); `None` otherwise. Private — used only by `cluv.job.current_run_info()`.
     """
-    raise NotImplementedError
+    return _current_sweep_state

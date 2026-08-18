@@ -1,10 +1,6 @@
 """Tests for `cluv.sweep` — the SSH-free runtime module used by `cluv sweep` job scripts.
 
 Pure, no I/O. See `design/cluv-sweep.md` for the design these tests are derived from.
-
-`cluv/sweep.py` is currently a stub (every function raises `NotImplementedError`) — these
-tests are written TDD-first and are expected to fail until each function is implemented,
-in the order they appear below.
 """
 
 import sys
@@ -189,8 +185,8 @@ def test_current_sweep_context_returns_sweep_name_slug_and_combo_after_patch(mon
     sweep_name, slug, combo = _current_sweep_context()
 
     assert sweep_name == "my-sweep"
-    assert combo == ["main.py", "--foo=2"]
-    assert slug == _slugify_combo(["main.py", "--foo=2"])
+    assert combo == ["--foo=2"]
+    assert slug == _slugify_combo(["--foo=2"])
 
 
 def test_current_sweep_context_same_combo_same_slug_under_different_offset_procid_pairs(

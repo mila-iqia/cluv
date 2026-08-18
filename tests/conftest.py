@@ -6,10 +6,22 @@ import pytest_asyncio
 import cluv.cli.clean
 import cluv.cli.submit
 import cluv.config
+import cluv.sweep
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars
 from cluv.remote import control_socket_is_running
 from tests.test_integration import ALL_CLUSTERS, IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
+
+
+@pytest.fixture(autouse=True)
+def reset_sweep_state():
+    """`cluv.sweep.patch_argv()` stashes state in a module global; isolate tests from each
+    other regardless of execution order (`patch_argv()` itself resets this at the start of
+    every call, but tests that check `_current_sweep_context()` *without* calling
+    `patch_argv()` first rely on a clean slate)."""
+    cluv.sweep._current_sweep_state = None
+    yield
+    cluv.sweep._current_sweep_state = None
 
 
 @pytest.fixture

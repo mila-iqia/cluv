@@ -34,8 +34,10 @@ VRAM_GB_BY_MODEL: dict[str, float] = {
     # VRAM they have (e.g. "h100" on the Fir, Rorqual and Killarney clusters).
     "a100": 40,
     "a100l": 80,
+    "a5000": 24,
     "a6000": 48,
     "h100": 80,
+    "mi300a": 128,
     "h200": 141,
     "l40s": 48,
     "p100": 12,

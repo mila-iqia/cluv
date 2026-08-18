@@ -458,13 +458,6 @@ async def clone_project(
     # repo root, since the project subdir might not exist on the main/master branch!
     await remote.run(f"git -C {cluster_repo_dir} fetch --all --prune", hide=True, env=gitenv)
 
-    # `cluv sync` treats this clone purely as a mirror of whatever commit was pushed, so any local
-    # modifications sitting in the working tree can only be stale leftovers (e.g. from a sync that
-    # was interrupted, or from two clusters that happen to share this filesystem racing each
-    # other). Reset them away first, otherwise every checkout below would keep failing forever
-    # with "local changes would be overwritten by checkout".
-    await remote.run(f"git -C {cluster_repo_dir} reset --hard", hide=True, env=gitenv)
-
     if not detached_head:
         # Simplest case. We're on a branch, life is good.
         await remote.run(

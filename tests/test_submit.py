@@ -423,6 +423,103 @@ class TestSubmitCliParsing:
         )
 
 
+class TestSweepCliParsing:
+    def test_full_command_line_parses_into_expected_args_dict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(cluv_main, "sweep", mock_sweep := mock.AsyncMock(spec=cluv_main.sweep))
+        job_script = tmp_path / "job.sh"
+        job_script.write_text("#!/bin/bash\n")
+        monkeypatch.chdir(tmp_path)
+
+        cluv_main.main(
+            [
+                "sweep",
+                "tamia",
+                "job.sh",
+                "--name",
+                "x",
+                "--ntasks-per-gpu=2",
+                "--gres=gpu:h100:1",
+                "--",
+                "python",
+                "main.py",
+                "--foo=1,2",
+            ]
+        )
+
+        mock_sweep.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": Path("job.sh"),
+                "name": "x",
+                "sbatch_args": ["--ntasks-per-gpu=2", "--gres=gpu:h100:1"],
+                "program_args": ["python", "main.py", "--foo=1,2"],
+                "autocommit": False,
+                "max_concurrent_submissions": 8,
+            }
+        )
+
+    def test_job_script_can_be_omitted_when_using_separator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(cluv_main, "sweep", mock_sweep := mock.AsyncMock(spec=cluv_main.sweep))
+
+        cluv_main.main(["sweep", "tamia", "--", "python", "main.py"])
+
+        mock_sweep.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "name": None,
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "max_concurrent_submissions": 8,
+            }
+        )
+
+    def test_name_recovered_when_swallowed_into_remainder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Omitting the job script positional makes REMAINDER start consuming earlier,
+        # swallowing '--name x' as plain tokens instead of the parser recognizing --name.
+        monkeypatch.setattr(cluv_main, "sweep", mock_sweep := mock.AsyncMock(spec=cluv_main.sweep))
+
+        cluv_main.main(["sweep", "tamia", "--name", "x", "--", "python", "main.py"])
+
+        mock_sweep.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "name": "x",
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "max_concurrent_submissions": 8,
+            }
+        )
+
+    def test_autocommit_recovered_when_swallowed_into_remainder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(cluv_main, "sweep", mock_sweep := mock.AsyncMock(spec=cluv_main.sweep))
+
+        cluv_main.main(["sweep", "tamia", "--autocommit", "--", "python", "main.py"])
+
+        mock_sweep.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "name": None,
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+                "autocommit": True,
+                "max_concurrent_submissions": 8,
+            }
+        )
+
+
 class TestBuildSubmitCommand:
     def test_build_submit_command_with_program_args(self) -> None:
         assert (

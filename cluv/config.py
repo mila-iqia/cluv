@@ -184,12 +184,13 @@ class CluvConfig(BaseModel):
         job_script_path = cluster_config.job_script_path or self.job_script_path
         project_dir = cluster_config.project_dir or self.project_dir
         # One set of sbatch args per allocation on this cluster (a single one in most cases).
-        allocations = cluster_config.sbatch_args
-        if isinstance(allocations, dict):
-            allocations = [allocations]
+        sbatch_args_list = cluster_config.sbatch_args
+        if isinstance(sbatch_args_list, dict):
+            sbatch_args_list = [sbatch_args_list]
+
         return ClusterConfig(
             env=self.env | cluster_config.env,
-            sbatch_args=[self.sbatch_args | allocation for allocation in allocations]
+            sbatch_args=[self.sbatch_args | sbatch_args for sbatch_args in sbatch_args_list]
             or [dict(self.sbatch_args)],
             results_path=PurePosixPath(results_path),
             datasets_path=PurePosixPath(datasets_path) if datasets_path else None,

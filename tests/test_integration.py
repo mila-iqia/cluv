@@ -19,10 +19,11 @@ import pytest_asyncio
 
 from cluv.cache import Job
 from cluv.cli.init import init
-from cluv.cli.login import login
+from cluv.cli.login import get_remote_without_2fa_prompt, login
+from cluv.cli.sh import sh
 from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
-from cluv.cli.sync import sync
+from cluv.cli.sync import expandvars, sync
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote
 from cluv.slurm import run_sacct
@@ -79,6 +80,63 @@ def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
 
 async def test_login(remote: Remote):
     assert (await login([remote.hostname])) == [remote]
+
+
+async def _expected_cluv_sh_pwd_line(remote: Remote) -> str:
+    """The `cluv sh pwd` output line we'd expect for `remote`.
+
+    Computed the same way `cluv sh` itself resolves the project dir (config override / $HOME
+    fallback, then env-var expansion on the remote), rather than a hardcoded path -- so this works
+    regardless of machine, username, or whether the project has actually been synced to that
+    cluster yet (in which case `cd` silently no-ops and `pwd` reports the cluster's home dir).
+    """
+    project_dir = get_cluv_config().get_cluster_config(remote.hostname).project_dir
+    if project_dir is not None:
+        expanded = await expandvars(remote, project_dir)
+        exists = await remote.get_output(f'test -d "{expanded}" && echo yes || echo no')
+        if exists == "yes":
+            return f"{remote.hostname}: {expanded}"
+    home = await remote.get_output("echo $HOME")
+    return f"{remote.hostname}: {home}"
+
+
+@pytest.mark.timeout(40)
+async def test_cluv_sh_pwd_on_required_clusters(capfd: pytest.CaptureFixture[str]) -> None:
+    """Runs the real `cluv sh pwd` and checks the required clusters' output lines.
+
+    Relies on `mock_home_in_selfhosted_runner` (autouse in this module) to make `$HOME` line up
+    with this checkout's actual synced location in self-hosted CI, so the `cd`-into-project-dir
+    branch is genuinely exercised there (not just the "not synced yet, fall back to $HOME" one --
+    see git history for how running this from an arbitrary/unsynced checkout can't tell the two
+    apart).
+
+    Calls `sh()` directly rather than `cluv_main.main(["sh", "pwd"])`: `main` calls `asyncio.run`
+    internally to dispatch to it, which can't nest inside this test's own already-running event
+    loop -- going straight to the coroutine sidesteps that entirely.
+
+    Uses `capfd` (not `capsys`/`console.capture()`) because `_run_locally`/`_invoke_clush` spawn
+    real subprocesses that inherit the actual OS file descriptors: `capfd` is the only one of the
+    three that intercepts at that level, rather than at the `sys.stdout` attribute (`capsys`) or the
+    `rich.Console` instance (`console.capture()`) levels, so it's the one that sees both the
+    console's own log lines and the subprocess output.
+    """
+    remotes: dict[str, Remote] = {}
+    for cluster in REQUIRED_CLUSTERS:
+        remote = await get_remote_without_2fa_prompt(cluster)
+        if remote is None:
+            pytest.fail(f"Required cluster {cluster!r} must be connected for this test.")
+        remotes[cluster] = remote
+    expected_lines = {
+        cluster: await _expected_cluv_sh_pwd_line(remote) for cluster, remote in remotes.items()
+    }
+
+    await sh(["pwd"])
+    out, _ = capfd.readouterr()
+
+    for cluster, expected in expected_lines.items():
+        assert expected in out, (
+            f"Missing/unexpected output for {cluster!r}, expected {expected!r} in:\n{out}"
+        )
 
 
 @pytest_asyncio.fixture(scope="session")

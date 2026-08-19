@@ -119,13 +119,19 @@ class TestGetSbatchCommand:
         )
         job_script_relative_path = sbatch_script.relative_to(fake_home)
 
+        export_value = (
+            "ALL,MY_VAR=1,SPECIAL_MILA_VAR=xyz,SBATCH_JOB_NAME=cluv-my_script,"
+            f"GIT_COMMIT=abecdef,CLUV_CLUSTER={cluster},"
+            f"SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out"
+        )
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz SBATCH_JOB_NAME=cluv-my_script "
             # Ugly, quite hard-coded.
             f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster} "
             f"SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out "
             "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
-            f"--mem=8G $HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
+            f"--mem=8G --export={export_value} "
+            f"$HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
         assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
 
@@ -203,11 +209,16 @@ class TestGetSbatchCommand:
             chunking=False,
         )
 
+        export_value = (
+            "ALL,MY_VAR=2,SBATCH_JOB_NAME=cluv-my_script,GIT_COMMIT=abecdef,CLUV_CLUSTER=mila,"
+            f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out"
+        )
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
             "CLUV_CLUSTER=mila "
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
-            "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh '"
+            f"sbatch --parsable --chdir=$HOME/my_project --export={export_value} "
+            "$HOME/my_project/scripts/my_script.sh '"
         )
         assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
 
@@ -322,6 +333,70 @@ class TestGetSbatchCommand:
 
         assert " ".join(expected_sbatch_args) in sbatch_command
         assert submission_args == ResolvedSbatchArgs(sbatch_args=expected_sbatch_args, n_chunks=4)
+
+    def test_export_all_flag_added_so_env_vars_survive_a_wrapped_sbatch(
+        self, project_dir: Path
+    ) -> None:
+        """`--export=ALL,...` restates the env vars as an explicit sbatch argument.
+
+        Some clusters' login nodes shadow `sbatch` with a wrapper that hardcodes `--export=NONE`
+        (trillium-gpu does), which drops the submitting shell's environment entirely - and with it
+        GIT_COMMIT, CLUV_CLUSTER, WANDB_MODE, etc. - before the job ever starts. Since `sbatch`
+        takes the last `--export` on its command line, appending our own after the wrapper's makes
+        cluv's variables win regardless of whether such a wrapper exists.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.env]
+            WANDB_MODE = "offline"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        sbatch_command, _ = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args=[],
+            program_args=[],
+            git_commit="abc123",
+            chunking=False,
+        )
+        export_flag = next(f for f in sbatch_command.split() if f.startswith("--export="))
+        assert export_flag == (
+            "--export=ALL,WANDB_MODE=offline,SBATCH_JOB_NAME=cluv-job,GIT_COMMIT=abc123,"
+            "CLUV_CLUSTER=mila,SBATCH_OUTPUT=results/mila_%j/slurm-%j.out"
+        )
+
+    def test_export_flag_not_added_if_already_set_by_caller(self, project_dir: Path) -> None:
+        """A user-supplied `--export=...` sbatch flag is left alone, not appended after."""
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        sbatch_command, _ = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args=["--export=NONE"],
+            program_args=[],
+            git_commit="abc123",
+            chunking=False,
+        )
+        assert sbatch_command.count("--export=") == 1
+        assert "--export=NONE" in sbatch_command
 
 
 class TestSubmitCliParsing:

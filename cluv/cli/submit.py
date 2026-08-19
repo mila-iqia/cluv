@@ -660,7 +660,20 @@ def get_sbatch_command(
         )
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    sbatch_args_str = shlex.join(sbatch_args)
+    final_sbatch_args = sbatch_args
+    if env_vars and not any("--export" in flag for flag in sbatch_args):
+        # Belt and suspenders: `env_vars_prefix` above sets these as plain shell variables before
+        # `sbatch`, which is normally enough for them to reach the job (Slurm's default is to copy
+        # the submitting shell's environment). But some clusters' login nodes shadow `sbatch` with
+        # a wrapper that hardcodes `--export=NONE` (trillium-gpu does), which discards the
+        # submitting shell's environment entirely - silently dropping GIT_COMMIT, CLUV_CLUSTER,
+        # WANDB_MODE, etc. `--export=ALL,KEY=VALUE,...` restates the same variables as an explicit
+        # sbatch argument instead of relying on environment inheritance; since it comes after the
+        # wrapper's own `--export=NONE` on the final command line, it wins (last `--export` set on
+        # the command line takes effect). A harmless no-op on clusters without such a wrapper.
+        export_value = "ALL," + ",".join(f"{k}={v}" for k, v in env_vars.items())
+        final_sbatch_args = [*sbatch_args, f"--export={export_value}"]
+    sbatch_args_str = shlex.join(final_sbatch_args)
     program_args_str = shlex.join(program_args)
 
     sbatch_command = (

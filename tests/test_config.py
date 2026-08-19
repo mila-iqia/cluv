@@ -6,18 +6,13 @@ from pathlib import Path
 import pytest
 from milatools.cli.init_command import DRAC_CLUSTERS
 
-from cluv.config import ClusterConfig, PartialClusterConfig, get_cluv_config, load_cluv_config
+from cluv.config import ClusterConfig, PartialClusterConfig, load_cluv_config
 
 
 def write_pyproject(tmp_path: Path, content: str) -> Path:
     p = tmp_path / "pyproject.toml"
     p.write_text(content)
     return p
-
-
-@pytest.fixture(autouse=True)
-def clear_get_cluv_config_cache() -> None:
-    get_cluv_config.cache_clear()
 
 
 # ---------------------------------------------------------------------------

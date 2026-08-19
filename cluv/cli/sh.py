@@ -63,10 +63,11 @@ async def sh(command: list[str]) -> None:
         # its own `clush` invocation so it can `cd` there before running `command`. In the common
         # case (no per-cluster override) there's a single group, i.e. a single `clush` call.
         hostnames_by_project_dir: dict[PurePosixPath | None, list[str]] = defaultdict(list)
+        config = get_cluv_config()
+
         for remote in remotes:
-            hostnames_by_project_dir[_project_dir_for_cluster(remote.hostname)].append(
-                remote.hostname
-            )
+            project_dir_for_cluster = config.get_cluster_config(remote.hostname).project_dir
+            hostnames_by_project_dir[project_dir_for_cluster].append(remote.hostname)
         for project_dir, hostnames in hostnames_by_project_dir.items():
             with tempfile.NamedTemporaryFile("w", suffix=".txt") as hostfile:
                 hostfile.write("\n".join(hostnames) + "\n")
@@ -76,11 +77,6 @@ async def sh(command: list[str]) -> None:
 
     if returncode != 0:
         sys.exit(returncode)
-
-
-def _project_dir_for_cluster(cluster: str) -> PurePosixPath | None:
-    """Returns `cluster`'s configured/derived project dir, or `None` if it can't be determined."""
-    return get_cluv_config().get_cluster_config(cluster).project_dir
 
 
 async def _invoke_clush(

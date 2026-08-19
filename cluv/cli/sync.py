@@ -35,7 +35,7 @@ milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
 logger = logging.getLogger(__name__)
 
-__all__ = ["sync", "install_uv", "clone_project", "fetch_results", "default_project_dir"]
+__all__ = ["sync", "install_uv", "clone_project", "fetch_results"]
 
 
 # TODO: Control the 'hide' and 'display' / etc using the --verbose flag value, in addition to the loglevel.

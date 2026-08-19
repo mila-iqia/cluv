@@ -1,51 +1,36 @@
 """Tests for `cluv sh`."""
 
+import textwrap
 from pathlib import Path, PurePosixPath
 from unittest import mock
 
 import pytest
 
+import cluv
 import cluv.__main__ as cluv_main
+import cluv.cache
 import cluv.cli.sh as sh_module
 from cluv.cli.sh import sh
+from cluv.config import load_cluv_config
 from cluv.remote import Remote
 from cluv.utils import console
 
 
-@pytest.fixture(autouse=True)
-def no_disabled_clusters(monkeypatch: pytest.MonkeyPatch):
+@pytest.fixture()
+def clean_cache(monkeypatch: pytest.MonkeyPatch):
     """By default, pretend no clusters are disabled, so tests don't depend on the real cache."""
-    monkeypatch.setattr(sh_module, "get_disabled_clusters", lambda: {})
-
-
-@pytest.fixture(autouse=True)
-def not_on_a_cluster(monkeypatch: pytest.MonkeyPatch):
-    """By default, pretend we're not running from a cluster (e.g. a dev laptop)."""
-    monkeypatch.setattr(sh_module, "current_cluster", lambda: None)
-
-
-@pytest.fixture(autouse=True)
-def no_project_dir_by_default(monkeypatch: pytest.MonkeyPatch):
-    """By default, pretend no cluster is configured, so `_project_dir_for_cluster` returns `None`.
-
-    Keeps tests that aren't about the project-dir feature from depending on the real Cluv config
-    (loaded from this repo's own pyproject.toml) or from being split into multiple `clush` groups.
-    Patches `get_cluv_config` rather than `_project_dir_for_cluster` itself, so tests that exercise
-    `_project_dir_for_cluster` directly can still do so.
-    """
-    config = mock.Mock()
-    config.get_cluster_config.side_effect = KeyError
-    monkeypatch.setattr(sh_module, "get_cluv_config", lambda: config)
+    monkeypatch.setattr(
+        cluv.cache, cluv.cache.read_cache.__name__, lambda: cluv.cache.CacheContent()
+    )
 
 
 async def test_sh_prints_message_and_returns_when_nothing_to_run_on(
     monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(sh_module, "get_active_remotes", mock.AsyncMock(return_value=[]))
-    invoke_clush = mock.AsyncMock()
-    run_locally = mock.AsyncMock()
-    monkeypatch.setattr(sh_module, "_invoke_clush", invoke_clush)
-    monkeypatch.setattr(sh_module, "_run_locally", run_locally)
+
+    monkeypatch.setattr(sh_module, "_invoke_clush", invoke_clush := mock.AsyncMock())
+    monkeypatch.setattr(sh_module, "_run_locally", run_locally := mock.AsyncMock())
 
     with console.capture() as cap:
         await sh(["echo", "hi"])
@@ -58,8 +43,13 @@ async def test_sh_prints_message_and_returns_when_nothing_to_run_on(
 async def test_sh_writes_hostfile_with_connected_hostnames_and_invokes_clush(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    remotes = [Remote(hostname="mila"), Remote(hostname="narval")]
-    monkeypatch.setattr(sh_module, "get_active_remotes", mock.AsyncMock(return_value=remotes))
+    monkeypatch.setattr(
+        sh_module,
+        "get_active_remotes",
+        mock_get_active_remotes := mock.AsyncMock(
+            return_value=[Remote(hostname="mila"), Remote(hostname="narval")]
+        ),
+    )
 
     captured: dict = {}
 
@@ -70,27 +60,60 @@ async def test_sh_writes_hostfile_with_connected_hostnames_and_invokes_clush(
         captured["command"] = command
         return 0
 
-    monkeypatch.setattr(sh_module, "_invoke_clush", fake_invoke_clush)
+    monkeypatch.setattr(
+        sh_module,
+        "_invoke_clush",
+        mock_invoke_clush := mock.AsyncMock(side_effect=fake_invoke_clush),
+    )
 
     await sh(["squeue", "--me"])
+    mock_get_active_remotes.assert_called_once()
+    mock_invoke_clush.assert_awaited_once()
 
     assert captured["hostfile_contents"].splitlines() == ["mila", "narval"]
     assert captured["command"] == ["squeue", "--me"]
 
 
 async def test_sh_groups_remotes_by_project_dir_into_separate_clush_calls(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     """Clusters with different (or no) project dirs are split into separate `clush` invocations."""
-    remotes = [Remote(hostname="mila"), Remote(hostname="tamia"), Remote(hostname="killarney")]
-    monkeypatch.setattr(sh_module, "get_active_remotes", mock.AsyncMock(return_value=remotes))
+    monkeypatch.setattr(
+        sh_module,
+        "get_active_remotes",
+        mock.AsyncMock(
+            return_value=[
+                Remote(hostname="mila"),
+                Remote(hostname="tamia"),
+                Remote(hostname="killarney"),
+            ]
+        ),
+    )
     project_dirs = {
         "mila": PurePosixPath("$HOME/proj"),
         "tamia": PurePosixPath("$HOME/proj"),
-        "killarney": None,
+        "killarney": PurePosixPath("$SCRATCH/proj"),
     }
-    monkeypatch.setattr(sh_module, "_project_dir_for_cluster", project_dirs.__getitem__)
+    p = tmp_path / "pyproject.toml"
+    p.write_text(
+        textwrap.dedent(f"""\
+        [tool.cluv]
+        results_path = "logs"
 
+        [tool.cluv.clusters.mila]
+        project_dir = "{project_dirs["mila"]}"
+
+        [tool.cluv.clusters.killarney]
+        project_dir = "{project_dirs["killarney"]}"
+
+        [tool.cluv.clusters.tamia]
+        project_dir = "{project_dirs["tamia"]}"
+        """)
+    )
+    cfg = load_cluv_config(p)
+    monkeypatch.setattr(
+        sh_module, "get_cluv_config", mock_get_cluv_config := mock.Mock(return_value=cfg)
+    )
     calls: list[tuple[list[str], PurePosixPath | None]] = []
 
     async def fake_invoke_clush(
@@ -99,14 +122,18 @@ async def test_sh_groups_remotes_by_project_dir_into_separate_clush_calls(
         calls.append((Path(hostfile).read_text().splitlines(), project_dir))
         return 0
 
-    monkeypatch.setattr(sh_module, "_invoke_clush", fake_invoke_clush)
+    monkeypatch.setattr(
+        sh_module, "_invoke_clush", mock_invoke_clusk := mock.AsyncMock(wraps=fake_invoke_clush)
+    )
 
     await sh(["squeue", "--me"])
+    mock_get_cluv_config.assert_called()
+    mock_invoke_clusk.assert_awaited()
 
     assert sorted(calls, key=str) == sorted(
         [
             (["mila", "tamia"], PurePosixPath("$HOME/proj")),
-            (["killarney"], None),
+            (["killarney"], PurePosixPath("$SCRATCH/proj")),
         ],
         key=str,
     )
@@ -251,38 +278,6 @@ def test_with_cd_prefix_returns_plain_command_without_a_project_dir():
 def test_with_cd_prefix_prepends_a_best_effort_cd_when_given_a_project_dir():
     result = sh_module._with_cd_prefix(["squeue", "--me"], PurePosixPath("$HOME/proj"))
     assert result == 'cd "$HOME/proj" 2>/dev/null; squeue --me'
-
-
-def test_project_dir_for_cluster_prefers_the_configured_override(monkeypatch: pytest.MonkeyPatch):
-    cluster_config = mock.Mock(project_dir=PurePosixPath("/custom/path"))
-    config = mock.Mock()
-    config.get_cluster_config.return_value = cluster_config
-    monkeypatch.setattr(sh_module, "get_cluv_config", lambda: config)
-    monkeypatch.setattr(sh_module, "default_project_dir", mock.Mock(side_effect=AssertionError))
-
-    assert sh_module._project_dir_for_cluster("mila") == PurePosixPath("/custom/path")
-
-
-def test_project_dir_for_cluster_falls_back_to_the_default(monkeypatch: pytest.MonkeyPatch):
-    cluster_config = mock.Mock(project_dir=None)
-    config = mock.Mock()
-    config.get_cluster_config.return_value = cluster_config
-    monkeypatch.setattr(sh_module, "get_cluv_config", lambda: config)
-    monkeypatch.setattr(
-        sh_module, "default_project_dir", lambda: PurePosixPath("$HOME/repos/cluv")
-    )
-
-    assert sh_module._project_dir_for_cluster("mila") == PurePosixPath("$HOME/repos/cluv")
-
-
-def test_project_dir_for_cluster_returns_none_for_an_unconfigured_cluster(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    config = mock.Mock()
-    config.get_cluster_config.side_effect = KeyError("narval")
-    monkeypatch.setattr(sh_module, "get_cluv_config", lambda: config)
-
-    assert sh_module._project_dir_for_cluster("narval") is None
 
 
 async def test_run_locally_builds_expected_argv_and_returns_exit_code(

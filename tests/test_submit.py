@@ -27,39 +27,9 @@ from cluv.cli.submit import (
 )
 from cluv.cli.submit_utils.chunking import CHUNK_SIZE
 from cluv.cli.sync import sync
-from cluv.config import get_cluv_config, load_cluv_config
+from cluv.config import load_cluv_config
 from cluv.utils import current_cluster
 from tests.test_integration import IN_GITHUB_CLOUD_CI
-
-
-@pytest.fixture(autouse=True)
-def clear_get_cluv_config_cache():
-    # To avoid that a test reads the cached config of an other, we need to clear the cache between each test.
-    get_cluv_config.cache_clear()
-
-
-@pytest.fixture
-def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    fake_home = tmp_path / "fake_home"
-    fake_home.mkdir()
-    monkeypatch.setattr(Path, "home", lambda: fake_home)
-    return fake_home
-
-
-@pytest.fixture
-def project_dir(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    project_dir = fake_home / "my_project"
-    project_dir.mkdir()
-    monkeypatch.chdir(project_dir)  # Set current working dir
-    return project_dir
-
-
-@pytest.fixture
-def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.chdir(project_dir)  # Set current working dir
-
-    cluv.cli.init()
-    return project_dir
 
 
 class TestSbatchArgsFromDict:

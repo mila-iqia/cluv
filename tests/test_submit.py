@@ -116,7 +116,7 @@ class TestGetSbatchCommand:
             )
         )
         job_script = project_dir / "scripts" / "my_script.sh"
-        job_script.parent.mkdir()
+        job_script.parent.mkdir(exist_ok=True)  # already exists for the "existing_project" case
         job_script.touch(0o755)
 
         sbatch_args = []
@@ -231,7 +231,7 @@ class TestGetSbatchCommand:
             )
         )
         job_script = project_dir / "scripts" / "my_script.sh"
-        job_script.parent.mkdir()
+        job_script.parent.mkdir(exist_ok=True)  # already exists for the "existing_project" case
         job_script.write_text("#SBATCH --time=20:00:00")
 
         sbatch_command, submission_args = get_sbatch_command(

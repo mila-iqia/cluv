@@ -76,7 +76,9 @@ def is_existing_project(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def project_dir(fake_home: Path, project_name: str, is_existing_project: bool) -> Path:
+def project_dir(
+    fake_home: Path, project_name: str, is_existing_project: bool, monkeypatch: pytest.MonkeyPatch
+) -> Path:
     """Fixture that creates a project directory and changes into it."""
     project_dir = fake_home / project_name
     project_dir.mkdir()
@@ -87,6 +89,7 @@ def project_dir(fake_home: Path, project_name: str, is_existing_project: bool) -
         job_script.touch()  # Touch the job script to simulate an existing project
         # Make the job script executable:
         job_script.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    monkeypatch.chdir(project_dir)  # Set current working dir, as the docstring above promises.
     return project_dir
 
 

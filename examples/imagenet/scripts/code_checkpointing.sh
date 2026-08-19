@@ -47,7 +47,13 @@ if [[ -n "$GIT_COMMIT" ]]; then
     # $SLURM_TMPDIR is empty at job start, so there is nothing to clean up first.
     # `uv sync` needs either internet access on the compute nodes or a warm uv cache / the DRAC
     # wheelhouse. The `cluv sync` that precedes every `cluv submit` already warms that cache.
-    srun --ntasks-per-node=1 bash -c "\
+    # `--ntasks` has to be capped as well, not just `--ntasks-per-node`. Upstream's job script asks
+    # for a single task in total, so `--ntasks-per-node=1` alone is enough there. The job scripts in
+    # this example ask for one task per GPU, and Slurm then refuses to narrow the step:
+    #   srun: warning: can't honor --ntasks-per-node set to 1 which doesn't match the requested
+    #   tasks 4 with the maximum number of requested nodes 1. Ignoring --ntasks-per-node.
+    # The clone would then run once per GPU, concurrently, into the same directory.
+    srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} bash -c "\
         git clone --quiet $project_root \$SLURM_TMPDIR/$project_dirname && \
         cd \$SLURM_TMPDIR/$project_dirname && \
         git checkout --quiet --detach $GIT_COMMIT && \

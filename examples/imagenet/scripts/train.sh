@@ -57,7 +57,9 @@ echo "Running uv commands in directory: $UV_DIR"
 if [[ "${job_command[*]}" == *--use_fake_data* ]]; then
     echo "Skipping the dataset staging step, since --use_fake_data was passed."
 else
-    srun --ntasks-per-node=1 bash -c "\
+    # One task per node, not one per GPU: see the note in scripts/code_checkpointing.sh about why
+    # `--ntasks` has to be capped too.
+    srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} bash -c "\
         if [ -z \"\${SLURM_TMPDIR:-}\" ]; then \
             echo 'ERROR: \$SLURM_TMPDIR is not set in this job, so we do not know where this' >&2; \
             echo 'cluster wants ~150GB of node-local scratch to be written. Refusing to guess.' >&2; \

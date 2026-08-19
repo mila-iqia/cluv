@@ -112,6 +112,7 @@ async def submit(
     program_args: list[str],
     autocommit: bool = False,
     chunking: bool = False,
+    parsable: bool = False,
     _skip_sync: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
@@ -135,6 +136,7 @@ async def submit(
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
         chunking: Whether to split the job up into multiple consecutive short jobs.
+        parsable: If True, print only the job ID (or '<cluster>:<job_id>' for 'first') to stdout.
         _skip_sync: If True, skip the synchronization step before submitting.
 
     Returns:
@@ -173,6 +175,8 @@ async def submit(
         )
         if job:
             save_job(job)
+            if parsable:
+                print(f"{job.cluster}:{job.job_id}")
         return job
 
     if job_script is None:
@@ -229,11 +233,14 @@ async def submit(
     else:
         save_job(job)
 
-        console.log(
-            f"Successfully submitted job {job.job_id} on the {cluster} cluster.\n"
-            f"Use `ssh {cluster} sacct -j {job.job_id}` to view its status, and `cluv sync {cluster}` to "
-            f"fetch results once it is complete."
-        )
+        if parsable:
+            print(job.job_id)
+        else:
+            console.log(
+                f"Successfully submitted job {job.job_id} on the {cluster} cluster.\n"
+                f"Use `ssh {cluster} sacct -j {job.job_id}` to view its status, and `cluv sync {cluster}` to "
+                f"fetch results once it is complete."
+            )
 
     return job
 

@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
 from typing_extensions import TypeVar
 
-from cluv.utils import current_cluster, find_pyproject
+from cluv.utils import current_cluster, find_pyproject, try_find_pyproject
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,10 @@ class ClusterConfig(Generic[PathType]):
     """Path to the job script to use by default on this cluster."""
 
     project_dir: PathType | None
-    """Path where the project should be cloned on this cluster."""
+    """Path where the project should be cloned on this cluster.
+
+    See `default_project_dir` for how this is derived when not set in the config.
+    """
 
 
 @dataclass(frozen=True)
@@ -182,7 +185,10 @@ class CluvConfig(BaseModel):
         results_path = cluster_config.results_path or self.results_path
         datasets_path = cluster_config.datasets_path or self.datasets_path
         job_script_path = cluster_config.job_script_path or self.job_script_path
-        project_dir = cluster_config.project_dir or self.project_dir
+        project_dir = (
+            cluster_config.project_dir or self.project_dir or default_project_dir(cluster)
+        )
+
         # One set of sbatch args per allocation on this cluster (a single one in most cases).
         sbatch_args_list = cluster_config.sbatch_args
         if isinstance(sbatch_args_list, dict):
@@ -197,6 +203,39 @@ class CluvConfig(BaseModel):
             job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
             project_dir=PurePosixPath(project_dir) if project_dir else None,
         )
+
+
+def default_project_dir(cluster: str) -> PurePosixPath | None:
+    """Returns the path where the project should be synced when `project_dir` isn't set in the config.
+
+    - If the project is a member of a workspace, or there is a pyproject.toml file above the current,
+      that *does* specify this `project_dir`, then the same relative path will be recreated with respect to that
+      path, for this project. For example, say that the project is at `~/big_project/subproject`, and that
+      `big_project/subproject.pyproject.toml` doesn't have `project_dir` set for a given cluster, but
+      `big_project/pyproject.toml` *does* have `project_dir` of '$SCRATCH/big_project', then we will use
+      '$SCRATCH/big_project/subproject' as the project_dir for that cluster.
+
+    - If the project is relative to $HOME, then we will recreate the same relative path from $HOME on that cluster.
+
+    Otherwise, returns `None`, which should lead to some error in the calling code, since we want people to either have their project in $HOME,
+    or to set the directory to use for syncing their project to clusters.
+    """
+    pyproject_path = find_pyproject()
+    project_root = pyproject_path.parent
+
+    if (parent_pyproject := try_find_pyproject(project_root.parent)) and (
+        parent_project_dir := load_cluv_config(parent_pyproject)
+        .get_cluster_config(cluster)
+        .project_dir
+    ):
+        return PurePosixPath(parent_project_dir) / project_root.relative_to(
+            parent_pyproject.parent
+        )
+
+    if project_root.is_relative_to(Path.home()):
+        return PurePosixPath("$HOME" / project_root.relative_to(Path.home()))
+
+    return None
 
 
 @functools.cache

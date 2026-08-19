@@ -582,9 +582,14 @@ def get_sbatch_command(
     job_script_relative_path = local_job_script.relative_to(local_project_dir)
 
     # The project either has a project_dir set, or it is assumed to be under $HOME.
-    remote_project_dir = get_cluv_config().get_cluster_config(cluster).project_dir or (
-        PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
-    )
+    remote_project_dir = get_cluv_config().get_cluster_config(cluster).project_dir
+    if not remote_project_dir:
+        raise RuntimeError(
+            f"Unable to determine where the project is/should be cloned on cluster {cluster}.\n"
+            f"Either set the `project_dir` in the config for this cluster, or sure that your project "
+            f"is under your $HOME directory on the current machine."
+        )
+
     remote_job_script = PurePosixPath(remote_project_dir) / job_script_relative_path
 
     # Build env var dict: global SBATCH_* defaults merged with per-cluster overrides.

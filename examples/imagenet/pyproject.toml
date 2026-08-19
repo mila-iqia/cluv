@@ -79,15 +79,7 @@ job_script_path = "scripts/job_tamia.sh"
 
 [tool.cluv.clusters.killarney]
 job_script_path = "scripts/job_killarney.sh"
-# Two reasons to set `output` explicitly here (it stops cluv computing the path itself):
-#  1. Slurm here doesn't create the parent directory of `--output`, and cluv's default is
-#     `{results_path}/{cluster}_%j/slurm-%j.out`, so the job is killed before it even starts.
-#  2. $SCRATCH is only defined in a *login* shell on this cluster, and cluv's sbatch command is
-#     assembled such that the path is expanded by the (non-login) ssh shell - `$SCRATCH` would
-#     silently become empty, giving `/logs/imagenet/...`.
-# A path relative to the job's working directory dodges both: `logs` is the symlink to
-# `results_path` that cluv creates in the project folder.
-sbatch_args = { account = "aip-bengioy", output = "logs/killarney_%j.out" }
+sbatch_args = { account = "aip-bengioy" }
 # Killarney refuses to run jobs whose submission directory is under /home
 # ("Submitting jobs from directories residing in /home is not permitted"), so the project lives on
 # $SCRATCH there instead of the default $HOME location.
@@ -95,9 +87,7 @@ project_dir = "$SCRATCH/repos/cluv/examples/imagenet"
 
 [tool.cluv.clusters.vulcan]
 job_script_path = "scripts/job_vulcan.sh"
-# Same two reasons as Killarney: no parent-directory creation for `--output`, and $SCRATCH is only
-# set in a login shell. `logs` is cluv's symlink to `results_path` inside the project folder.
-sbatch_args = { account = "aip-bengioy", output = "logs/vulcan_%j.out" }
+sbatch_args = { account = "aip-bengioy" }
 
 [tool.cluv.clusters.rorqual]
 job_script_path = "scripts/job_rorqual.sh"

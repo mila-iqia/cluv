@@ -4,7 +4,7 @@ import subprocess
 import textwrap
 import unittest
 import unittest.mock
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest import mock
 
 import pytest
@@ -128,6 +128,49 @@ class TestGetSbatchCommand:
             f"--mem=8G $HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
         assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
+
+    def test_resolved_results_path_is_used_verbatim_in_sbatch_output(
+        self, project_dir: Path
+    ) -> None:
+        """A `results_path` holding env vars has to be resolved before it reaches SBATCH_OUTPUT.
+
+        `shlex.quote` wraps a value containing `$` in single quotes, and those close the
+        `bash --login -c '...'` string, so the *non-login* ssh shell would expand it. On the clusters
+        where $SCRATCH is only set in a login shell (Killarney, Vulcan) it expands to nothing and the
+        job dies writing to an unwritable `/logs/...`. `sbatch` therefore resolves it on the remote
+        first and passes the result in.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [project]
+            name = "my_project"
+            version = "0.1.0"
+            [tool.cluv]
+            results_path = "$SCRATCH/logs/my_project"
+            [tool.cluv.clusters.killarney]
+            """
+            )
+        )
+        sbatch_script = project_dir / "my_script.sh"
+        sbatch_script.touch(0o755)
+
+        sbatch_command, _ = get_sbatch_command(
+            cluster="killarney",
+            job_script=sbatch_script,
+            sbatch_args=[],
+            program_args=[],
+            git_commit="abecdef",
+            chunking=False,
+            results_path=PurePosixPath("/scratch/me/logs/my_project"),
+        )
+        assert "SBATCH_OUTPUT=/scratch/me/logs/my_project/killarney_%j/slurm-%j.out" in (
+            sbatch_command
+        )
+        # The whole point: no unexpanded variable, and therefore no nested quoting, is left in the
+        # SBATCH_OUTPUT the remote shell will see.
+        assert "SBATCH_OUTPUT='" not in sbatch_command
+        assert "$SCRATCH" not in sbatch_command
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"
@@ -733,6 +776,11 @@ async def test_submit_first_considers_current_cluster(
             )
 
         print(f"Running command: {full_command}")
+        # `sbatch` resolves env vars in the cluster's results_path through a login shell before
+        # putting it in SBATCH_OUTPUT (see `get_sbatch_command` for why it can't be left to the
+        # shell that runs sbatch).
+        if "bash --login -c" in full_command and "echo " in full_command:
+            return _result("/scratch/testuser/logs/my_project")
         if full_command.startswith("bash --login -c '") and "sbatch --parsable" in full_command:
             return _result(str(this_cluster_jobid))
         if full_command.startswith(f"ssh {other_cluster}") and "sbatch --parsable" in full_command:

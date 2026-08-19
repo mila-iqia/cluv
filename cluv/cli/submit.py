@@ -24,7 +24,7 @@ from cluv.cli.submit_utils.first import (
     wait_for_jobs_to_cancel,
     wait_for_running_job,
 )
-from cluv.cli.sync import get_active_remotes, sync
+from cluv.cli.sync import expandvars, get_active_remotes, sync
 from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.utils import console, current_cluster
@@ -577,12 +577,22 @@ def get_sbatch_command(
     program_args: list[str],
     git_commit: str,
     chunking: bool,
+    results_path: PurePosixPath | None = None,
 ) -> tuple[str, ResolvedSbatchArgs]:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate
     sbatch_arguments, environment variables and paths set.
 
     NOTE: `sbatch_args` needs to already contain the sbatch arguments from the cluster config + command-line.
+
+    `results_path` should be the cluster's `results_path` with its environment variables already
+    resolved (see `sbatch`). It has to be resolved by the caller, because a value like
+    `$SCRATCH/logs/x` would otherwise be expanded by the wrong shell: the `SBATCH_OUTPUT=...` pieces
+    below are `shlex.quote`d, and those single quotes close the `bash --login -c '...'` string, so
+    the *non-login* ssh shell ends up expanding them. On clusters where $SCRATCH is only set in a
+    login shell (Killarney, Vulcan) it expands to nothing, and the job dies with its output going to
+    an unwritable `/logs/...`. Falls back to the unresolved config value when not given, which is
+    fine for callers that only want the command for display.
     """
     # Resolve remote job script path.
     local_job_script = job_script
@@ -615,8 +625,8 @@ def get_sbatch_command(
 
     in_job_packing = False
     assert not in_job_packing, "todo"
-    # might contain unresolved env vars.
-    cluster_results_path = PurePosixPath(cluster_config.results_path)
+    # Resolved by `sbatch`; may still contain env vars when this is called just for display.
+    cluster_results_path = PurePosixPath(results_path or cluster_config.results_path)
     n_chunks = None
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
     if chunking:
@@ -674,6 +684,13 @@ async def sbatch(
     # Should be set, since `remote` is None if current_cluster() is the same as the cluster argument
     # to `submit`.
     assert cluster
+    # Resolve any env vars in the results_path *before* it goes into SBATCH_OUTPUT. See the note in
+    # `get_sbatch_command` for why it can't be left for the shell that runs sbatch to expand.
+    config_results_path = get_cluv_config().get_cluster_config(cluster).results_path
+    if remote is not None:
+        results_path = await expandvars(remote, config_results_path)
+    else:
+        results_path = PurePosixPath(os.path.expandvars(str(config_results_path)))
     sbatch_command, resolved_args = get_sbatch_command(
         cluster=cluster,
         job_script=job_script,
@@ -681,6 +698,7 @@ async def sbatch(
         program_args=program_args,
         git_commit=git_commit,
         chunking=chunking,
+        results_path=results_path,
     )
 
     display = display_commands.get()

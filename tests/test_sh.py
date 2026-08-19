@@ -6,35 +6,39 @@ from unittest import mock
 
 import pytest
 
-import cluv
 import cluv.__main__ as cluv_main
-import cluv.cache
 import cluv.cli.sh as sh_module
 from cluv.cli.sh import sh
-from cluv.config import load_cluv_config
+from cluv.config import find_pyproject, load_cluv_config
 from cluv.remote import Remote
 from cluv.utils import console
 
 
-@pytest.fixture()
-def clean_cache(monkeypatch: pytest.MonkeyPatch):
+@pytest.fixture(autouse=True)
+def no_disabled_clusters(monkeypatch: pytest.MonkeyPatch):
     """By default, pretend no clusters are disabled, so tests don't depend on the real cache."""
-    monkeypatch.setattr(
-        cluv.cache, cluv.cache.read_cache.__name__, lambda: cluv.cache.CacheContent()
-    )
+    monkeypatch.setattr(sh_module, "get_disabled_clusters", lambda: {})
+
+
+@pytest.fixture(autouse=True)
+def not_on_a_cluster(monkeypatch: pytest.MonkeyPatch):
+    """By default, pretend we're not running from a cluster (e.g. a dev laptop)."""
+    monkeypatch.setattr(sh_module, "current_cluster", lambda: None)
 
 
 async def test_sh_prints_message_and_returns_when_nothing_to_run_on(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr(sh_module, "get_active_remotes", mock.AsyncMock(return_value=[]))
-
+    monkeypatch.setattr(
+        sh_module, "get_active_remotes", get_active_remotes := mock.AsyncMock(return_value=[])
+    )
     monkeypatch.setattr(sh_module, "_invoke_clush", invoke_clush := mock.AsyncMock())
     monkeypatch.setattr(sh_module, "_run_locally", run_locally := mock.AsyncMock())
 
     with console.capture() as cap:
         await sh(["echo", "hi"])
 
+    get_active_remotes.assert_awaited_once()
     invoke_clush.assert_not_called()
     run_locally.assert_not_called()
     assert "cluv login" in cap.get()
@@ -46,9 +50,7 @@ async def test_sh_writes_hostfile_with_connected_hostnames_and_invokes_clush(
     monkeypatch.setattr(
         sh_module,
         "get_active_remotes",
-        mock_get_active_remotes := mock.AsyncMock(
-            return_value=[Remote(hostname="mila"), Remote(hostname="narval")]
-        ),
+        mock.AsyncMock(return_value=[Remote(hostname="mila"), Remote(hostname="narval")]),
     )
 
     captured: dict = {}
@@ -61,15 +63,12 @@ async def test_sh_writes_hostfile_with_connected_hostnames_and_invokes_clush(
         return 0
 
     monkeypatch.setattr(
-        sh_module,
-        "_invoke_clush",
-        mock_invoke_clush := mock.AsyncMock(side_effect=fake_invoke_clush),
+        sh_module, "_invoke_clush", invoke_clush := mock.AsyncMock(side_effect=fake_invoke_clush)
     )
 
     await sh(["squeue", "--me"])
-    mock_get_active_remotes.assert_called_once()
-    mock_invoke_clush.assert_awaited_once()
 
+    invoke_clush.assert_awaited_once()
     assert captured["hostfile_contents"].splitlines() == ["mila", "narval"]
     assert captured["command"] == ["squeue", "--me"]
 
@@ -94,8 +93,8 @@ async def test_sh_groups_remotes_by_project_dir_into_separate_clush_calls(
         "tamia": PurePosixPath("$HOME/proj"),
         "killarney": PurePosixPath("$SCRATCH/proj"),
     }
-    p = tmp_path / "pyproject.toml"
-    p.write_text(
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
         textwrap.dedent(f"""\
         [tool.cluv]
         results_path = "logs"
@@ -110,10 +109,9 @@ async def test_sh_groups_remotes_by_project_dir_into_separate_clush_calls(
         project_dir = "{project_dirs["tamia"]}"
         """)
     )
-    cfg = load_cluv_config(p)
-    monkeypatch.setattr(
-        sh_module, "get_cluv_config", mock_get_cluv_config := mock.Mock(return_value=cfg)
-    )
+    config = load_cluv_config(pyproject)
+    monkeypatch.setattr(sh_module, "get_cluv_config", lambda: config)
+
     calls: list[tuple[list[str], PurePosixPath | None]] = []
 
     async def fake_invoke_clush(
@@ -123,13 +121,12 @@ async def test_sh_groups_remotes_by_project_dir_into_separate_clush_calls(
         return 0
 
     monkeypatch.setattr(
-        sh_module, "_invoke_clush", mock_invoke_clusk := mock.AsyncMock(wraps=fake_invoke_clush)
+        sh_module, "_invoke_clush", invoke_clush := mock.AsyncMock(side_effect=fake_invoke_clush)
     )
 
     await sh(["squeue", "--me"])
-    mock_get_cluv_config.assert_called()
-    mock_invoke_clusk.assert_awaited()
 
+    assert invoke_clush.await_count == 2  # one per distinct project dir, not one per cluster.
     assert sorted(calls, key=str) == sorted(
         [
             (["mila", "tamia"], PurePosixPath("$HOME/proj")),
@@ -140,13 +137,17 @@ async def test_sh_groups_remotes_by_project_dir_into_separate_clush_calls(
 
 
 async def test_sh_exits_with_clush_return_code_on_failure(monkeypatch: pytest.MonkeyPatch):
-    remotes = [Remote(hostname="mila")]
-    monkeypatch.setattr(sh_module, "get_active_remotes", mock.AsyncMock(return_value=remotes))
-    monkeypatch.setattr(sh_module, "_invoke_clush", mock.AsyncMock(return_value=17))
+    monkeypatch.setattr(
+        sh_module, "get_active_remotes", mock.AsyncMock(return_value=[Remote(hostname="mila")])
+    )
+    monkeypatch.setattr(
+        sh_module, "_invoke_clush", invoke_clush := mock.AsyncMock(return_value=17)
+    )
 
     with pytest.raises(SystemExit) as exc_info:
         await sh(["false"])
 
+    invoke_clush.assert_awaited_once()
     assert exc_info.value.code == 17
 
 
@@ -162,7 +163,7 @@ async def test_sh_runs_locally_when_on_a_cluster_even_with_no_other_connections(
 
     await sh(["squeue", "--me"])
 
-    run_locally.assert_called_once_with(["squeue", "--me"])
+    run_locally.assert_awaited_once_with(["squeue", "--me"])
     invoke_clush.assert_not_called()  # nothing to hostfile — no other clusters connected.
 
 
@@ -174,15 +175,18 @@ async def test_sh_runs_locally_then_clush_in_order_when_both_apply(
         sh_module, "get_active_remotes", mock.AsyncMock(return_value=[Remote(hostname="narval")])
     )
     call_order: list[str] = []
+    received_commands: list[list[str]] = []
 
     async def fake_run_locally(command: list[str]) -> int:
         call_order.append("local")
+        received_commands.append(command)
         return 0
 
     async def fake_invoke_clush(
         hostfile: Path, command: list[str], project_dir: PurePosixPath | None
     ) -> int:
         call_order.append("clush")
+        received_commands.append(command)
         return 0
 
     monkeypatch.setattr(sh_module, "_run_locally", fake_run_locally)
@@ -191,6 +195,7 @@ async def test_sh_runs_locally_then_clush_in_order_when_both_apply(
     await sh(["squeue", "--me"])
 
     assert call_order == ["local", "clush"]
+    assert received_commands == [["squeue", "--me"], ["squeue", "--me"]]
 
 
 async def test_sh_exits_with_local_return_code_when_local_fails_before_clush_runs(
@@ -207,7 +212,7 @@ async def test_sh_exits_with_local_return_code_when_local_fails_before_clush_run
     with pytest.raises(SystemExit) as exc_info:
         await sh(["false"])
 
-    invoke_clush.assert_called_once()  # clush still runs even though the local run failed.
+    invoke_clush.assert_awaited_once()  # clush still runs even though the local run failed.
     assert exc_info.value.code == 3  # but the local (first) failure's code wins.
 
 
@@ -280,28 +285,24 @@ def test_with_cd_prefix_prepends_a_best_effort_cd_when_given_a_project_dir():
     assert result == 'cd "$HOME/proj" 2>/dev/null; squeue --me'
 
 
-async def test_run_locally_builds_expected_argv_and_returns_exit_code(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_sh_pwd_runs_for_real_from_the_local_project_root(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
 ):
-    create_subprocess_exec = mock.AsyncMock(return_value=_fake_proc(0))
-    monkeypatch.setattr(sh_module.asyncio, "create_subprocess_exec", create_subprocess_exec)
-    monkeypatch.setattr(sh_module, "find_pyproject", lambda: Path("/fake/repo/pyproject.toml"))
+    """An end-to-end (unmocked) run of `cluv sh pwd`'s local-execution path.
 
-    returncode = await sh_module._run_locally(["squeue", "--me"])
+    No SSH/`clush` is involved here (that would need a live cluster connection — see
+    `tests/test_integration.py`), so this is real enough to exercise the actual `subprocess`
+    call, unlike `test_invoke_clush_*`/the old `_run_locally` argv tests: it proves `cluv sh`
+    really does `cd` into the project root, rather than just asserting a mock received the right
+    `cwd=` kwarg.
+    """
+    monkeypatch.setattr(sh_module, "current_cluster", lambda: "mila")
+    monkeypatch.setattr(sh_module, "get_active_remotes", mock.AsyncMock(return_value=[]))
 
-    assert returncode == 0
-    create_subprocess_exec.assert_called_once_with("squeue", "--me", cwd=Path("/fake/repo"))
+    await sh(["pwd"])
 
-
-async def test_run_locally_returns_nonzero_exit_code(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(
-        sh_module.asyncio, "create_subprocess_exec", mock.AsyncMock(return_value=_fake_proc(7))
-    )
-    monkeypatch.setattr(sh_module, "find_pyproject", lambda: Path("/fake/repo/pyproject.toml"))
-
-    returncode = await sh_module._run_locally(["false"])
-
-    assert returncode == 7
+    printed_lines = [line for line in capfd.readouterr().out.splitlines() if line.strip()]
+    assert printed_lines[-1] == str(find_pyproject().parent)
 
 
 def test_sh_cli_parses_command_args(monkeypatch: pytest.MonkeyPatch) -> None:

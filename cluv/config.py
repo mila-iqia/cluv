@@ -11,7 +11,7 @@ from dataclasses import field
 from pathlib import Path, PurePath, PurePosixPath
 from typing import Generic
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 from pydantic.dataclasses import dataclass
 from typing_extensions import TypeVar
 
@@ -168,6 +168,13 @@ class CluvConfig(BaseModel):
 
     local: LocalConfig = LocalConfig()
 
+    # Path of the pyproject.toml this config was loaded from (set by `load_cluv_config`). Threaded
+    # through to `default_project_dir` so it walks up from *this* config's location instead of
+    # re-deriving it from the cwd — which would recompute the same path forever when a parent
+    # pyproject.toml is found but doesn't resolve the cluster's `project_dir` either (infinite
+    # recursion between `get_cluster_config` and `default_project_dir`).
+    _pyproject_path: Path | None = PrivateAttr(default=None)
+
     @property
     def clusters_names(self) -> list[str]:
         return list(self.clusters.keys())
@@ -186,7 +193,9 @@ class CluvConfig(BaseModel):
         datasets_path = cluster_config.datasets_path or self.datasets_path
         job_script_path = cluster_config.job_script_path or self.job_script_path
         project_dir = (
-            cluster_config.project_dir or self.project_dir or default_project_dir(cluster)
+            cluster_config.project_dir
+            or self.project_dir
+            or default_project_dir(cluster, self._pyproject_path)
         )
 
         # One set of sbatch args per allocation on this cluster (a single one in most cases).
@@ -205,7 +214,7 @@ class CluvConfig(BaseModel):
         )
 
 
-def default_project_dir(cluster: str) -> PurePosixPath | None:
+def default_project_dir(cluster: str, pyproject_path: Path | None = None) -> PurePosixPath | None:
     """Returns the path where the project should be synced when `project_dir` isn't set in the config.
 
     - If the project is a member of a workspace, or there is a pyproject.toml file above the current,
@@ -219,8 +228,14 @@ def default_project_dir(cluster: str) -> PurePosixPath | None:
 
     Otherwise, returns `None`, which should lead to some error in the calling code, since we want people to either have their project in $HOME,
     or to set the directory to use for syncing their project to clusters.
+
+    Parameters:
+        pyproject_path: The pyproject.toml to walk up *from*. Defaults to the current project's
+            (`find_pyproject()`). Passed explicitly by `get_cluster_config` when recursing into a
+            parent pyproject.toml, so each step walks further up the filesystem instead of
+            recomputing the same (cwd-relative) starting point forever.
     """
-    pyproject_path = find_pyproject()
+    pyproject_path = pyproject_path or find_pyproject()
     project_root = pyproject_path.parent
 
     if (parent_pyproject := try_find_pyproject(project_root.parent)) and (
@@ -279,6 +294,7 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
     if current_cluster() is None:
         set_local_env_vars(cluv.get("local", {}).get("env", {}))
     config = CluvConfig.model_validate(cluv, extra="forbid")
+    config._pyproject_path = pyproject_path
     return config
 
 

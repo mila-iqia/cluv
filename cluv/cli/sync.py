@@ -175,26 +175,13 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
-def default_project_dir() -> PurePosixPath | None:
-    """Returns the `$HOME`-relative remote project dir mirroring the local project's location.
-
-    This is the fallback used when a cluster's `project_dir` isn't set in the Cluv config: it
-    reflects the local project root's path relative to the user's home directory (e.g. a project
-    at `~/code/foo` would end up at `$HOME/code/foo` on the cluster). Returns `None` if the local
-    project root isn't under `$HOME`, in which case `project_dir` must be set explicitly.
-    """
-    project_root = find_pyproject().parent
-    if not project_root.is_relative_to(Path.home()):
-        return None
-    return PurePosixPath("$HOME" / project_root.relative_to(Path.home()))
-
-
 async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     config = get_cluv_config()
     cluster = remote.hostname
-    cluster_config = config.get_cluster_config(remote.hostname)
-    project_path = cluster_config.project_dir or default_project_dir()
+    cluster_config = config.get_cluster_config(cluster)
+    project_path = cluster_config.project_dir
+    # The project either has a project_dir set, or it is assumed to be under $HOME.
     if project_path is None:
         raise RuntimeError(
             f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
@@ -367,32 +354,7 @@ async def clone_project(
     - Worry about authentication later, just raise an error if need be for now.
     """
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
-
-    # In the case of a subproject (like the examples in the cluv repo), these are different!
-    local_project_root = find_pyproject().parent
-    local_repo_dir = Path(subprocess.getoutput("git rev-parse --show-toplevel").strip())
-
-    if local_project_root == local_repo_dir:
-        cluster_repo_dir = project_path
-    elif not local_repo_dir.is_relative_to(Path.home()):
-        # Try to find the directory where the project should be cloned on the cluster
-        # by reading the pyproject.toml at the repo root. Hopefully it has a cluv config with project_dir set.
-        cluster_repo_dir = None
-        if (local_repo_dir / "pyproject.toml").exists():
-            cluster_repo_dir = (
-                load_cluv_config(local_repo_dir / "pyproject.toml")
-                .get_cluster_config(remote.hostname)
-                .project_dir
-            )
-        if not cluster_repo_dir:
-            raise RuntimeError(
-                f"Can't tell where to clone the current git repository on {remote.hostname}, "
-                f"because the project isn't under $HOME, and there is no `project_dir` in the "
-                f"subproject or in the root pyproject.toml."
-            )
-    else:
-        cluster_repo_dir = PurePosixPath("$HOME" / local_repo_dir.relative_to(Path.home()))
-        cluster_repo_dir = await expandvars(remote, cluster_repo_dir)
+    cluster_repo_dir = await get_cluster_repo_dir(remote, project_path)
 
     if project_state.checked_out_git_commit == current_git_commit:
         logger.info(
@@ -521,6 +483,42 @@ async def clone_project(
         env=gitenv,
     )
     project_state.checked_out_git_commit = current_git_commit
+
+
+async def get_cluster_repo_dir(
+    remote: Remote, project_path_from_config: PurePosixPath
+) -> PurePosixPath:
+    """Determines the path where the repo should be cloned on that cluster.
+
+    Resolves any environment variables in the path on the remote.
+    """
+    local_project_root = find_pyproject().parent
+    local_repo_dir = Path(subprocess.getoutput("git rev-parse --show-toplevel").strip())
+    # In the case of a subproject (like the examples in the cluv repo), these are different.
+    if local_project_root == local_repo_dir:
+        # The project is at the root of the repo, just use `project_path` as the clone target dir.
+        return await expandvars(remote, project_path_from_config)
+
+    if (local_repo_pyproject := (local_repo_dir / "pyproject.toml")).exists() and (
+        cluster_repo_dir := (
+            load_cluv_config(local_repo_pyproject).get_cluster_config(remote.hostname).project_dir
+        )
+    ):
+        # Try to find the directory where the project should be cloned on the cluster
+        # by reading the pyproject.toml at the repo root. Hopefully it has a cluv config
+        # with project_dir set.
+        # There is an edge case here, if the
+        return await expandvars(remote, cluster_repo_dir)
+
+    if local_repo_dir.is_relative_to(Path.home()):
+        cluster_repo_dir = PurePosixPath("$HOME" / local_repo_dir.relative_to(Path.home()))
+        return await expandvars(remote, cluster_repo_dir)
+
+    raise RuntimeError(
+        f"Can't tell where to clone the current git repository on {remote.hostname}, "
+        f"because the project isn't under $HOME, and there is no `project_dir` in the "
+        f"subproject or in the root pyproject.toml."
+    )
 
 
 async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):

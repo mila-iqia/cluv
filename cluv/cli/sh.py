@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 
 from cluv.cache import get_disabled_clusters
 from cluv.cli.disable import print_disabled_clusters
-from cluv.cli.sync import default_project_dir, get_active_remotes
+from cluv.cli.sync import get_active_remotes
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.utils import console, current_cluster
 
@@ -79,16 +79,8 @@ async def sh(command: list[str]) -> None:
 
 
 def _project_dir_for_cluster(cluster: str) -> PurePosixPath | None:
-    """Returns `cluster`'s configured/derived project dir, or `None` if it can't be determined.
-
-    Falls back to `None` (rather than raising) for a cluster that isn't in the Cluv config at all,
-    since `sh` never validates cluster names against the config (unlike `sync`/`submit`).
-    """
-    try:
-        cluster_config = get_cluv_config().get_cluster_config(cluster)
-    except KeyError:
-        return None
-    return cluster_config.project_dir or default_project_dir()
+    """Returns `cluster`'s configured/derived project dir, or `None` if it can't be determined."""
+    return get_cluv_config().get_cluster_config(cluster).project_dir
 
 
 async def _invoke_clush(

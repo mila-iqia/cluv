@@ -144,7 +144,7 @@ env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 
 [tool.cluv.clusters.killarney]
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
-results_path = "$HOME/logs/cluv"
+project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.vulcan]
 

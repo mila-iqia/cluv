@@ -110,11 +110,24 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
         ],
     )
     assert job is not None
-    # The job script that cluv picked should be the one configured for this cluster.
-    assert job.job_script == f"scripts/job_{remote.hostname}.sh"
 
-    state = await wait_for_job_to_finish(remote, job.job_id)
-    assert state.startswith("COMPLETED"), state
+    should_cancel_job = True
+    try:
+        # The job script that cluv picked should be the one configured for this cluster.
+        assert job.job_script == f"scripts/job_{remote.hostname}.sh"
+
+        state = await wait_for_job_to_finish(remote, job.job_id)
+        should_cancel_job = False  # it reached a terminal state, so there is nothing to cancel.
+        assert state.startswith("COMPLETED"), state
+    finally:
+        if should_cancel_job:
+            # The job is still queued or running: it either outlasted the timeout in
+            # `wait_for_job_to_finish` (which skips the test) or something above it failed. Either
+            # way nothing is watching it any more, so don't leave it on the cluster - these jobs ask
+            # for most of a GPU node, and this example's config sets `requeue = true`, so a
+            # preempted orphan comes back rather than dying.
+            print(f"Cancelling job {job.job_id} on {remote.hostname}.")
+            await remote.run(f"scancel {job.job_id}", warn=True, hide=True, display=True)
 
 
 async def wait_for_job_to_finish(remote: Remote, job_id: int, timeout_minutes: int = 30) -> str:
@@ -130,4 +143,7 @@ async def wait_for_job_to_finish(remote: Remote, job_id: int, timeout_minutes: i
         print(f"Job {job_id} on {remote.hostname}: {state}")
         if state.startswith(("COMPLETED", "CANCELLED")) or state in FAILED_JOB_STATES:
             return state
-    pytest.skip(f"Job {job_id} on {remote.hostname} did not finish within {timeout_minutes}min.")
+    pytest.skip(
+        f"Job {job_id} on {remote.hostname} did not finish within {timeout_minutes}min; "
+        f"it will be cancelled."
+    )

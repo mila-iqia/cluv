@@ -298,6 +298,7 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": False,
+                "vram": None,
             }
         )
 
@@ -318,6 +319,26 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": False,
+                "vram": None,
+            }
+        )
+
+    def test_vram_is_not_passed_along_to_sbatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--gpus=1", "--vram=10GB", "--", "python", "main.py"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--gpus=1"],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "chunking": False,
+                "vram": "10GB",
             }
         )
 
@@ -341,6 +362,7 @@ class TestSubmitCliParsing:
                 "program_args": [],
                 "autocommit": False,
                 "chunking": False,
+                "vram": None,
             }
         )
 

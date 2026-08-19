@@ -35,7 +35,7 @@ milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
 logger = logging.getLogger(__name__)
 
-__all__ = ["sync", "install_uv", "clone_project", "fetch_results"]
+__all__ = ["sync", "install_uv", "clone_project", "fetch_results", "default_project_dir"]
 
 
 # TODO: Control the 'hide' and 'display' / etc using the --verbose flag value, in addition to the loglevel.
@@ -175,23 +175,32 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
+def default_project_dir() -> PurePosixPath | None:
+    """Returns the `$HOME`-relative remote project dir mirroring the local project's location.
+
+    This is the fallback used when a cluster's `project_dir` isn't set in the Cluv config: it
+    reflects the local project root's path relative to the user's home directory (e.g. a project
+    at `~/code/foo` would end up at `$HOME/code/foo` on the cluster). Returns `None` if the local
+    project root isn't under `$HOME`, in which case `project_dir` must be set explicitly.
+    """
+    project_root = find_pyproject().parent
+    if not project_root.is_relative_to(Path.home()):
+        return None
+    return PurePosixPath("$HOME" / project_root.relative_to(Path.home()))
+
+
 async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     config = get_cluv_config()
     cluster = remote.hostname
     cluster_config = config.get_cluster_config(remote.hostname)
-    project_path = cluster_config.project_dir
+    project_path = cluster_config.project_dir or default_project_dir()
     if project_path is None:
-        if find_pyproject().parent.is_relative_to(Path.home()):
-            project_path = PurePosixPath(
-                "$HOME" / find_pyproject().parent.relative_to(Path.home())
-            )
-        else:
-            raise RuntimeError(
-                f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
-                f"project root ({find_pyproject().parent}) is not under $HOME. "
-                f"Please set `cluv.project_dir` in the Cluv config section of pyproject.toml."
-            )
+        raise RuntimeError(
+            f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
+            f"project root ({find_pyproject().parent}) is not under $HOME. "
+            f"Please set `cluv.project_dir` in the Cluv config section of pyproject.toml."
+        )
     project_path = await expandvars(remote, project_path)
 
     def _update_progress(progress: int, status: str, total: int):

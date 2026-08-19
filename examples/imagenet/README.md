@@ -30,6 +30,7 @@ cd examples/imagenet
 | `scripts/train.sh` | Shared job body: code checkpointing, stage the data, set up the `torch.distributed` env, `srun` the training script. |
 | `scripts/job_<cluster>.sh` | Thin per-cluster wrappers: only `#SBATCH` directives, then `exec scripts/train.sh`. |
 | `scripts/job.sh` | Generic 1-node/1-GPU fallback for clusters without a wrapper of their own. |
+| `scripts/sync_wandb.sh` | Uploads offline W&B runs pulled back by `cluv sync` to wandb.ai. |
 
 The mapping from cluster to job script lives in the `pyproject.toml`:
 
@@ -68,6 +69,31 @@ cluv submit tamia --time=0:20:00 -- python main.py --use_fake_data --epochs=1 \
 That takes well under a minute once the job starts (a short `--time` also helps it get scheduled
 sooner). It leaves `epoch_0.pt` / `epoch_1.pt` and one profiler trace per rank in the run's results
 directory, so you can tell that training, checkpointing and profiling all worked.
+
+Drop `--no_wandb` to also check the W&B integration. `[tool.cluv.env]` sets `WANDB_MODE=offline` by
+default (`online` on mila, fir and nibi, which have internet on their compute nodes), so the run's
+files land next to the checkpoints in `results_path` instead of streaming out live:
+
+```bash
+cluv submit tamia --time=0:20:00 -- python main.py --use_fake_data --epochs=1 \
+    --limit_train_samples=2048 --limit_val_samples=512 --batch_size=64 --model_name=resnet18
+```
+
+### Uploading offline W&B runs
+
+`cluv sync` pulls a run's `wandb/` directory back along with its checkpoints (`main.py` points
+`wandb.init(dir=...)` at `results_path`), but an *offline* run still needs `wandb sync` to actually
+upload it to wandb.ai - pulling the files back to your machine isn't the same as syncing them to the
+service:
+
+```bash
+cluv sync tamia               # pull the run(s) back
+scripts/sync_wandb.sh         # upload any offline runs found under results_path
+```
+
+`wandb sync` marks each run as synced after a successful upload and skips already-synced runs on
+later calls, so re-running `scripts/sync_wandb.sh` after every `cluv sync` is cheap and never
+re-uploads (or floods wandb.ai with) the same run twice.
 
 ### The real thing
 
@@ -114,6 +140,7 @@ Results (checkpoints, wandb files, the slurm output) land in `results_path`, whi
 
 ```bash
 cluv sync fir            # pull the results back
+scripts/sync_wandb.sh    # upload any offline runs to wandb.ai (see above)
 ls logs/fir_<job_id>/
 uvx tensorboard --with=torch_tb_profiler --logdir logs
 ```

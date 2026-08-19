@@ -388,6 +388,15 @@ class TestRealProjectConfig:
         for job_script in filter(None, job_scripts):
             assert (project_dir / job_script).exists()
 
+    def test_imagenet_sync_wandb_script_exists(self, pytestconfig) -> None:
+        """`scripts/sync_wandb.sh` uploads offline W&B runs pulled back by `cluv sync`.
+
+        It has to exist and be executable for the README instructions to work.
+        """
+        script = pytestconfig.rootpath / "examples" / "imagenet" / "scripts" / "sync_wandb.sh"
+        assert script.exists()
+        assert os.access(script, os.X_OK)
+
 
 def test_cluv_local_env_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Prevent any modifications to `os.environ` between tests.

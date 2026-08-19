@@ -75,6 +75,13 @@ async def test_hydra_example(
     assert subprocess_result.returncode == 0
 
 
+# Clusters whose Slurm partition requires a job to take every GPU of the node(s) it lands on
+# (see the comments in their `scripts/job_<cluster>.sh`). Everywhere else, `--gpus-per-node=1`
+# `--ntasks-per-node=1` overrides the per-cluster job script's GPU count so this smoke test uses as
+# little compute as will actually exercise the distributed code path (rank 0 + rank-0-only logic).
+WHOLE_NODE_CLUSTERS = {"tamia"}
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "cluster",
@@ -93,10 +100,14 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
     repo_root = Path(__file__).parent.parent
     monkeypatch.chdir(repo_root / "examples/imagenet")
 
+    sbatch_args = ["--time=0:20:00"]
+    if remote.hostname not in WHOLE_NODE_CLUSTERS:
+        sbatch_args += ["--gpus-per-node=1", "--ntasks-per-node=1"]
+
     job = await submit(
         remote.hostname,
         job_script=None,
-        sbatch_args=["--time=0:20:00"],
+        sbatch_args=sbatch_args,
         program_args=[
             "python",
             "main.py",

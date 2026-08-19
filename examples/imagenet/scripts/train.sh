@@ -10,10 +10,8 @@
 # (Note: $SLURM_SUBMIT_DIR is *not* that folder - it is the directory sbatch itself was run from,
 # which for `cluv submit` is the home directory of the SSH session.)
 #
-# It then switches into a clone of the repo in each node's $SLURM_TMPDIR, checked out at the
-# $GIT_COMMIT the job was submitted with, so the code cannot change under a job that is still queued.
-# Everything after that point runs from the clone. See the "Run the code from a per-node clone"
-# section below.
+# `scripts/code_checkpointing.sh` then clones the project onto each node's local storage at the
+# commit the job was submitted with, and every `uv run` below is pointed there with `--directory`.
 
 set -e # exit on error.
 
@@ -42,96 +40,13 @@ elif [ -n "${SLURM_MEM_PER_CPU:-}" ]; then
     unset SLURM_MEM_PER_NODE
 fi
 
-# Run this once per node. $SLURM_TMPDIR is set by a Slurm plugin at step launch, so it has to be
-# read inside an `srun` step rather than here in the batch script.
-one_task_per_node="srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1}"
-
-# The batch script needs the value too (to `cd` into the clone below, so that the steps launched
-# afterwards inherit it as their working directory), so ask a step for it when it isn't already set
-# here. The path is the same on every node of a job on all the clusters this example targets.
-slurm_tmpdir=${SLURM_TMPDIR:-$(srun --ntasks=1 --ntasks-per-node=1 bash -c 'echo "$SLURM_TMPDIR"')}
-
-# How to invoke uv for the steps below. Overridden just after this to point at the per-node clone.
-uv_run=(uv run)
-
-## Run the code from a per-node clone of the repo, pinned to $GIT_COMMIT ##
-# The project folder on the cluster is what `cluv sync` writes into, so a later `cluv sync` (or
-# another `cluv submit`) can move it to a different commit while this job is still sitting in the
-# queue. The job would then train whatever happens to be checked out at that moment instead of what
-# it was submitted with - and with `requeue = true` in the config, a requeued job re-runs this
-# script, which widens that window further.
-#
-# `cluv submit` refuses to submit a dirty tree and exports the commit it synced as $GIT_COMMIT, so
-# cloning the repo onto each node and detaching onto that commit makes the code this job runs
-# immutable, whatever happens in the project folder afterwards.
-#
-# The virtualenv is *symlinked*, not copied: it is ~7GB (torch plus the CUDA libraries), it already
-# matches this commit's uv.lock because `cluv submit` synced it, and UV_NO_SYNC below stops uv from
-# ever modifying it. The trade-off is that third-party packages -- and `cluv` itself, which is
-# installed in the venv as an editable workspace member -- are still read from the project folder,
-# so only this example's own code is pinned. Replace the symlink with
-# `cp -r "$repo_root/.venv" "$clone/.venv"` followed by `uv sync` if you need the dependencies
-# pinned too, keeping in mind that this copies ~7GB onto every node.
-#
-# Note: this does not change where Slurm writes the job's own output file. `--output` is resolved
-# relative to the `--chdir` that `cluv submit` passes (the project folder), and Slurm opens that
-# file before this script starts running.
-if [ -n "${GIT_COMMIT:-}" ]; then
-    repo_root=$(git rev-parse --show-toplevel)
-    # Where this project sits inside the repo, e.g. `examples/imagenet`.
-    project_subdir=$(realpath --relative-to="$repo_root" "$PWD")
-    repo_name=$(basename "$repo_root")
-
-    if [ -z "$slurm_tmpdir" ]; then
-        echo "ERROR: could not determine \$SLURM_TMPDIR for this job, so there is nowhere" >&2
-        echo "node-local to clone the repo into. Request local disk for the job (for example with" >&2
-        echo "--tmp), or drop this section to run straight out of the project folder." >&2
-        exit 1
-    fi
-
-    # $SLURM_TMPDIR is node-local and private to this job, so each node needs its own clone.
-    echo "Cloning the repo at $GIT_COMMIT into $slurm_tmpdir on each node..."
-    $one_task_per_node bash -c '
-        set -e
-        repo_root="$1"
-        git_commit="$2"
-        clone="$3/$(basename "$repo_root")"
-        # A requeued job keeps the same $SLURM_JOB_ID, so a clone from a previous attempt can still
-        # be there if this attempt landed on the same node.
-        rm -rf "$clone"
-        git clone --quiet "$repo_root" "$clone"
-        if ! git -C "$clone" checkout --quiet --detach "$git_commit"; then
-            echo "ERROR: commit $git_commit is not present in the clone of $repo_root." >&2
-            echo "The project folder was most likely moved to an unrelated commit while this job" >&2
-            echo "was queued. Re-submit the job with cluv submit." >&2
-            exit 1
-        fi
-        ln -s "$repo_root/.venv" "$clone/.venv"
-    ' _ "$repo_root" "$GIT_COMMIT" "$slurm_tmpdir"
-
-    # Point uv at the clone rather than `cd`-ing into it. srun resolves the working directory it
-    # hands to a step before that step's node-local $SLURM_TMPDIR mount is visible to it, so a `cd`
-    # into the clone makes every step log a confusing
-    #   error: couldn't chdir to `...': No such file or directory: going to /tmp instead
-    # and then rely on the chdir being retried once the namespace is set up. Leaving the steps in the
-    # project folder (which is on the shared filesystem, so always resolvable) and telling uv where
-    # the project actually is avoids depending on that.
-    uv_run=(uv run --directory="$slurm_tmpdir/$repo_name/$project_subdir")
-    echo "Running from:  $slurm_tmpdir/$repo_name/$project_subdir (pinned to $GIT_COMMIT)"
-    # The virtualenv is shared with the project folder, so uv must never modify it.
-    export UV_NO_SYNC=1
-else
-    echo "WARNING: \$GIT_COMMIT is not set, so this job runs straight out of $PWD, and the code" >&2
-    echo "can still change under it while it is queued. Submit with \`cluv submit\` instead." >&2
-fi
-
-## Warm up the virtualenv on each node ##
-# `import torch` pulls in ~2GB of shared libraries. Faulting those in from a networked filesystem
-# ($HOME is on Lustre on the DRAC clusters) in all the tasks of a node at once is *very* slow - the
-# tasks sit in `cl_sync_io_wait` for minutes. Reading them once per node first puts them in the
-# node's page cache, so the tasks below start quickly.
-echo "Warming up the virtualenv on each node..."
-$one_task_per_node "${uv_run[@]}" python -c 'import torch, torchvision; print(torch.__version__, flush=True)'
+## Code checkpointing with git, to avoid unexpected bugs ##
+# Clones the project at $GIT_COMMIT onto every node and creates the virtualenv there. What comes back
+# is the directory to give to `uv run --directory`, and it still contains a literal, unexpanded
+# `$SLURM_TMPDIR`: that path is node-local and can differ between the nodes of one job, so each task
+# has to expand it itself. That is why every `uv run` below goes through a `bash -c "..."`.
+UV_DIR=$(bash scripts/code_checkpointing.sh)
+echo "Running uv commands in directory: $UV_DIR"
 
 ## Stage the dataset into $SLURM_TMPDIR ##
 # Extract the ImageNet archives onto each node's local disk, using all the CPUs of each node.
@@ -142,16 +57,15 @@ $one_task_per_node "${uv_run[@]}" python -c 'import torch, torchvision; print(to
 if [[ "${job_command[*]}" == *--use_fake_data* ]]; then
     echo "Skipping the dataset staging step, since --use_fake_data was passed."
 else
-    $one_task_per_node bash -c '
-        echo "SLURM_TMPDIR: ${SLURM_TMPDIR:-<unset>}"
-        if [ -z "${SLURM_TMPDIR:-}" ]; then
-            echo "ERROR: \$SLURM_TMPDIR is not set in this job, so we do not know where this" >&2
-            echo "cluster wants ~150GB of node-local scratch to be written. Refusing to guess." >&2
-            echo "Request local disk for the job (for example with --tmp), or pass" >&2
-            echo "--use_fake_data to run without the real dataset." >&2
-            exit 1
-        fi
-        "$@" python prepare_data.py' _ "${uv_run[@]}"
+    srun --ntasks-per-node=1 bash -c "\
+        if [ -z \"\${SLURM_TMPDIR:-}\" ]; then \
+            echo 'ERROR: \$SLURM_TMPDIR is not set in this job, so we do not know where this' >&2; \
+            echo 'cluster wants ~150GB of node-local scratch to be written. Refusing to guess.' >&2; \
+            echo 'Request local disk for the job (for example with --tmp), or pass' >&2; \
+            echo '--use_fake_data to run without the real dataset.' >&2; \
+            exit 1; \
+        fi; \
+        uv run --directory=$UV_DIR python prepare_data.py"
 fi
 
 # These environment variables are used by torch.distributed and should ideally be set
@@ -165,7 +79,6 @@ export WORLD_SIZE=$SLURM_NTASKS
 # main.py derives RANK / LOCAL_RANK from $SLURM_PROCID / $SLURM_LOCALID, which differ per task, so
 # they must not be set here.
 
-## Pure Slurm version ##
 # `srun` runs the command once per task, which is once per GPU in our case.
 #
 # Note: the job scripts request GPUs with `--gpus-per-node`, not `--gpus-per-task`. With
@@ -177,19 +90,5 @@ export WORLD_SIZE=$SLURM_NTASKS
 # the GPUs per node and let each task pick its own by local rank.
 #
 # A per-cluster wrapper can `export SRUN_EXTRA_ARGS=...` to add flags here.
-srun ${SRUN_EXTRA_ARGS-} "${uv_run[@]}" "${job_command[@]}"
-
-## srun + torchrun version ##
-# srun --ntasks-per-node=1 bash -c "\
-#     uv run torchrun --node-rank=\$SLURM_NODEID --nnodes=\$SLURM_STEP_NUM_NODES \
-#     --master-addr=$MASTER_ADDR --master-port=$MASTER_PORT --nproc-per-node=gpu \
-#     ${job_command[*]}"
-
-## srun + accelerate version ##
-## NOTE: This particular example doesn't use accelerate, this is just here to illustrate.
-# srun --ntasks-per-node=1 bash -c "\
-#     uv run accelerate launch \
-#     --machine_rank \$SLURM_NODEID \
-#     --main_process_ip $MASTER_ADDR --main_process_port $MASTER_PORT \
-#     --num_machines $SLURM_NNODES --num_processes $SLURM_NTASKS \
-#     ${job_command[*]}"
+# `"\$@"` keeps the job command's own quoting intact, while $UV_DIR is expanded by each task.
+srun ${SRUN_EXTRA_ARGS-} bash -c "uv run --directory=$UV_DIR \"\$@\"" _ "${job_command[@]}"

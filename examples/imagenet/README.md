@@ -26,7 +26,8 @@ cd examples/imagenet
 |---|---|
 | `main.py` | The training script. Gets its run id and results dir from `cluv.job`. |
 | `prepare_data.py` | Extracts the ImageNet archives into `$SLURM_TMPDIR`, reading them from the `datasets_path` cluv resolved for the current cluster. |
-| `scripts/train.sh` | Shared job body: clone the repo at `$GIT_COMMIT` onto each node, stage the data, set up the `torch.distributed` env, `srun` the training script. |
+| `scripts/code_checkpointing.sh` | Clones the project at `$GIT_COMMIT` onto each node's `$SLURM_TMPDIR` and creates the virtualenv there. Prints the directory for `uv run --directory`. |
+| `scripts/train.sh` | Shared job body: code checkpointing, stage the data, set up the `torch.distributed` env, `srun` the training script. |
 | `scripts/job_<cluster>.sh` | Thin per-cluster wrappers: only `#SBATCH` directives, then `exec scripts/train.sh`. |
 | `scripts/job.sh` | Generic 1-node/1-GPU fallback for clusters without a wrapper of their own. |
 
@@ -162,17 +163,21 @@ was no SSH connection to nibi available at the time.
 
 ## Notes
 
-- The job runs from a clone of the repo in each node's `$SLURM_TMPDIR`, detached onto the
-  `$GIT_COMMIT` that `cluv submit` exported. The project folder on the cluster is what `cluv sync`
-  writes into, so without this a later `cluv sync` (or another `cluv submit`) could move it to a
-  different commit while the job was still queued, and the job would train whatever happened to be
-  checked out by then. `requeue = true` widens that window further, since a requeued job re-runs the
-  job script. This replaces upstream's `safe_sbatch` / `code_checkpointing.sh` helpers.
-  - The virtualenv is *symlinked* into the clone rather than copied: it is ~7GB, it already matches
-    this commit's `uv.lock` because `cluv submit` synced it, and `UV_NO_SYNC=1` keeps uv from
-    modifying it. So only this example's own code is pinned - third-party packages, and `cluv`
-    itself, are still read from the project folder. `scripts/train.sh` says what to change if you
-    need the dependencies pinned too.
+- **Code checkpointing.** `scripts/code_checkpointing.sh` clones the project onto each node's
+  `$SLURM_TMPDIR`, checks out the `$GIT_COMMIT` that `cluv submit` exported, and runs `uv sync`
+  there; the `uv run` calls in `scripts/train.sh` are then pointed at that clone with `--directory`.
+  The project folder on the cluster is what `cluv sync` writes into, so without this a later
+  `cluv sync` (or another `cluv submit`) could move it to a different commit while the job was still
+  queued, and the job would train whatever happened to be checked out by then. `requeue = true`
+  widens that window further, since a requeued job re-runs the job script. This is the same helper
+  the [mila-docs example](https://github.com/mila-iqia/mila-docs/tree/master/docs/examples/advanced/imagenet)
+  uses, with `cluv submit` playing the role of its `safe_sbatch`.
+  - The directory it returns keeps `$SLURM_TMPDIR` *unexpanded* on purpose: that path is node-local
+    and can differ between the nodes of one job, so each task has to expand it itself. That is why
+    every `uv run` in `scripts/train.sh` goes through a `bash -c "..."`.
+  - Because `uv sync` runs inside the clone, the dependencies are pinned along with the code. It
+    needs either internet access on the compute nodes or a warm uv cache - the `cluv sync` that
+    precedes every `cluv submit` already warms that cache on the cluster.
   - Nothing is copied back out of `$SLURM_TMPDIR` at the end of the job. Everything the run produces
     (checkpoints, profiler traces, wandb files) is written straight to the absolute `results_path`
     that cluv resolved for the cluster, and `main.py` refuses to start if that path did not resolve
@@ -186,9 +191,9 @@ was no SSH connection to nibi available at the time.
   `--gpus-per-task`, Slurm's cgroups show each task only its own GPU, and
   `torch.cuda.set_device(LOCAL_RANK)` then fails with `invalid device ordinal` in every rank but the
   first.
-- `scripts/train.sh` reads the virtualenv once per node before launching the tasks. Without that,
-  every rank faults the same ~2GB of torch libraries in from the networked `$HOME` simultaneously,
-  which on Lustre-backed clusters stalls the job for many minutes.
+- Building the virtualenv on each node's local disk also avoids a performance trap: when the ranks
+  run out of a virtualenv on the networked `$HOME`, they all fault the same ~2GB of torch libraries
+  in at once, which on the Lustre-backed clusters stalls the job for many minutes.
 
 ### Per-cluster quirks worked around in the config
 

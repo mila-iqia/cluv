@@ -40,6 +40,7 @@ dev = [
     "ruff",
     "pytest-skip-slow>=0.0.5",
     "torchvision>=0.25.0",
+    "pytest-regressions>=2.11.0",
 ]
 
 [tool.pytest.ini_options]

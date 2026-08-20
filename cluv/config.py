@@ -219,9 +219,9 @@ def set_local_env_vars(env_vars: dict[str, str]) -> None:
             if new_value == value:
                 break
             value = new_value
-        if key in os.environ:
+        if key in os.environ and (existing := os.environ[key]) != value:
             logger.warning(
-                f"Overwriting local env var {key}={os.environ[key]} "
+                f"Overwriting local env var {key}={existing} "
                 rf"with value from \[tool.cluv.local.env] {value}"
             )
         else:

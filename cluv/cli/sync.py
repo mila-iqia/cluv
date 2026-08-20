@@ -69,6 +69,41 @@ async def sync(
     - Over SSH, does a git fetch on all remote clusters
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
+    remotes = await prepare_sync(clusters, sync_datasets=sync_datasets)
+
+    here = current_cluster()
+    tasks: list[AsyncTaskFn] = []
+    task_descriptions: list[str] = []
+    for remote in remotes:
+        tasks.append(functools.partial(sync_task_function, remote=remote))
+        task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
+
+    token = console_lock.set(asyncio.Lock())
+    per_cluster_new_runs: list[list[Path]] = await run_async_tasks_with_progress_bar(
+        async_task_fns=tasks,
+        task_descriptions=task_descriptions,
+        overall_progress_task_description="[green]Syncing project",
+    )
+    console_lock.reset(token)
+
+    # Display a consolidated summary of all newly-synced runs across all clusters.
+    for remote, new_runs in zip(remotes, per_cluster_new_runs):
+        print_new_runs(remote.hostname, new_runs)
+
+    return remotes
+
+
+async def prepare_sync(
+    clusters: list[str] | None = None, sync_datasets: bool = True
+) -> list[Remote]:
+    """Runs the steps of `sync` that are shared by all the clusters.
+
+    These have to happen before any cluster is synced: figuring out which clusters we can sync with,
+    pushing the local commits, and pulling the datasets from the source cluster when it isn't on this
+    machine.
+
+    Returns the Remotes of the clusters to sync with (see `sync_task_function`).
+    """
     here = current_cluster()
     if clusters and here in clusters:
         clusters.remove(here)
@@ -104,13 +139,6 @@ async def sync(
     # TODO: Add an --ignore flag to ignore some clusters?
     console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
-    tasks: list[AsyncTaskFn] = []
-    task_descriptions: list[str] = []
-    for remote in remotes:
-        tasks.append(functools.partial(sync_task_function, remote=remote))
-        task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
-
-    token = console_lock.set(asyncio.Lock())
     if (
         sync_datasets
         and config.data_source
@@ -136,26 +164,21 @@ async def sync(
         await _pull_datasets(source_remote, source_path, local_datasets_path)
     # else: data_source is a local path; data is already available locally, no pull needed
 
-    per_cluster_new_runs: list[list[Path]] = await run_async_tasks_with_progress_bar(
-        async_task_fns=tasks,
-        task_descriptions=task_descriptions,
-        overall_progress_task_description="[green]Syncing project",
-    )
-    console_lock.reset(token)
-
-    # Display a consolidated summary of all newly-synced runs across all clusters.
-    cwd = Path.cwd()
-    for remote, new_runs in zip(remotes, per_cluster_new_runs):
-        if new_runs:
-            console.print(f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]")
-            for run_path in sorted(new_runs):
-                try:
-                    display_path = run_path.relative_to(cwd)
-                except ValueError:
-                    display_path = run_path
-                console.print(f"  {display_path}")
-
     return remotes
+
+
+def print_new_runs(cluster: str, new_runs: list[Path]) -> None:
+    """Displays the run directories that were newly fetched from a cluster."""
+    if not new_runs:
+        return
+    cwd = Path.cwd()
+    console.print(f"[green]Newly synced runs from [bold]{cluster}[/bold]:[/green]")
+    for run_path in sorted(new_runs):
+        try:
+            display_path = run_path.relative_to(cwd)
+        except ValueError:
+            display_path = run_path
+        console.print(f"  {display_path}")
 
 
 async def get_active_remotes() -> list[Remote]:

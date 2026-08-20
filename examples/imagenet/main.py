@@ -26,6 +26,7 @@ srun --ntasks=2 --pty uv run python main.py --epochs=1 --limit_train_samples=50_
 import contextlib
 import dataclasses
 import datetime
+import json
 import logging
 import os
 import random
@@ -745,6 +746,32 @@ def setup_wandb(
     run.define_metric("val/samples_per_sec", summary="min")
 
 
+def get_slurm_output_path() -> Path | None:
+    """Asks Slurm directly for the resolved path of this job's stdout file.
+
+    `/proc/self/fd/1` doesn't work for this: Slurm forwards a task's stdout to slurmstepd over a
+    pipe rather than redirecting the file descriptor straight to the file (verified empirically -
+    `readlink`ing it shows a `pipe:[...]`, not a path). `scontrol show job <id> --json`, however,
+    reports it directly as `stdout_expanded` (the same field cluv itself reads as `StdOut=` when
+    showing job info) - with any `%j`/`%A`/`%a` placeholders already resolved, so this doesn't need
+    to assume anything about cluv's particular `SBATCH_OUTPUT` naming pattern, chunked or not.
+    """
+    try:
+        result = subprocess.run(
+            ["scontrol", "show", "job", JOB_ID, "--json"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        job = json.loads(result.stdout)["jobs"][0]
+        stdout_path = job.get("stdout_expanded") or job.get("standard_output")
+        return Path(stdout_path) if stdout_path else None
+    except Exception as e:
+        logger.warning(f"Could not ask Slurm for this job's stdout path ({e}).")
+        return None
+
+
 def watch_slurm_output(run, policy: str = "live"):
     """Streams the job's Slurm output file into the W&B run, so the training log is visible from
     the run's page (Files tab) instead of only living on the cluster's disk.
@@ -758,19 +785,20 @@ def watch_slurm_output(run, policy: str = "live"):
       empirically, only about half of the final file had made it up by the time a job completed -
       so this second call closes that gap. It still can't capture whatever this process prints
       after that point, or Slurm's own trailer once the job fully exits.
-
-    cluv points `SBATCH_OUTPUT` at `{results_path}/{run_id}/slurm-{job_id}.out` - the same
-    directory `RESULTS_DIR` already points at - for every job this example submits (no chunking or
-    job-packing here), so that's where to find it.
     """
-    slurm_output = RESULTS_DIR / f"slurm-{JOB_ID}.out"
+    slurm_output = get_slurm_output_path()
+    # Fall back to cluv's own naming convention if Slurm couldn't be asked directly (e.g.
+    # `scontrol` not on $PATH). Every job this example submits uses this exact pattern (no
+    # chunking or job-packing here), so it's a reasonable guess, just not a guaranteed one.
+    if slurm_output is None:
+        slurm_output = RESULTS_DIR / f"slurm-{JOB_ID}.out"
     if not slurm_output.exists():
         # Slurm creates this file (empty) before main.py even starts, so this shouldn't happen -
         # but `save()` only expands its glob once, at call time, so if the file isn't there yet, a
         # later retry wouldn't be picked up automatically either. Warn rather than fail the run.
         logger.warning(f"Could not find the Slurm output file at {slurm_output}; not watching it.")
         return
-    run.save(str(slurm_output), base_path=str(RESULTS_DIR), policy=policy)
+    run.save(str(slurm_output), base_path=str(slurm_output.parent), policy=policy)
 
 
 T = TypeVar("T")

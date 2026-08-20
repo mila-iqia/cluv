@@ -26,6 +26,7 @@ srun --ntasks=2 --pty uv run python main.py --epochs=1 --limit_train_samples=50_
 import contextlib
 import dataclasses
 import datetime
+import functools
 import json
 import logging
 import os
@@ -746,6 +747,7 @@ def setup_wandb(
     run.define_metric("val/samples_per_sec", summary="min")
 
 
+@functools.cache
 def get_slurm_output_path() -> Path | None:
     """Asks Slurm directly for the resolved path of this job's stdout file.
 
@@ -755,6 +757,9 @@ def get_slurm_output_path() -> Path | None:
     reports it directly as `stdout_expanded` (the same field cluv itself reads as `StdOut=` when
     showing job info) - with any `%j`/`%A`/`%a` placeholders already resolved, so this doesn't need
     to assume anything about cluv's particular `SBATCH_OUTPUT` naming pattern, chunked or not.
+
+    `watch_slurm_output()` calls this twice (once at startup, once right before the run finishes),
+    and the answer can't change mid-job, so `@functools.cache` skips the second `scontrol` call.
     """
     try:
         result = subprocess.run(

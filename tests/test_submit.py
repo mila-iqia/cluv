@@ -25,6 +25,7 @@ from cluv.cli.submit import (
     submit,
     submit_first,
 )
+from cluv.cli.submit_utils.chunking import CHUNK_SIZE
 from cluv.cli.sync import prepare_sync, sync_task_function
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.utils import current_cluster
@@ -115,7 +116,7 @@ class TestGetSbatchCommand:
             sbatch_args=sbatch_args,
             program_args=["program_arg_1", "program_arg_2"],
             git_commit="abecdef",
-            chunking=False,
+            chunking=None,
         )
         job_script_relative_path = sbatch_script.relative_to(fake_home)
 
@@ -156,7 +157,7 @@ class TestGetSbatchCommand:
             sbatch_args=sbatch_args,
             program_args=[],
             git_commit="abecdef",
-            chunking=False,
+            chunking=None,
         )
 
         assert sbatch_command == (
@@ -196,7 +197,7 @@ class TestGetSbatchCommand:
             sbatch_args=config_sbatch_args + ["--time=1:00:00"],  # CLI overrides the config time
             program_args=[],
             git_commit="abc123",
-            chunking=False,
+            chunking=None,
         )
         # Config flags come first (time, requeue, gpus), then CLI flag (--time=1:00:00).
         # sbatch uses last occurrence, so the CLI time wins.
@@ -239,7 +240,7 @@ class TestGetSbatchCommand:
             sbatch_args=config_sbatch_args + [],
             program_args=[],
             git_commit="abc123",
-            chunking=False,
+            chunking=None,
         )
         # gpus removed by cluster override, time still present
         assert "--gpus" not in sbatch_command
@@ -270,7 +271,7 @@ class TestGetSbatchCommand:
             sbatch_args=["--time=10:00:00"],
             program_args=[],
             git_commit="abecdef",
-            chunking=True,
+            chunking=3,
         )
 
         expected_sbatch_args = ["--time=3:00:00", "--array=0-3%1"]
@@ -297,7 +298,7 @@ class TestSubmitCliParsing:
                 "sbatch_args": [],
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
-                "chunking": False,
+                "chunking": None,
             }
         )
 
@@ -317,7 +318,7 @@ class TestSubmitCliParsing:
                 "sbatch_args": ["--mem=8G"],
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
-                "chunking": False,
+                "chunking": None,
             }
         )
 
@@ -340,7 +341,52 @@ class TestSubmitCliParsing:
                 "sbatch_args": [],
                 "program_args": [],
                 "autocommit": False,
-                "chunking": False,
+                "chunking": None,
+            }
+        )
+
+    def test_chunking_with_value_is_recovered_from_sbatch_args(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--chunking=N` placed before `--` can get swallowed into the REMAINDER `sbatch_args`
+        along with the other sbatch flags; it should still be parsed as `chunking=N` and not be
+        forwarded to `sbatch`."""
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--chunking=6", "--time=24:00:00", "--", "sleep", "10"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--time=24:00:00"],
+                "program_args": ["sleep", "10"],
+                "autocommit": False,
+                "chunking": 6,
+            }
+        )
+
+    def test_bare_chunking_recovered_from_sbatch_args_uses_default_chunk_size(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bare `--chunking` recovered from the REMAINDER `sbatch_args` should default to
+        `CHUNK_SIZE`, not `True`."""
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--chunking", "--time=24:00:00", "--", "sleep", "10"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--time=24:00:00"],
+                "program_args": ["sleep", "10"],
+                "autocommit": False,
+                "chunking": CHUNK_SIZE,
             }
         )
 
@@ -592,7 +638,7 @@ async def test_can_submit_on_current_cluster(
         job_script=job_script,
         sbatch_args=sbatch_args,
         program_args=program_args,
-        chunking=False,
+        chunking=None,
     )
 
     assert returned_job
@@ -823,7 +869,7 @@ async def test_submit_first_considers_current_cluster(
         sbatch_args=sbatch_args,
         program_args=program_args,
         git_commit=dummy_commit,
-        chunking=False,
+        chunking=None,
     )
     assert returned_job
     mock_prepare_sync.assert_awaited_once()

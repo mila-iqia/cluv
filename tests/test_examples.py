@@ -100,6 +100,12 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
     repo_root = Path(__file__).parent.parent
     monkeypatch.chdir(repo_root / "examples/imagenet")
 
+    # This job name is stable across commits (it comes from the job script's filename, not
+    # GIT_COMMIT), so a job still queued under it can only be a leftover from an earlier run of
+    # *this same test* on this cluster - clean it up before adding another one to the queue. See
+    # `cancel_stale_jobs` for why this can't just be left to that earlier run's own cleanup.
+    await cancel_stale_jobs(remote, job_name=f"cluv-job_{remote.hostname}")
+
     sbatch_args = ["--time=0:20:00"]
     if remote.hostname not in WHOLE_NODE_CLUSTERS:
         sbatch_args += ["--gpus-per-node=1", "--ntasks-per-node=1"]
@@ -116,7 +122,7 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
             "--limit_train_samples=2048",
             "--limit_val_samples=512",
             "--batch_size=64",
-            "--model_name=resnet18",
+            "--model_name=vit_b_32",
             "--no_wandb",
         ],
     )
@@ -139,6 +145,27 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
             # preempted orphan comes back rather than dying.
             print(f"Cancelling job {job.job_id} on {remote.hostname}.")
             await remote.run(f"scancel {job.job_id}", warn=True, hide=True, display=True)
+
+
+async def cancel_stale_jobs(remote: Remote, job_name: str) -> None:
+    """Cancel any jobs already queued under `job_name`, left over from an earlier test run.
+
+    This test's own `finally` block already cancels its job once it's done with it - but on a
+    self-hosted CI runner with `concurrency: cancel-in-progress: true`, a *newer* push cancels the
+    whole previous workflow run, including this test's process, before that `finally` gets to
+    await its `scancel`. On a cluster with a deep enough queue (jobs can sit PENDING for hours),
+    that leaves an orphaned job requesting a full node behind for every push, indefinitely - there
+    is nothing left running that could ever cancel it. A process that's being killed can't clean
+    up after itself, so the cleanup has to happen at the *start* of the next run instead.
+    """
+    job_ids = (
+        await remote.get_output(f"squeue -h -u $USER -n {job_name} -o %i", warn=True)
+    ).split()
+    if job_ids:
+        print(
+            f"Cancelling {len(job_ids)} stale job(s) named {job_name} on {remote.hostname}: {job_ids}"
+        )
+        await remote.run(f"scancel {' '.join(job_ids)}", warn=True, hide=True, display=True)
 
 
 async def wait_for_job_to_finish(remote: Remote, job_id: int, timeout_minutes: int = 30) -> str:

@@ -63,7 +63,7 @@ setup and results path all work:
 ```bash
 cluv submit tamia --time=0:20:00 -- python main.py --use_fake_data --epochs=1 \
     --limit_train_samples=2048 --limit_val_samples=512 --batch_size=64 \
-    --model_name=resnet18 --no_wandb
+    --model_name=vit_b_32 --no_wandb
 ```
 
 That takes well under a minute once the job starts (a short `--time` also helps it get scheduled
@@ -76,7 +76,7 @@ files land next to the checkpoints in `results_path` instead of streaming out li
 
 ```bash
 cluv submit tamia --time=0:20:00 -- python main.py --use_fake_data --epochs=1 \
-    --limit_train_samples=2048 --limit_val_samples=512 --batch_size=64 --model_name=resnet18
+    --limit_train_samples=2048 --limit_val_samples=512 --batch_size=64 --model_name=vit_b_32
 ```
 
 ### Uploading offline W&B runs

@@ -565,6 +565,13 @@ def main():
     overall_sps = overall_samples / total_time
     if wandb.run:
         wandb.run.summary["overall_train_samples_per_sec"] = overall_sps
+        if is_master:
+            # The "live" watch_slurm_output() call at startup re-uploads on change, but there's no
+            # guarantee it catches up to the very latest content before finish() tears the run
+            # down - verified empirically (only about half of the final file had made it up by the
+            # time the job completed). One last explicit save closes that gap; still misses
+            # whatever this process prints after this point, plus Slurm's own trailer.
+            watch_slurm_output(wandb.run, policy="now")
         wandb.run.finish()
     print(f"Done in {total_time:.1f} seconds, with {overall_sps:.1f} images/second")
 
@@ -738,18 +745,23 @@ def setup_wandb(
     run.define_metric("val/samples_per_sec", summary="min")
 
 
-def watch_slurm_output(run):
-    """Starts streaming the job's Slurm output file into the W&B run as it grows, so the training
-    log is visible from the run's page (Files tab) while the job is still running, not just as a
-    static file once it's done.
+def watch_slurm_output(run, policy: str = "live"):
+    """Streams the job's Slurm output file into the W&B run, so the training log is visible from
+    the run's page (Files tab) instead of only living on the cluster's disk.
 
-    Call this once, from the master rank, right after `wandb.init()`. cluv points `SBATCH_OUTPUT`
-    at `{results_path}/{run_id}/slurm-{job_id}.out` - the same directory `RESULTS_DIR` already
-    points at - for every job this example submits (no chunking or job-packing here), so that's
-    where to find it.
+    Called twice, both times from the master rank only:
 
-    `policy="live"` re-uploads the file on every change instead of only once; it's wandb's default
-    for `save()`, spelled out explicitly here since that's the whole point of calling this early.
+    - Right after `wandb.init()`, with the default `policy="live"`, so the log is visible while
+      the job is still running, not just once it's done.
+    - Again right before `wandb.run.finish()`, with `policy="now"`. The "live" watch doesn't
+      reliably catch up to the very latest content before `finish()` tears the run down - verified
+      empirically, only about half of the final file had made it up by the time a job completed -
+      so this second call closes that gap. It still can't capture whatever this process prints
+      after that point, or Slurm's own trailer once the job fully exits.
+
+    cluv points `SBATCH_OUTPUT` at `{results_path}/{run_id}/slurm-{job_id}.out` - the same
+    directory `RESULTS_DIR` already points at - for every job this example submits (no chunking or
+    job-packing here), so that's where to find it.
     """
     slurm_output = RESULTS_DIR / f"slurm-{JOB_ID}.out"
     if not slurm_output.exists():
@@ -758,7 +770,7 @@ def watch_slurm_output(run):
         # later retry wouldn't be picked up automatically either. Warn rather than fail the run.
         logger.warning(f"Could not find the Slurm output file at {slurm_output}; not watching it.")
         return
-    run.save(str(slurm_output), base_path=str(RESULTS_DIR), policy="live")
+    run.save(str(slurm_output), base_path=str(RESULTS_DIR), policy=policy)
 
 
 T = TypeVar("T")

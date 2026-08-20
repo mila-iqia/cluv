@@ -25,6 +25,7 @@ from cluv.cli.submit import (
     submit,
     submit_first,
 )
+from cluv.cli.submit_utils.chunking import CHUNK_SIZE
 from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.utils import current_cluster
@@ -341,6 +342,51 @@ class TestSubmitCliParsing:
                 "program_args": [],
                 "autocommit": False,
                 "chunking": None,
+            }
+        )
+
+    def test_chunking_with_value_is_recovered_from_sbatch_args(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--chunking=N` placed before `--` can get swallowed into the REMAINDER `sbatch_args`
+        along with the other sbatch flags; it should still be parsed as `chunking=N` and not be
+        forwarded to `sbatch`."""
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--chunking=6", "--time=24:00:00", "--", "sleep", "10"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--time=24:00:00"],
+                "program_args": ["sleep", "10"],
+                "autocommit": False,
+                "chunking": 6,
+            }
+        )
+
+    def test_bare_chunking_recovered_from_sbatch_args_uses_default_chunk_size(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bare `--chunking` recovered from the REMAINDER `sbatch_args` should default to
+        `CHUNK_SIZE`, not `True`."""
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--chunking", "--time=24:00:00", "--", "sleep", "10"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--time=24:00:00"],
+                "program_args": ["sleep", "10"],
+                "autocommit": False,
+                "chunking": CHUNK_SIZE,
             }
         )
 

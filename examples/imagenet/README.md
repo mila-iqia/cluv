@@ -62,13 +62,16 @@ setup and results path all work:
 
 ```bash
 cluv submit tamia --time=0:20:00 -- python main.py --use_fake_data --epochs=1 \
-    --limit_train_samples=2048 --limit_val_samples=512 --batch_size=64 \
+    --limit_train_samples=8192 --limit_val_samples=2048 --batch_size=256 --logging_interval=5 \
     --model_name=vit_b_32 --no_wandb
 ```
 
 That takes well under a minute once the job starts (a short `--time` also helps it get scheduled
 sooner). It leaves `epoch_0.pt` / `epoch_1.pt` and one profiler trace per rank in the run's results
-directory, so you can tell that training, checkpointing and profiling all worked.
+directory, so you can tell that training, checkpointing and profiling all worked. `--batch_size`
+matches a real run (see "The real thing" below); `--limit_train_samples`/`--logging_interval` are
+picked to get at least 5 `train/*` points in wandb (32 batches / `--logging_interval=5` = 7,
+verified locally) without needing anywhere near a real run's sample count just for that.
 
 Drop `--no_wandb` to also check the W&B integration. `[tool.cluv.env]` sets `WANDB_MODE=offline` by
 default (`online` on mila, fir and nibi, which have internet on their compute nodes), so the run's
@@ -76,7 +79,8 @@ files land next to the checkpoints in `results_path` instead of streaming out li
 
 ```bash
 cluv submit tamia --time=0:20:00 -- python main.py --use_fake_data --epochs=1 \
-    --limit_train_samples=2048 --limit_val_samples=512 --batch_size=64 --model_name=vit_b_32
+    --limit_train_samples=8192 --limit_val_samples=2048 --batch_size=256 --logging_interval=5 \
+    --model_name=vit_b_32
 ```
 
 ### Uploading offline W&B runs

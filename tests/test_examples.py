@@ -124,9 +124,15 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
             "main.py",
             "--use_fake_data",
             "--epochs=1",
-            "--limit_train_samples=2048",
-            "--limit_val_samples=512",
-            "--batch_size=64",
+            # Same --batch_size as a real training run (see "The real thing" in the README), and
+            # enough --limit_train_samples at that batch size for at least 5 `train/*` logs in
+            # wandb (32 batches / --logging_interval=5 = 7, verified locally) - not the full
+            # 100_000 a real run uses, since none of that is needed just to check the logging
+            # cadence and this should stay fast.
+            "--limit_train_samples=8192",
+            "--limit_val_samples=2048",
+            "--batch_size=256",
+            "--logging_interval=5",
             "--model_name=vit_b_32",
             "--no_wandb",
         ],

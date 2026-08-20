@@ -50,7 +50,8 @@ Available for all commands.
 
 
 `-v`, `--verbose`
-:   Increase logging verbosity. Can be repeated: `-v` shows info-level logs, `-vv` (or more) shows debug-level logs. Defaults to warning-level logs only.
+:   Increase logging verbosity. Can be repeated: `-v` shows info-level logs, `-vv` (or more)
+    shows debug-level logs. Defaults to warning-level logs only.
 
 `-q`, `--quiet`
 :   Disable command output. Has no effect on `cluv status`.
@@ -64,13 +65,16 @@ Initialize a cluv project.
 
 If the project already have a `pyproject.toml` file, it will add a `[tool.cluv]` section to the file.
 
-If the project does not have a `pyproject.toml` file, it will create one with a `[tool.cluv]` section.
+If the project does not have a `pyproject.toml` file, it will create one with [`uv init`](https://docs.astral.sh/uv/reference/cli/#uv-init)
+and add a `[tool.cluv]` section.
 
-Default project structure after `cluv init`:
+Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to `$SCRATCH/logs/<project_name>`.
+
+Default project structure after [`cluv init`](#cluv-init) (if the project didn't already exist):
 ```
 my_project/
 ├── README.md
-├── logs -> $SCRATCH/logs/my_project   # symlink to $SCRATCH
+├── logs -> $SCRATCH/logs/<project_name>   # symlink to cluster logs at `results_path`
 ├── pyproject.toml        # includes [tool.cluv] config
 ├── scripts/
 │   ├── job.sh            # Slurm job script template
@@ -147,9 +151,10 @@ cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
 Submit a Slurm job on a remote cluster.
 
 Enforces a clean git working tree, syncs the project to the target cluster (equivalent to running
-[`cluv sync`](#cluv-sync)), then runs `sbatch` on the remote, merging the global and per-cluster arguments from the config with the args from the command line.
+[`cluv sync`](#cluv-sync)), then runs `sbatch` on the remote, merging the global and per-cluster
+arguments from the config with the args from the command line.
 
-See the ["Configuring job submission"](guides/submit-config.md) guide for more information.
+See the ["Configuring job submission"](guides/submit/config.md) guide for more information.
 
 **Usage**
 ```console
@@ -161,6 +166,9 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 `cluster`
 :   The cluster to submit the job on. Can be set to `first` to submit the job to every cluster and
     wait until one of them starts; once one starts, the others are automatically cancelled.
+    The same happens when the target cluster has
+    [more than one job configuration](guides/submit/config.md#multiple-job-configurations-on-the-same-cluster)
+    configured: one job is submitted per configuration, and only the first one to start is kept.
 
 `job.sh`
 :   Path to the sbatch job script, relative to the project root. Defaults to the job script
@@ -246,7 +254,8 @@ cluv clean [clusters] [-f | --force] [--dry-run]
 **Arguments**
 
 `clusters`
-:   One or more cluster hostnames to clean. If omitted, cleans every cluster you currently have an active SSH connection to and that has been synced before.
+:   One or more cluster hostnames to clean. If omitted, cleans every cluster you currently have an
+    active SSH connection to and that has been synced before.
 
 **Options**
 
@@ -265,10 +274,11 @@ Show the status of clusters and jobs.
 The `clusters` table shows each cluster's live GPU availability and storage usage, along with
 counts of your running/pending/failed/completed cluv jobs on that cluster.
 
-The `jobs` table shows jobs submitted with `cluv submit` (from the local job cache), enriched with live Slurm
-status, wait time, and elapsed time.
+The `jobs` table shows jobs submitted with [`cluv submit`](#cluv-submit) (from the local job cache),
+enriched with live Slurm status, wait time, and elapsed time.
 
-Requires an active connection (see [`cluv login`](#cluv-login)) to fetch live data for a cluster; otherwise it is shown as disconnected.
+Requires an active connection (see [`cluv login`](#cluv-login)) to fetch live data for a cluster;
+otherwise it is shown as disconnected.
 
 **Usage**
 ```console

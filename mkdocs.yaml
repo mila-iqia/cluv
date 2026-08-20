@@ -12,7 +12,9 @@ nav:
   - Guides:
       - Introduction: guides/introduction.md
       - Syncing datasets: guides/syncing-datasets.md
-      - Configuring job submission: guides/submit-config.md
+      - Submitting jobs:
+        - Configuring job submission: guides/submit/config.md
+        - Writing a job script: guides/submit/job-scripts.md
       - Cleaning runs: guides/cleaning-runs.md
   - Reference:
       - CLI:
@@ -48,11 +50,13 @@ theme:
     - navigation.expand
     - content.code.copy
     - content.code.annotate
-    - navigation.sections
+    - navigation.expand
+    - navigation.footer
     - navigation.path
+    - navigation.sections
+    - search.highlight
     - search.share
     - search.suggest
-    - search.highlight
   icon:
     repo: fontawesome/brands/github
 markdown_extensions:
@@ -70,6 +74,8 @@ markdown_extensions:
   - attr_list
   - def_list
   - md_in_html
+  - toc:
+      permalink: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid

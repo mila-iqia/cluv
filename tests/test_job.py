@@ -42,7 +42,7 @@ def _set_in_slurm_job(monkeypatch: pytest.MonkeyPatch, *, job_id: int, procid: i
 def fake_cluster_config(monkeypatch, tmp_path):
     cluster_config = ClusterConfig(
         env={},
-        sbatch_args={},
+        sbatch_args=[{}],
         results_path=tmp_path / "results",
         datasets_path=tmp_path / "datasets",
         job_script_path=None,

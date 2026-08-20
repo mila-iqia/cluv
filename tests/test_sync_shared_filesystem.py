@@ -7,11 +7,11 @@ jobs through `trillium`. So:
 
 - `get_active_remotes()` must still return a `Remote` for *each* of them.
 - `sync()` must still return a `Remote` for each of them (so job submission can target either).
-- But `sync()` must only actually run the sync steps (git clone/checkout, `uv sync`, fetching
-  results) once for the pair, since it's the exact same on-disk checkout -- running it twice is
-  redundant, and running it concurrently is unsafe (this is what made
-  `checkout -B <branch> FETCH_HEAD` fail intermittently in the `cluster=first` hydra launcher
-  integration test).
+- But `_build_sync_tasks()` -- the piece of `sync()` that decides what actually gets synced --
+  must only build one task per shared-filesystem group, since it's the exact same on-disk
+  checkout -- running it twice is redundant, and running it concurrently is unsafe (this is what
+  made `checkout -B <branch> FETCH_HEAD` fail intermittently in the `cluster=first` hydra
+  launcher integration test).
 """
 
 from __future__ import annotations
@@ -27,20 +27,6 @@ from cluv.remote import Remote
 sync_module = importlib.import_module("cluv.cli.sync")
 
 
-@pytest.fixture
-def fake_cache_dir(tmp_path, monkeypatch: pytest.MonkeyPatch) -> mock.Mock:
-    cache_dir = tmp_path / "cache"
-    cache_dir.mkdir()
-    import cluv.cache
-
-    monkeypatch.setattr(
-        cluv.cache,
-        cluv.cache._get_cache_dir.__name__,
-        mock_get_cache_dir := mock.Mock(cluv.cache._get_cache_dir, return_value=cache_dir),
-    )
-    return mock_get_cache_dir
-
-
 @pytest.mark.parametrize(
     ("hostnames", "expected"),
     [
@@ -54,6 +40,23 @@ def test_remotes_to_actually_sync_keeps_only_the_first_per_group(hostnames, expe
     remotes = [Remote(hostname=h) for h in hostnames]
     result = sync_module._remotes_to_actually_sync(remotes)
     assert [r.hostname for r in result] == expected
+
+
+def test_build_sync_tasks_skips_remotes_sharing_a_filesystem():
+    """One task per remote, except `trillium-gpu` shares a filesystem with `trillium` -- and thus
+    gets no task of its own -- while unrelated clusters are untouched.
+    """
+    remotes = [
+        Remote(hostname="trillium"),
+        Remote(hostname="trillium-gpu"),
+        Remote(hostname="narval"),
+    ]
+
+    remotes_to_sync, tasks, task_descriptions = sync_module._build_sync_tasks(remotes, here=None)
+
+    assert [r.hostname for r in remotes_to_sync] == ["trillium", "narval"]
+    assert [task.keywords["remote"].hostname for task in tasks] == ["trillium", "narval"]
+    assert task_descriptions == ["local -> trillium", "local -> narval"]
 
 
 async def test_get_active_remotes_returns_every_active_cluster(monkeypatch: pytest.MonkeyPatch):
@@ -109,10 +112,15 @@ async def test_get_active_remotes_returns_every_active_cluster(monkeypatch: pyte
     mock_get_remote.assert_any_await("narval")
 
 
-async def test_sync_only_syncs_once_but_returns_every_remote(
-    fake_cache_dir: mock.Mock, monkeypatch: pytest.MonkeyPatch
-):
-    """`sync(["trillium", "trillium-gpu"])` must run the sync steps only once, but return both."""
+async def test_sync_only_syncs_once_but_returns_every_remote(monkeypatch: pytest.MonkeyPatch):
+    """`sync(["trillium", "trillium-gpu"])` must run the per-remote sync step only once, but
+    return both remotes.
+
+    The dedup logic itself (which remote "wins" a shared-filesystem group) is already covered by
+    `test_build_sync_tasks_skips_remotes_sharing_a_filesystem`, so here we only need to check
+    that `sync()` wires that decision through correctly, by mocking `sync_task_function` as a
+    single unit rather than each of its internal steps.
+    """
     # sync() skips the "is HEAD up to date" check (and thus _head_is_up_to_date) entirely when
     # GITHUB_ACTIONS is set, which it is in CI but not locally. Force it unset so this test
     # exercises the same branch -- and the same mock.assert_awaited_once() below -- everywhere.
@@ -162,52 +170,25 @@ async def test_sync_only_syncs_once_but_returns_every_remote(
         sync_module.get_active_remotes.__name__,
         mock_get_active_remotes := mock.AsyncMock(sync_module.get_active_remotes, return_value=[]),
     )
-
-    sync_calls: list[str] = []
-
-    async def fake_step(remote, *args, **kwargs):
-        sync_calls.append(remote.hostname)
-        return []
-
     monkeypatch.setattr(
         sync_module,
-        sync_module.install_uv.__name__,
-        mock_install_uv := mock.AsyncMock(sync_module.install_uv, side_effect=fake_step),
-    )
-    monkeypatch.setattr(
-        sync_module,
-        sync_module.clone_project.__name__,
-        mock_clone_project := mock.AsyncMock(sync_module.clone_project, side_effect=fake_step),
-    )
-    monkeypatch.setattr(
-        sync_module,
-        sync_module.run_uv_sync.__name__,
-        mock_run_uv_sync := mock.AsyncMock(sync_module.run_uv_sync, side_effect=fake_step),
-    )
-    monkeypatch.setattr(
-        sync_module,
-        sync_module.fetch_results.__name__,
-        mock_fetch_results := mock.AsyncMock(sync_module.fetch_results, side_effect=fake_step),
+        sync_module.sync_task_function.__name__,
+        mock_sync_task_function := mock.AsyncMock(sync_module.sync_task_function, return_value=[]),
     )
 
     remotes = await sync_module.sync(["trillium", "trillium-gpu"], sync_datasets=False)
 
     # Both clusters are returned (they're genuinely different Slurm targets)...
     assert {r.hostname for r in remotes} == {"trillium", "trillium-gpu"}
-    # ...but the sync steps (install_uv, clone_project, run_uv_sync, fetch_results) only ran for
-    # one of them.
-    assert set(sync_calls) == {"trillium"}
-    mock_install_uv.assert_awaited_once()
-    mock_clone_project.assert_awaited_once()
-    mock_run_uv_sync.assert_awaited_once()
-    mock_fetch_results.assert_awaited_once()
+    # ...but the actual sync work only ran once, for the cluster that "wins" the shared group.
+    mock_sync_task_function.assert_awaited_once()
+    assert mock_sync_task_function.await_args.kwargs["remote"].hostname == "trillium"
 
     # And every collaborator mocked to get there was actually exercised -- otherwise mocking it
     # would be pointless.
     mock_get_active_remotes.assert_awaited_once()
     mock_login.assert_awaited_once_with(["trillium", "trillium-gpu"], disabled={})
     mock_head_is_up_to_date.assert_awaited_once()
-    fake_cache_dir.assert_called()
     mock_get_cluv_config.assert_called()
     mock_current_cluster.assert_called_once()
     mock_get_disabled_clusters.assert_called_once()

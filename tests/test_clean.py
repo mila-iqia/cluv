@@ -23,7 +23,7 @@ from cluv.cli.clean import clean, compute_runs_to_delete
 from cluv.cli.sync import (
     create_results_dir_with_symlink_to_scratch,
     fetch_results,
-    get_active_remotes,
+    get_remotes,
     remote_test,
     sync,
 )
@@ -163,9 +163,7 @@ def clean_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (results_path_here / "bar_run_kept").mkdir()
 
     remotes = [Remote(hostname="foo"), Remote(hostname="bar")]
-    monkeypatch.setattr(
-        cluv.cli.clean, get_active_remotes.__name__, mock.AsyncMock(return_value=remotes)
-    )
+    monkeypatch.setattr(cluv.cli.clean, get_remotes.__name__, mock.AsyncMock(return_value=remotes))
 
     watermark = datetime(2026, 7, 1, tzinfo=timezone.utc)
     cache = CacheContent(
@@ -287,9 +285,7 @@ async def test_never_synced_cluster_is_skipped(tmp_path: Path, monkeypatch: pyte
     (tmp_path / "results").mkdir()
 
     remotes = [Remote(hostname="mila")]
-    monkeypatch.setattr(
-        cluv.cli.clean, get_active_remotes.__name__, mock.AsyncMock(return_value=remotes)
-    )
+    monkeypatch.setattr(cluv.cli.clean, get_remotes.__name__, mock.AsyncMock(return_value=remotes))
     monkeypatch.setattr(cluv.cli.clean, read_cache.__name__, lambda: CacheContent())
 
     called = mock.AsyncMock()

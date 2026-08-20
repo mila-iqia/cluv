@@ -11,12 +11,11 @@ from pathlib import Path
 
 from rich.prompt import Confirm
 
-from cluv.cache import CacheContent, get_disabled_clusters, read_cache
-from cluv.cli.login import login
-from cluv.cli.sync import expandvars, get_active_remotes
+from cluv.cache import CacheContent, read_cache
+from cluv.cli.sync import expandvars, get_remotes
 from cluv.config import get_cluv_config
 from cluv.remote import list_remote_run_dirs
-from cluv.utils import console
+from cluv.utils import console, current_cluster
 
 __all__ = ["clean", "compute_runs_to_delete"]
 
@@ -74,18 +73,24 @@ async def clean(
     logger.info(f"Starting cluv clean: clusters={clusters}, force={force}, dry_run={dry_run}")
     config = get_cluv_config()
 
-    all_remotes = await get_active_remotes()
-    if clusters:
-        disabled = get_disabled_clusters()
-        remotes = await login(clusters, disabled)
-    elif not all_remotes:
-        raise RuntimeError(
-            "[red]Not currently connected to any Slurm cluster.[/red] "
-            "Use `cluv login` to login and create reusable connections."
+    here = current_cluster()
+    if clusters and here in clusters:
+        # The point of this command is that we want to reflect the state of the local results dir
+        # on the (other) clusters. Therefore when running this on a cluster, we don't need to do
+        # anything on the current cluster, since the user already updated the results dir as they want.
+        # - If the user runs `cluv clean mila` from the mila cluster, then don't do anything.
+        # - If the user runs `cluv clean mila tamia rorqual ...`, then the current cluster should just
+        #   be removed from the list.
+        # - If the user runs  `cluv clean`, then the current cluster won't be considered.
+        logger.warning(
+            f"Current cluster ({here}) is in the list of clusters to clean, but it will be skipped."
         )
-    else:
-        remotes = all_remotes.copy()
-    logger.debug(f"Cleaning on remotes: {[remote.hostname for remote in remotes]}")
+
+    remotes = await get_remotes(clusters)
+    assert remotes, "clusters is not empty: an error is raised if no remotes are found."
+    clusters = [remote.hostname for remote in remotes]
+
+    logger.debug(f"Cleaning on remotes: {clusters}")
 
     cache = read_cache()
     results_path_here = Path(os.path.expandvars(config.results_path))

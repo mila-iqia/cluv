@@ -169,6 +169,18 @@ models: dict[str, Callable[..., nn.Module]] = {
     "vit_l_32": torchvision.models.vit_l_32,
 }
 
+# Applied to a batch of images right after it's moved to the GPU (see `make_datasets` for why
+# these two specifically are the ones that moved: they're the cheap, purely elementwise ops that
+# don't need the per-sample, variously-sized PIL images the dataset transforms still handle on
+# CPU). `ToDtype`/`Normalize` read the input tensor's own device at call time, so this needs no
+# `.to(device)` of its own - it runs on whatever device the batch it's given is already on.
+GPU_TRANSFORMS = transforms.Compose(
+    [
+        transforms.ToDtype(torch.float32, scale=True),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ]
+)
+
 
 @dataclass
 class Args:
@@ -480,6 +492,19 @@ def main():
                 # Move the batch to the GPU before we pass it to the model
                 batch = tuple(item.to(device, non_blocking=True) for item in batch)
                 x, y = batch
+            # Reproduced locally as a CUDA assertion inside the loss computation ("t >= 0 && t <
+            # n_classes") when GPU_TRANSFORMS used to run inside the `with torch.cuda.stream(...)`
+            # block above: the recipe this pattern comes from is explicit that the consuming
+            # (default) stream has to wait on the side stream before touching the tensors it
+            # produced, and while a plain non-blocking H2D copy alone apparently tolerates that gap
+            # in practice, adding real GPU compute on the side stream did not, even with
+            # `wait_stream()` added back. Rather than chase the exact hazard, GPU_TRANSFORMS now
+            # runs after this wait, on the default stream - the same stream `training_step`'s
+            # forward/backward already run on, so there's no cross-stream tensor to reason about.
+            torch.cuda.current_stream().wait_stream(data_transfer_cuda_stream)
+            # Dtype conversion + normalization happen here, on the batched GPU tensor, rather than
+            # per-sample on CPU in the dataset transform - see `make_datasets`.
+            x = GPU_TRANSFORMS(x)
 
             loss, accuracy, n_samples = training_step(
                 model,
@@ -655,6 +680,7 @@ def validation_loop(model: nn.Module, dataloader: DataLoader, device: torch.devi
     for batch in progress_bar:
         batch = tuple(item.to(device) for item in batch)
         x, y = batch
+        x = GPU_TRANSFORMS(x)
 
         logits: Tensor = model(x)
         loss = F.cross_entropy(logits, y, reduction="sum")
@@ -789,45 +815,51 @@ def make_datasets(
     val_split_seed: int = 42,
     use_fake_data: bool = False,
 ):
-    """Returns the training, validation, and test splits."""
+    """Returns the training, validation, and test splits.
+
+    Only the geometric ops (crop/resize/flip) run here, on CPU - they need arbitrarily-sized
+    per-sample PIL images, before a batch can be stacked into one tensor. `ToDtype`/`Normalize` are
+    dropped from these pipelines on purpose: they run on the already-batched, already-GPU tensor
+    instead (`GPU_TRANSFORMS`, applied right after the host-to-device copy) - moving a batch of
+    small uint8 images across PCIe is cheaper than moving the same batch already converted to
+    float32, and normalizing whole batches at once amortizes better than one sample at a time
+    across dataloader worker processes.
+    """
     if use_fake_data:
+        # Same shape as the real ImageNet transforms below (crop/flip for train, resize/crop for
+        # eval), even though FakeData's images are already exactly 224x224 - so this exercises the
+        # same code path (and roughly the same compute cost) as a real run would.
         train_dataset = torchvision.datasets.FakeData(
             size=1_281_167,
             image_size=(3, 224, 224),
             num_classes=1000,
-            transform=transforms.ToTensor(),
+            transform=transforms.Compose(
+                [
+                    transforms.RandomResizedCrop(224),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToImage(),
+                ]
+            ),
+        )
+        eval_transform = transforms.Compose(
+            [transforms.Resize(256), transforms.CenterCrop(224), transforms.ToImage()]
         )
         valid_dataset = torchvision.datasets.FakeData(
-            size=20_000,
-            image_size=(3, 224, 224),
-            num_classes=1000,
-            transform=transforms.Compose(
-                [transforms.ToImage(), transforms.ToDtype(torch.float32, scale=True)]
-            ),
+            size=20_000, image_size=(3, 224, 224), num_classes=1000, transform=eval_transform
         )
         test_dataset = torchvision.datasets.FakeData(
-            size=50_000,
-            image_size=(3, 224, 224),
-            num_classes=1000,
-            transform=transforms.Compose(
-                [transforms.ToImage(), transforms.ToDtype(torch.float32, scale=True)]
-            ),
+            size=50_000, image_size=(3, 224, 224), num_classes=1000, transform=eval_transform
         )
         return train_dataset, valid_dataset, test_dataset
-    # todo: torchvision transforms can apparently moved to the GPU now? Would that speed up the training?
     train_transforms = torch.nn.Sequential(
         transforms.RandomResizedCrop(224),
         transforms.RandomHorizontalFlip(),
         transforms.ToImage(),
-        transforms.ToDtype(torch.float32, scale=True),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     )
     test_transforms = torch.nn.Sequential(
         transforms.Resize(256),
         transforms.CenterCrop(224),
         transforms.ToImage(),
-        transforms.ToDtype(torch.float32, scale=True),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     )
     # This takes ~12-15 minutes on the Mila cluster. The timeout value for the distributed process group
     # needs to be higher than this to avoid a timeout.

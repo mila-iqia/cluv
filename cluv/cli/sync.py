@@ -104,25 +104,7 @@ async def sync(
     # TODO: Add an --ignore flag to ignore some clusters?
     console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
-    # A cluster that shares a filesystem with another one already being synced (see
-    # `CLUSTERS_SHARING_A_FILESYSTEM`) is the exact same on-disk checkout, so syncing it a second
-    # time would be redundant, and unsafe to do concurrently. It's still kept in `remotes` (the
-    # return value of this function), since it can be a genuinely different Slurm cluster to
-    # submit jobs to (e.g. `trillium`/`trillium-gpu` are the CPU and GPU partitions of the same
-    # cluster) -- only the sync step itself is skipped for it.
-    remotes_to_sync = _remotes_to_actually_sync(remotes)
-    skipped = [r.hostname for r in remotes if r not in remotes_to_sync]
-    if skipped:
-        console.log(
-            f"[yellow]Not syncing separately with {skipped}: shares a filesystem with a cluster "
-            "already being synced.[/yellow]"
-        )
-
-    tasks: list[AsyncTaskFn] = []
-    task_descriptions: list[str] = []
-    for remote in remotes_to_sync:
-        tasks.append(functools.partial(sync_task_function, remote=remote))
-        task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
+    remotes_to_sync, tasks, task_descriptions = _build_sync_tasks(remotes, here)
 
     token = console_lock.set(asyncio.Lock())
     if (
@@ -198,6 +180,29 @@ def _remotes_to_actually_sync(remotes: list[Remote]) -> list[Remote]:
             seen_groups.add(group)
         to_sync.append(remote)
     return to_sync
+
+
+def _build_sync_tasks(
+    remotes: list[Remote], here: str | None
+) -> tuple[list[Remote], list[AsyncTaskFn], list[str]]:
+    """Builds one sync task per remote, skipping those that just share a filesystem with a
+    remote already in the list (see `_remotes_to_actually_sync`) -- redundant, and unsafe to run
+    concurrently. `remotes` itself is left for the caller to return unfiltered: a skipped remote
+    can still be a genuinely different Slurm cluster to submit jobs to (e.g.
+    `trillium`/`trillium-gpu`).
+
+    Returns `(remotes_to_sync, tasks, task_descriptions)`.
+    """
+    remotes_to_sync = _remotes_to_actually_sync(remotes)
+    skipped = [r.hostname for r in remotes if r not in remotes_to_sync]
+    if skipped:
+        console.log(
+            f"[yellow]Not syncing separately with {skipped}: shares a filesystem with a cluster "
+            "already being synced.[/yellow]"
+        )
+    tasks = [functools.partial(sync_task_function, remote=remote) for remote in remotes_to_sync]
+    task_descriptions = [f"{here or 'local'} -> {remote.hostname}" for remote in remotes_to_sync]
+    return remotes_to_sync, tasks, task_descriptions
 
 
 async def get_active_remotes() -> list[Remote]:

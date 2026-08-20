@@ -249,27 +249,26 @@ Both clusters accept and run the job, but hit issues unrelated to this example's
 - Building the virtualenv on each node's local disk also avoids a performance trap: when the ranks
   run out of a virtualenv on the networked `$HOME`, they all fault the same ~2GB of torch libraries
   in at once, which on the Lustre-backed clusters stalls the job for many minutes.
-- **Dtype conversion and normalization run on the GPU, not in the dataset transform.** The
-  geometric ops (`RandomResizedCrop`/`RandomHorizontalFlip` for training, `Resize`/`CenterCrop` for
-  eval) still run per-sample on CPU in `make_datasets`, but for two different reasons:
-  `RandomResizedCrop`/`Resize` need arbitrarily-sized PIL images before a batch can be stacked into
-  one tensor, while `RandomHorizontalFlip` isn't blocked by that but has its own trap: torchvision
+- **All transforms (including `ToDtype`/`Normalize`) run on CPU, per-sample, in the dataset
+  transform.** Moving the purely-elementwise ones to run once per batch on the GPU instead was
+  tried and worked, but wasn't kept: for this dataset/model, CPU-side transforms aren't the
+  bottleneck, so it wasn't worth the extra code path or the CUDA-stream subtleties below.
+  `RandomResizedCrop`/`Resize` couldn't have moved regardless - real ImageNet images have arbitrary
+  native sizes, so there's no fixed-size tensor to stack into a batch until each image has been
+  resized individually - and `RandomHorizontalFlip` has its own trap if you ever try: torchvision
   v2 transforms pick their random parameters once per call, so calling one on an already-batched
-  tensor flips (or doesn't) the *whole batch* together, not each sample independently - verified
-  locally, not assumed. `ToDtype`/`Normalize` (`GPU_TRANSFORMS`) have neither problem - they're
-  elementwise - so they run once per batch instead, right after the host-to-device copy: moving
-  small uint8 images across PCIe is cheaper than moving the same batch already converted to
-  float32.
+  tensor flips (or doesn't) the *whole batch* together, not each sample independently (verified
+  locally, not assumed).
   - Watch out if you touch the training loop's async prefetch (`data_transfer_cuda_stream`,
     following [this recipe](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html)):
-    doing real GPU compute inside that `with torch.cuda.stream(...)` block, rather than only the
-    `.to(..., non_blocking=True)` copy the recipe shows, needs an explicit
-    `torch.cuda.current_stream().wait_stream(data_transfer_cuda_stream)` before the result is safe
-    to use on the default stream. Skipping it doesn't reliably crash - it reproduced consistently
+    the consuming (default) stream needs an explicit
+    `torch.cuda.current_stream().wait_stream(data_transfer_cuda_stream)` before it's safe to touch
+    the tensors the `.to(..., non_blocking=True)` copy produced on the side stream. This was
+    missing and only reliably surfaced (as a CUDA assertion inside the loss computation) while
+    briefly experimenting with running GPU compute on that side stream - reproduced consistently
     outside `CUDA_LAUNCH_BLOCKING=1` and consistently didn't under it, a classic sign of an actual
-    race - so this is an easy trap to reintroduce without noticing in casual testing. `main.py` now
-    does the GPU transform after that wait, on the default stream, specifically to avoid having to
-    reason about a tensor crossing streams at all.
+    race. `main.py` keeps the `wait_stream()` call even after that experiment was reverted, since
+    without it the copy and its first use on the default stream aren't actually ordered.
 - **The Slurm output file is streamed into the W&B run.** Right after `wandb.init()`, the master
   rank calls `run.save(f"{RESULTS_DIR}/*.out", policy="live")`, which re-uploads it every time it
   changes - so the training log is visible from the run's page (Files tab) while the job is still

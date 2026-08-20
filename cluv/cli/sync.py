@@ -296,7 +296,18 @@ async def run_uv_sync(
     # hop, so a value containing e.g. `$SCRATCH` is expanded correctly by this same login shell -
     # quoting it would instead pass the literal, unexpanded string through.
     env_prefix = f"UV_CACHE_DIR={uv_cache_dir} " if uv_cache_dir else ""
-    await remote.run(f"bash --login -c '{env_prefix}uv --directory={project_path} sync --quiet'")
+    # --reinstall: without a custom UV_CACHE_DIR, this `uv sync` also builds the venv the login node
+    # itself would use, so a plain `uv sync` is enough - it downloads (and thereby caches) whatever
+    # the venv doesn't already have. With a custom UV_CACHE_DIR, though, the *job* builds its own
+    # separate, ephemeral venv (typically under $SLURM_TMPDIR) that starts out empty every run; if
+    # this login-node venv already satisfies the lockfile (the common case after the first sync),
+    # a plain `uv sync` here has nothing left to download and silently leaves that alternate cache
+    # empty. --reinstall forces every package through cache/download regardless, so the directory
+    # the job will actually read from gets populated either way.
+    reinstall_flag = " --reinstall" if uv_cache_dir else ""
+    await remote.run(
+        f"bash --login -c '{env_prefix}uv --directory={project_path} sync --quiet{reinstall_flag}'"
+    )
     project_state.last_uv_sync_git_commit = current_git_commit
 
 

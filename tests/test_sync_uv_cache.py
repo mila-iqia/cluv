@@ -31,12 +31,32 @@ async def test_uv_cache_dir_is_forwarded_unquoted_to_the_warm_up_sync() -> None:
     (command,), _kwargs = remote.run.call_args
     assert command == (
         "bash --login -c 'UV_CACHE_DIR=$SCRATCH/.cache/uv "
-        "uv --directory=/scratch/me/repos/cluv/examples/imagenet sync --quiet'"
+        "uv --directory=/scratch/me/repos/cluv/examples/imagenet sync --quiet --reinstall'"
     )
     # The whole point: unlike the job-time env vars in `get_sbatch_command`, this isn't
     # `shlex.quote`d - it has to stay a bare `$SCRATCH` so the single login shell that runs this
     # entire command expands it, rather than being passed through as a literal, useless string.
     assert "'$SCRATCH" not in command
+
+
+async def test_uv_cache_dir_forces_reinstall_so_the_cache_actually_gets_populated() -> None:
+    """A login-node venv that already satisfies the lockfile needs nothing new, so a plain
+
+    `uv sync` wouldn't touch UV_CACHE_DIR at all - leaving it empty for the job that needs it.
+    --reinstall forces every package through cache/download regardless.
+    """
+    remote = mock.AsyncMock(spec=Remote)
+    remote.hostname = "trillium-gpu"
+
+    await run_uv_sync(
+        remote,
+        PurePosixPath("/scratch/me/repos/cluv/examples/imagenet"),
+        ProjectStateOnCluster(),
+        uv_cache_dir="$SCRATCH/.cache/uv",
+    )
+
+    (command,), _kwargs = remote.run.call_args
+    assert "--reinstall" in command
 
 
 async def test_no_uv_cache_dir_prefix_when_not_configured() -> None:

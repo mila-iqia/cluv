@@ -249,12 +249,17 @@ Both clusters accept and run the job, but hit issues unrelated to this example's
 - Building the virtualenv on each node's local disk also avoids a performance trap: when the ranks
   run out of a virtualenv on the networked `$HOME`, they all fault the same ~2GB of torch libraries
   in at once, which on the Lustre-backed clusters stalls the job for many minutes.
-- **Dtype conversion and normalization run on the GPU, not in the dataset transform.** Only the
+- **Dtype conversion and normalization run on the GPU, not in the dataset transform.** The
   geometric ops (`RandomResizedCrop`/`RandomHorizontalFlip` for training, `Resize`/`CenterCrop` for
-  eval) run per-sample on CPU in `make_datasets` - they need arbitrarily-sized PIL images, before a
-  batch can be stacked into one tensor. `ToDtype`/`Normalize` (`GPU_TRANSFORMS`) run once per batch
-  instead, right after the host-to-device copy: moving small uint8 images across PCIe is cheaper
-  than moving the same batch already converted to float32.
+  eval) still run per-sample on CPU in `make_datasets`, but for two different reasons:
+  `RandomResizedCrop`/`Resize` need arbitrarily-sized PIL images before a batch can be stacked into
+  one tensor, while `RandomHorizontalFlip` isn't blocked by that but has its own trap: torchvision
+  v2 transforms pick their random parameters once per call, so calling one on an already-batched
+  tensor flips (or doesn't) the *whole batch* together, not each sample independently - verified
+  locally, not assumed. `ToDtype`/`Normalize` (`GPU_TRANSFORMS`) have neither problem - they're
+  elementwise - so they run once per batch instead, right after the host-to-device copy: moving
+  small uint8 images across PCIe is cheaper than moving the same batch already converted to
+  float32.
   - Watch out if you touch the training loop's async prefetch (`data_transfer_cuda_stream`,
     following [this recipe](https://docs.pytorch.org/tutorials/intermediate/pinmem_nonblock.html)):
     doing real GPU compute inside that `with torch.cuda.stream(...)` block, rather than only the

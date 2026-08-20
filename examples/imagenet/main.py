@@ -817,11 +817,24 @@ def make_datasets(
 ):
     """Returns the training, validation, and test splits.
 
-    Only the geometric ops (crop/resize/flip) run here, on CPU - they need arbitrarily-sized
-    per-sample PIL images, before a batch can be stacked into one tensor. `ToDtype`/`Normalize` are
-    dropped from these pipelines on purpose: they run on the already-batched, already-GPU tensor
-    instead (`GPU_TRANSFORMS`, applied right after the host-to-device copy) - moving a batch of
-    small uint8 images across PCIe is cheaper than moving the same batch already converted to
+    Only the geometric ops (crop/resize/flip) run here, on CPU, and for two different reasons:
+
+    - `RandomResizedCrop`/`Resize` MUST run per-sample, before batching: real ImageNet images have
+      arbitrary native sizes, and there's no fixed-size tensor to stack into a batch until each
+      image has been resized to the common output size individually.
+    - `RandomHorizontalFlip` isn't blocked by that, but moving it to the GPU naively (calling it on
+      an already-batched tensor) is a trap: torchvision v2 transforms draw their random parameters
+      once per `__call__`, not once per sample - given a batched `(N, C, H, W)` tensor, the whole
+      batch is treated as "one image" and gets the *same* flip-or-not decision, not N independent
+      ones. Verified locally: calling `RandomHorizontalFlip` on a batch of distinct images always
+      flips all of them together or none of them, never a mix. That's a real change in training
+      semantics (correlated augmentation within a batch), not just a speedup, so it stays here,
+      per-sample, on CPU.
+
+    `ToDtype`/`Normalize` don't have either problem - they're elementwise and shape-preserving - so
+    they're dropped from these pipelines on purpose and run on the already-batched, already-GPU
+    tensor instead (`GPU_TRANSFORMS`, applied right after the host-to-device copy): moving a batch
+    of small uint8 images across PCIe is cheaper than moving the same batch already converted to
     float32, and normalizing whole batches at once amortizes better than one sample at a time
     across dataloader worker processes.
     """

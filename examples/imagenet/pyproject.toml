@@ -107,16 +107,16 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 [tool.cluv.clusters.trillium-gpu]
 job_script_path = "scripts/job_trillium-gpu.sh"
 sbatch_args = { account = "rrg-bengioy-ad" }
-# trillium-gpu's compute nodes have internet access, unlike most other DRAC clusters here; without
-# this, `uv sync` (run fresh in every job, since $HOME - and with it the cache cluv's own `uv sync`
-# warms during `cluv sync` - isn't reachable from these compute nodes either, see
-# scripts/job_trillium-gpu.sh) has no way to fetch anything not already in its (per-job, node-local)
-# cache.
-env = { UV_OFFLINE = "0" }
 # $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
 # location is rejected ("Job output requested to be written to a filesystem not available on
 # compute nodes"). Keep the project on $SCRATCH instead.
 project_dir = "$SCRATCH/repos/cluv/examples/imagenet"
+# $HOME isn't reachable from compute nodes either (see scripts/job_trillium-gpu.sh), and compute
+# nodes have no internet access, so uv's cache has to be both on $SCRATCH (reachable from both the
+# login node and compute nodes) *and* actually warmed - from the login node, the only place with
+# internet - before a job can use it. `cluv sync`'s own `uv sync` step honors this too (see
+# `run_uv_sync` in cluv/cli/sync.py), so it warms the same directory the job later reads from.
+env = { UV_CACHE_DIR = "$SCRATCH/.cache/uv" }
 
 [tool.cluv.clusters.narval]
 job_script_path = "scripts/job_narval.sh"

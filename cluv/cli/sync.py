@@ -227,7 +227,9 @@ async def sync_task_function(
     _save()
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
-    await run_uv_sync(remote, project_path, project_state)
+    await run_uv_sync(
+        remote, project_path, project_state, uv_cache_dir=cluster_config.env.get("UV_CACHE_DIR")
+    )
     _save()
 
     _update_progress(3, "Fetching results", num_tasks)
@@ -270,7 +272,10 @@ async def expandvars(remote: Remote, path: str | PurePosixPath) -> PurePosixPath
 
 
 async def run_uv_sync(
-    remote: Remote, project_path: PurePosixPath, project_state: ProjectStateOnCluster
+    remote: Remote,
+    project_path: PurePosixPath,
+    project_state: ProjectStateOnCluster,
+    uv_cache_dir: str | None = None,
 ):
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
 
@@ -280,7 +285,18 @@ async def run_uv_sync(
             f"{remote.hostname}. Skipping uv sync."
         )
         return
-    await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
+    # A cluster whose job environment sets UV_CACHE_DIR (see `get_sbatch_command`) most likely does
+    # so because uv's default cache location ($HOME/.cache/uv) isn't reachable from its compute
+    # nodes - which usually also means those compute nodes have no internet access either (that's
+    # the case on trillium-gpu). If so, this `uv sync` - run here on the login node, which does have
+    # internet - is the only chance to actually populate that cache before a job needs it.
+    #
+    # Deliberately not shlex-quoted, unlike the job-time env vars in `get_sbatch_command`: this runs
+    # as a single `bash --login -c '...'` command sent directly over SSH, with no intermediate shell
+    # hop, so a value containing e.g. `$SCRATCH` is expanded correctly by this same login shell -
+    # quoting it would instead pass the literal, unexpanded string through.
+    env_prefix = f"UV_CACHE_DIR={uv_cache_dir} " if uv_cache_dir else ""
+    await remote.run(f"bash --login -c '{env_prefix}uv --directory={project_path} sync --quiet'")
     project_state.last_uv_sync_git_commit = current_git_commit
 
 

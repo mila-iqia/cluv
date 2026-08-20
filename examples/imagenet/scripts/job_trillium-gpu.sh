@@ -10,14 +10,18 @@
 #SBATCH --cpus-per-task=24
 
 # $HOME isn't writable from Trillium's compute nodes, and uv's default cache lives under
-# $HOME/.cache/uv - every `uv` invocation below would otherwise fail immediately with
-# "Permission denied" trying to create it. $SLURM_TMPDIR is already set by the time this script
-# runs and is always node-local and writable, so point the cache there instead. (This has to be a
-# plain `export` in a script that already runs on the compute node, not a `[tool.cluv.env]` entry:
-# a value containing a variable like `$SCRATCH` there would need the same shell to both set *and*
-# expand it, which cluv's submit command doesn't guarantee - see the README's "$SCRATCH expansion"
-# note.)
-export UV_CACHE_DIR="$SLURM_TMPDIR/uv-cache"
+# $HOME/.cache/uv - every `uv` invocation below would otherwise fail immediately with "Permission
+# denied" trying to create it. Compute nodes also have no internet access, so (unlike a node-local
+# $SLURM_TMPDIR cache, which would start cold every job) the cache has to be somewhere persistent
+# and reachable from the login node too, so `cluv sync`'s own `uv sync` can actually warm it before
+# the job runs (see `run_uv_sync` in cluv/cli/sync.py) - $SCRATCH fits.
+#
+# This mirrors `[tool.cluv.clusters.trillium-gpu].env`'s UV_CACHE_DIR, but has to be repeated here
+# as a plain `export`: that config value only reaches the job as a literal, already-expanded-or-not
+# string (see the README's "$SCRATCH expansion" note on why cluv can't expand `$SCRATCH` in it for
+# the job's own environment), whereas a script that already runs on the compute node can expand it
+# itself correctly.
+export UV_CACHE_DIR="$SCRATCH/.cache/uv"
 
 # `cluv submit` runs `sbatch --chdir=<project dir>`, so the job starts in this project's
 # folder on the cluster, and the rest of the work is shared with the other clusters:

@@ -100,13 +100,18 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
     repo_root = Path(__file__).parent.parent
     monkeypatch.chdir(repo_root / "examples/imagenet")
 
-    # This job name is stable across commits (it comes from the job script's filename, not
-    # GIT_COMMIT), so a job still queued under it can only be a leftover from an earlier run of
-    # *this same test* on this cluster - clean it up before adding another one to the queue. See
-    # `cancel_stale_jobs` for why this can't just be left to that earlier run's own cleanup.
-    await cancel_stale_jobs(remote, job_name=f"cluv-job_{remote.hostname}")
+    # Without --job-name, cluv names the job after the job script's filename alone (see
+    # `base_name` in `get_sbatch_command`) - no per-project qualifier, so any other project whose
+    # job script happens to share that filename (e.g. another `job_tamia.sh`) would get the exact
+    # same name on the same cluster. Pinning an explicit, test-specific name avoids that, and
+    # doubles as the identity `cancel_stale_jobs` sweeps on below: it's stable across commits (it
+    # doesn't depend on GIT_COMMIT), so anything still queued under it can only be a leftover from
+    # an earlier run of *this same test* on this cluster - see `cancel_stale_jobs` for why that
+    # can't just be left to that earlier run's own cleanup.
+    job_name = f"cluv-ci-imagenet-example-{remote.hostname}"
+    await cancel_stale_jobs(remote, job_name=job_name)
 
-    sbatch_args = ["--time=0:20:00"]
+    sbatch_args = [f"--job-name={job_name}", "--time=0:20:00"]
     if remote.hostname not in WHOLE_NODE_CLUSTERS:
         sbatch_args += ["--gpus-per-node=1", "--ntasks-per-node=1"]
 

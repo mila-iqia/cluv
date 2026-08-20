@@ -107,6 +107,12 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 [tool.cluv.clusters.trillium-gpu]
 job_script_path = "scripts/job_trillium-gpu.sh"
 sbatch_args = { account = "rrg-bengioy-ad" }
+# trillium-gpu's compute nodes have internet access, unlike most other DRAC clusters here; without
+# this, `uv sync` (run fresh in every job, since $HOME - and with it the cache cluv's own `uv sync`
+# warms during `cluv sync` - isn't reachable from these compute nodes either, see
+# scripts/job_trillium-gpu.sh) has no way to fetch anything not already in its (per-job, node-local)
+# cache.
+env = { UV_OFFLINE = "0" }
 # $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
 # location is rejected ("Job output requested to be written to a filesystem not available on
 # compute nodes"). Keep the project on $SCRATCH instead.

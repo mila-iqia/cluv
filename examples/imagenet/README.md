@@ -233,6 +233,8 @@ was no SSH connection to nibi available at the time.
 | killarney, vulcan | `$SCRATCH` in a path handed to `sbatch` expands to *nothing*, because cluv's command is assembled so that paths are expanded by the non-login ssh shell (see below) | an `output` path relative to the job's working directory, via cluv's `logs` symlink |
 | trillium-gpu | Reports `CC_CLUSTER=trillium`, and Slurm's `ClusterName` is `grillium` | `cluv submit` exports `$CLUV_CLUSTER` |
 | killarney, vulcan | `$CC_CLUSTER` and `$SCRATCH` are only set in a *login* shell | same |
+| trillium-gpu | The login node shadows `sbatch` with a wrapper hardcoding `--export=NONE --get-user-env`, dropping the whole submitting environment (`GIT_COMMIT`, `CLUV_CLUSTER`, `WANDB_MODE`, ...) before the job starts | `cluv submit` also passes `--export=ALL,KEY=VALUE,...` explicitly; `sbatch` uses the last `--export` on its command line |
+| trillium-gpu | `$HOME` isn't writable from compute nodes, so `uv`'s default cache dir (`$HOME/.cache/uv`) fails with "Permission denied" | `export UV_CACHE_DIR="$SLURM_TMPDIR/uv-cache"` in `scripts/job_trillium-gpu.sh` |
 
 About that `$SCRATCH` expansion: `cluv submit` runs
 `bash --login -c '<env vars> sbatch ... <args>'`, but the arguments are `shlex`-quoted and then

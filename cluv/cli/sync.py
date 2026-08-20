@@ -104,11 +104,7 @@ async def sync(
     # TODO: Add an --ignore flag to ignore some clusters?
     console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
-    tasks: list[AsyncTaskFn] = []
-    task_descriptions: list[str] = []
-    for remote in remotes:
-        tasks.append(functools.partial(sync_task_function, remote=remote))
-        task_descriptions.append(f"{here or 'local'} -> {remote.hostname}")
+    remotes_to_sync, tasks, task_descriptions = _build_sync_tasks(remotes, here)
 
     token = console_lock.set(asyncio.Lock())
     if (
@@ -145,7 +141,7 @@ async def sync(
 
     # Display a consolidated summary of all newly-synced runs across all clusters.
     cwd = Path.cwd()
-    for remote, new_runs in zip(remotes, per_cluster_new_runs):
+    for remote, new_runs in zip(remotes_to_sync, per_cluster_new_runs):
         if new_runs:
             console.print(f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]")
             for run_path in sorted(new_runs):
@@ -158,10 +154,64 @@ async def sync(
     return remotes
 
 
+# Groups of cluster hostnames that are actually distinct login nodes of the same physical
+# cluster, sharing a single filesystem (confirmed live via SSH: `trillium` and `trillium-gpu`
+# mount the identical NFS export at $HOME). Syncing with more than one cluster in the same group
+# at a time is pointless (it's the same on-disk checkout) and unsafe (concurrent `git`/`uv sync`
+# commands from two hosts race on that shared checkout).
+CLUSTERS_SHARING_A_FILESYSTEM: list[frozenset[str]] = [
+    frozenset({"trillium", "trillium-gpu"}),
+]
+
+
+def _remotes_to_actually_sync(remotes: list[Remote]) -> list[Remote]:
+    """Drops remotes that are just another login node for one already in the list.
+
+    See `CLUSTERS_SHARING_A_FILESYSTEM`. Keeps the first remote seen from each group and
+    preserves the order of `remotes` otherwise.
+    """
+    seen_groups: set[frozenset[str]] = set()
+    to_sync: list[Remote] = []
+    for remote in remotes:
+        group = next((g for g in CLUSTERS_SHARING_A_FILESYSTEM if remote.hostname in g), None)
+        if group is not None:
+            if group in seen_groups:
+                continue
+            seen_groups.add(group)
+        to_sync.append(remote)
+    return to_sync
+
+
+def _build_sync_tasks(
+    remotes: list[Remote], here: str | None
+) -> tuple[list[Remote], list[AsyncTaskFn], list[str]]:
+    """Builds one sync task per remote, skipping those that just share a filesystem with a
+    remote already in the list (see `_remotes_to_actually_sync`) -- redundant, and unsafe to run
+    concurrently. `remotes` itself is left for the caller to return unfiltered: a skipped remote
+    can still be a genuinely different Slurm cluster to submit jobs to (e.g.
+    `trillium`/`trillium-gpu`).
+
+    Returns `(remotes_to_sync, tasks, task_descriptions)`.
+    """
+    remotes_to_sync = _remotes_to_actually_sync(remotes)
+    skipped = [r.hostname for r in remotes if r not in remotes_to_sync]
+    if skipped:
+        console.log(
+            f"[yellow]Not syncing separately with {skipped}: shares a filesystem with a cluster "
+            "already being synced.[/yellow]"
+        )
+    tasks = [functools.partial(sync_task_function, remote=remote) for remote in remotes_to_sync]
+    task_descriptions = [f"{here or 'local'} -> {remote.hostname}" for remote in remotes_to_sync]
+    return remotes_to_sync, tasks, task_descriptions
+
+
 async def get_active_remotes() -> list[Remote]:
     """Returns the Remotes for each cluster which has an active SSH connection.
 
-    Disabled clusters (see `cluv disable`) are excluded.
+    Disabled clusters (see `cluv disable`) are excluded. Note that this can include more than one
+    cluster from the same `CLUSTERS_SHARING_A_FILESYSTEM` group (e.g. both `trillium` and
+    `trillium-gpu`): they're genuinely different Slurm clusters to submit jobs to, even though
+    `sync()` only syncs the underlying (shared) checkout once.
     """
     clusters = get_cluv_config().clusters_names
     if (this_cluster := current_cluster()) and this_cluster in clusters:

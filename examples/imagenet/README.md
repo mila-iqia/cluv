@@ -249,6 +249,11 @@ Both clusters accept and run the job, but hit issues unrelated to this example's
 - Building the virtualenv on each node's local disk also avoids a performance trap: when the ranks
   run out of a virtualenv on the networked `$HOME`, they all fault the same ~2GB of torch libraries
   in at once, which on the Lustre-backed clusters stalls the job for many minutes.
+- **The Slurm output file is attached to the W&B run.** `main.py` uploads `slurm-<job_id>.out` (from
+  the master rank, right before `wandb.run.finish()`) as a run file, so the training logs are one
+  click away on the run's page instead of only living on the cluster's disk. It's a best-effort
+  snapshot, not the literal complete file: Slurm keeps writing to it (and appends its own trailer)
+  after this process returns, so the very last few lines never make it into the upload.
 
 ### Per-cluster quirks worked around in the config
 

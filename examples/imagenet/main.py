@@ -565,6 +565,8 @@ def main():
     overall_sps = overall_samples / total_time
     if wandb.run:
         wandb.run.summary["overall_train_samples_per_sec"] = overall_sps
+        if is_master:
+            attach_slurm_output_to_wandb()
         wandb.run.finish()
     print(f"Done in {total_time:.1f} seconds, with {overall_sps:.1f} images/second")
 
@@ -733,6 +735,27 @@ def setup_wandb(
     run.define_metric("val/samples_per_sec", summary="max")
     run.define_metric("val/samples_per_sec", summary="mean")
     run.define_metric("val/samples_per_sec", summary="min")
+
+
+def attach_slurm_output_to_wandb():
+    """Uploads the job's Slurm output file as a run file, so the training logs are visible from
+    the W&B run page too, not just in `results_path` on the cluster.
+
+    Call this once, from the master rank only, right before `wandb.run.finish()`. cluv points
+    `SBATCH_OUTPUT` at `{results_path}/{run_id}/slurm-{job_id}.out` - the same directory `RESULTS_DIR`
+    already points at - for every job this example submits (no chunking or job-packing here), so
+    that's where to find it.
+
+    One caveat: Slurm keeps writing to this file until the job itself exits, and this process is
+    what Slurm is waiting on, so the very last few lines (anything printed after this call, plus
+    whatever trailer Slurm itself appends once the job ends) can't be captured - this uploads
+    everything up to this point, not truly the complete file.
+    """
+    slurm_output = RESULTS_DIR / f"slurm-{JOB_ID}.out"
+    if not slurm_output.exists():
+        logger.warning(f"Could not find the Slurm output file at {slurm_output}; not uploading it.")
+        return
+    wandb.save(str(slurm_output), base_path=str(RESULTS_DIR), policy="now")
 
 
 T = TypeVar("T")

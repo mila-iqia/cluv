@@ -178,15 +178,43 @@ srun --ntasks=4 --nodes=1 uv run python main.py
 
 ## Verified on
 
-The fake-data smoke run above was checked end-to-end (training, validation, checkpoints, profiler
-traces from every rank) on **mila** (2x L40S), **tamia** (4x H100, whole node), **rorqual** (4x H100,
-no compute-node internet) and **fir** (4x H100). Each finished in well under a minute of runtime.
+Every row below is a real job submitted with `cluv submit` from this branch (no job script named on
+the command line - the per-cluster `job_script_path` picks it), with W&B logging **enabled** end to
+end: `cluv sync` pulled the run back and, for the offline-mode clusters, `scripts/sync_wandb.sh`
+uploaded it to wandb.ai. GPU count is 1 on clusters that don't enforce whole-node allocation
+(narrowed via `--gpus-per-node`/`--ntasks-per-node` on the command line, on top of the cluster's own
+job script) - tamia and trillium-gpu do enforce it, so those keep the whole node.
+
+| Cluster | GPUs used | Job ID | Runtime | W&B |
+|---|---|---|---|---|
+| mila | 2x L40S | `10286668` | 13m24s | [mila_10286668](https://wandb.ai/lebrice/cluv-imagenet-example/runs/mila_10286668) (real ImageNet) |
+| tamia | 4x H100 (whole node) | `419511` | 52s | [tamia_419511](https://wandb.ai/lebrice/cluv-imagenet-example/runs/tamia_419511) |
+| rorqual | 1x H100 | `19281877` | 40s | [rorqual_19281877](https://wandb.ai/lebrice/cluv-imagenet-example/runs/rorqual_19281877) |
+| fir | 1x H100 | `55655345` | 8m52s | [fir_55655345](https://wandb.ai/lebrice/cluv-imagenet-example/runs/fir_55655345) |
+| nibi | 1x H100 | `20120942` | 2m05s | [nibi_20120942](https://wandb.ai/lebrice/cluv-imagenet-example/runs/nibi_20120942) |
+| narval | 1x A100 | `1286134` | 1m05s | [narval_1286134](https://wandb.ai/lebrice/cluv-imagenet-example/runs/narval_1286134) |
+| trillium-gpu | 4x H100 (whole node) | `814260` | 1m10s | [trillium-gpu_814260](https://wandb.ai/lebrice/cluv-imagenet-example/runs/trillium-gpu_814260) |
 
 The real-ImageNet subset run was checked on **mila**: 13m29s in total, of which 11m37s was extracting
 the archives into `$SLURM_TMPDIR`.
 
-`scripts/job_nibi.sh` follows the same shape as the other DRAC scripts but has not been run - there
-was no SSH connection to nibi available at the time.
+### Not yet working: killarney, vulcan
+
+Both clusters accept and run the job, but hit issues unrelated to this example's code or to W&B:
+
+- **killarney**: every attempt (with a bare 1-GPU request, and with a typed `l40s:1` one) hangs on
+  the very first `srun` inside the job with `step creation temporarily disabled ... Requested nodes
+  are busy`, retried until the job is killed by its own time limit without ever running any Python.
+  Adding `--overlap` to every `srun` in this example - the standard fix for clusters using Slurm's
+  `cons_tres` select plugin, which killarney does (`SelectTypeParameters=CR_CORE_MEMORY`) - didn't
+  resolve it either. Needs deeper investigation into killarney's Slurm/GRES configuration than fits
+  this PR.
+- **vulcan**: `uv sync` inside the job intermittently fails within 1-2 seconds with "Network
+  connectivity is disabled, but the requested data wasn't found in the cache" for a package that
+  `cluv sync` had just warmed into the shared uv cache seconds earlier from the login node -
+  reproduced across 4 attempts, 3 different packages, 2 different compute nodes. Looks like an
+  NFS cache-visibility race between the login node and compute nodes rather than anything cluv or
+  this example does.
 
 ## Notes
 

@@ -565,8 +565,6 @@ def main():
     overall_sps = overall_samples / total_time
     if wandb.run:
         wandb.run.summary["overall_train_samples_per_sec"] = overall_sps
-        if is_master:
-            attach_slurm_output_to_wandb()
         wandb.run.finish()
     print(f"Done in {total_time:.1f} seconds, with {overall_sps:.1f} images/second")
 
@@ -725,6 +723,9 @@ def setup_wandb(
         # also create it. Otherwise we can get a 409 error from the wandb server.
         time.sleep(5)
 
+    if is_master:
+        watch_slurm_output(run)
+
     # Specify the step metric (x-axis) and the metric to log against it (y-axis)
     run.define_metric("train/*", step_metric="updates")
     run.define_metric("val/*", step_metric="epoch")
@@ -737,25 +738,27 @@ def setup_wandb(
     run.define_metric("val/samples_per_sec", summary="min")
 
 
-def attach_slurm_output_to_wandb():
-    """Uploads the job's Slurm output file as a run file, so the training logs are visible from
-    the W&B run page too, not just in `results_path` on the cluster.
+def watch_slurm_output(run):
+    """Starts streaming the job's Slurm output file into the W&B run as it grows, so the training
+    log is visible from the run's page (Files tab) while the job is still running, not just as a
+    static file once it's done.
 
-    Call this once, from the master rank only, right before `wandb.run.finish()`. cluv points
-    `SBATCH_OUTPUT` at `{results_path}/{run_id}/slurm-{job_id}.out` - the same directory `RESULTS_DIR`
-    already points at - for every job this example submits (no chunking or job-packing here), so
-    that's where to find it.
+    Call this once, from the master rank, right after `wandb.init()`. cluv points `SBATCH_OUTPUT`
+    at `{results_path}/{run_id}/slurm-{job_id}.out` - the same directory `RESULTS_DIR` already
+    points at - for every job this example submits (no chunking or job-packing here), so that's
+    where to find it.
 
-    One caveat: Slurm keeps writing to this file until the job itself exits, and this process is
-    what Slurm is waiting on, so the very last few lines (anything printed after this call, plus
-    whatever trailer Slurm itself appends once the job ends) can't be captured - this uploads
-    everything up to this point, not truly the complete file.
+    `policy="live"` re-uploads the file on every change instead of only once; it's wandb's default
+    for `save()`, spelled out explicitly here since that's the whole point of calling this early.
     """
     slurm_output = RESULTS_DIR / f"slurm-{JOB_ID}.out"
     if not slurm_output.exists():
-        logger.warning(f"Could not find the Slurm output file at {slurm_output}; not uploading it.")
+        # Slurm creates this file (empty) before main.py even starts, so this shouldn't happen -
+        # but `save()` only expands its glob once, at call time, so if the file isn't there yet, a
+        # later retry wouldn't be picked up automatically either. Warn rather than fail the run.
+        logger.warning(f"Could not find the Slurm output file at {slurm_output}; not watching it.")
         return
-    wandb.save(str(slurm_output), base_path=str(RESULTS_DIR), policy="now")
+    run.save(str(slurm_output), base_path=str(RESULTS_DIR), policy="live")
 
 
 T = TypeVar("T")

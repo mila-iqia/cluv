@@ -9,10 +9,15 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import TypeVar
 
+import milatools.cli
+import milatools.utils.parallel_progress
 import rich.console
 
 # todo: seeing some weird behaviour with stderr, the progress bars repeating themselves, etc.
 console = rich.console.Console(record=True, file=sys.stdout)
+
+milatools.cli.console = console
+milatools.utils.parallel_progress.console = console
 
 console_lock: contextvars.ContextVar[asyncio.Lock | None] = contextvars.ContextVar(
     "console_lock", default=None

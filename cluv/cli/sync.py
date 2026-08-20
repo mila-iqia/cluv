@@ -13,9 +13,6 @@ import textwrap
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-import milatools.cli
-import milatools.utils.parallel_progress
-
 # Reuse some code milatools. Could also extract it here to remove the dependency.
 from milatools.utils.parallel_progress import (
     AsyncTaskFn,
@@ -31,8 +28,6 @@ from cluv.job import get_datasets_path
 from cluv.remote import Remote, list_remote_run_dirs, run
 from cluv.utils import console, console_lock, current_cluster
 
-milatools.cli.console = console
-milatools.utils.parallel_progress.console = console
 logger = logging.getLogger(__name__)
 
 __all__ = ["sync", "install_uv", "clone_project", "fetch_results"]

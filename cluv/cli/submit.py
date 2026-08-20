@@ -15,8 +15,8 @@ from typing import NamedTuple
 import rich.syntax
 import rich.table
 import rich.text
-from rich.live import Live
 
+from cluv import tui
 from cluv.cache import Job, save_job
 from cluv.cli.submit_utils.chunking import chunking_update_sbatch_args, get_n_chunks
 from cluv.cli.submit_utils.first import (
@@ -27,6 +27,7 @@ from cluv.cli.submit_utils.first import (
 from cluv.cli.sync import get_active_remotes, sync
 from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
+from cluv.tui import JobWaitProgress
 from cluv.utils import console, current_cluster
 
 logger = logging.getLogger(__name__)
@@ -209,6 +210,7 @@ async def submit(
             ],
             git_commit=git_commit,
             chunking=chunking,
+            label=progress_label(job_script, program_args),
         )
         if job:
             save_job(job)
@@ -285,15 +287,27 @@ async def submit_first(
         submissions,
         git_commit=git_commit,
         chunking=chunking,
+        label=progress_label(job_script, program_args),
     )
+
+
+def progress_label(job_script: Path | None, program_args: list[str]) -> str:
+    """Short identifier for a submission, used to tell concurrent submissions apart."""
+    return shlex.join(program_args) if program_args else str(job_script or "job")
 
 
 async def submit_and_keep_first(
     submissions: list[Submission],
     git_commit: str,
     chunking: bool = False,
+    label: str = "job",
 ) -> Job | None:
-    """Submit all the given jobs, wait until one of them starts, then cancel the others."""
+    """Submit all the given jobs, wait until one of them starts, then cancel the others.
+
+    `label` identifies this batch among any other `submit_and_keep_first()` calls running
+    concurrently (e.g. a Hydra sweep submitting many jobs at once). It is only shown in the
+    live display when more than one call is active.
+    """
 
     sbatch_results = await asyncio.gather(
         *[
@@ -320,7 +334,7 @@ async def submit_and_keep_first(
         "Cluster",
         *(["sbatch arguments"] if show_allocations else []),
         "Result",
-        title="Jobs submitted on the clusters",
+        title=f"Jobs submitted on the clusters — {label}",
     )
 
     for submission, sbatch_result in zip(submissions, sbatch_results):
@@ -365,36 +379,20 @@ async def submit_and_keep_first(
 
     cancelling = False
 
-    def make_table() -> rich.table.Table:
-        table = rich.table.Table(
-            "Cluster",
-            "Job ID",
-            "Status",
-            title="Waiting for a job to start..."
-            if not cancelling
-            else "Waiting for jobs to cancel...",
+    def make_progress() -> JobWaitProgress:
+        return JobWaitProgress(
+            label=label,
+            cancelling=cancelling,
+            rows=[(job.cluster, job.job_id, job_state) for job, job_state in job_to_state.items()],
         )
-        for job, state in job_to_state.items():
-            table.add_row(
-                job.cluster,
-                str(job.job_id),
-                rich.text.Text(
-                    state,
-                    style="green"
-                    if state.startswith(("RUNNING", "COMPLETED", "CANCELLED"))
-                    else "yellow"
-                    if state.startswith(("PENDING", "UNKNOWN"))
-                    else "red",
-                ),
-            )
-        return table
 
     try:
-        with Live(get_renderable=make_table, console=console, refresh_per_second=1) as live:
+        async with tui.registry.section(make_progress()) as live:
             wait_result = await wait_for_running_job(
                 job_to_state, cluster_to_remote, max_wait_time_seconds
             )
-            live.update(make_table(), refresh=True)  # probably not entirely necessary.
+            live.update(make_progress())
+            live.refresh()  # probably not entirely necessary.
             if not wait_result:
                 console.log("All submitted jobs have failed! Exiting.")
                 return None
@@ -412,7 +410,8 @@ async def submit_and_keep_first(
                 cluster_to_remote,
                 max_wait_time_seconds,
             )
-            live.update(make_table(), refresh=True)  # probably not entirely necessary.
+            live.update(make_progress())
+            live.refresh()  # probably not entirely necessary.
 
         console.print(
             f"Successfully cancelled all other jobs except for job {first_running_job.job_id} "

@@ -250,16 +250,15 @@ Both clusters accept and run the job, but hit issues unrelated to this example's
   run out of a virtualenv on the networked `$HOME`, they all fault the same ~2GB of torch libraries
   in at once, which on the Lustre-backed clusters stalls the job for many minutes.
 - **The Slurm output file is streamed into the W&B run.** Right after `wandb.init()`, the master
-  rank calls `run.save(slurm_output_path, policy="live")`, which re-uploads the file every time it
+  rank calls `run.save(f"{RESULTS_DIR}/*.out", policy="live")`, which re-uploads it every time it
   changes - so the training log is visible from the run's page (Files tab) while the job is still
   running, not just once it's done. A second call with `policy="now"` right before
   `wandb.run.finish()` closes most of the gap left by "live" not always catching up to the latest
-  content before the run is torn down. The path itself comes from `scontrol show job <id> --json`
-  (`stdout_expanded`) rather than being assumed from cluv's own `SBATCH_OUTPUT` naming pattern -
-  `/proc/self/fd/1` doesn't work for this, since Slurm forwards a task's stdout to `slurmstepd`
-  over a pipe rather than redirecting the file descriptor straight to the file. Slurm keeps writing
-  to that file for a moment after this process exits (it appends its own trailer), so the very last
-  couple of lines are the one part that never makes it into the upload.
+  content before the run is torn down. Using a glob sidesteps having to know the exact filename
+  (chunked or job-packed submissions use a different `SBATCH_OUTPUT` pattern than a single job
+  does) - one that matches nothing is a silent no-op, not an error. Slurm keeps writing to that
+  file for a moment after this process exits (it appends its own trailer), so the very last couple
+  of lines are the one part that never makes it into the upload.
 
 ### Per-cluster quirks worked around in the config
 

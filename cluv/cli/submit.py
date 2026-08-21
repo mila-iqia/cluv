@@ -24,7 +24,7 @@ from cluv.cli.submit_utils.first import (
     wait_for_jobs_to_cancel,
     wait_for_running_job,
 )
-from cluv.cli.sync import get_active_remotes, sync
+from cluv.cli.sync import expandvars, get_active_remotes, sync
 from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.utils import console, current_cluster
@@ -112,6 +112,7 @@ async def submit(
     program_args: list[str],
     autocommit: bool = False,
     chunking: int | None = None,
+    sync_datasets: bool = True,
     _skip_sync: bool = False,
 ) -> Job | None:
     """Submit a SLURM job on a remote cluster.
@@ -136,6 +137,9 @@ async def submit(
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
         chunking: Duration in hours of each chunk when splitting the job into multiple consecutive
             short jobs. When None, chunking is disabled.
+        sync_datasets: If False, don't replicate `data_source` to the cluster's `datasets_path`
+            during the sync that precedes the submission. Useful when the data is already there, or
+            when a `cluv sync` is already replicating it.
         _skip_sync: If True, skip the synchronization step before submitting.
 
     Returns:
@@ -170,7 +174,13 @@ async def submit(
 
     if cluster == "first":
         job = await submit_first(
-            job_script, sbatch_args, program_args, git_commit, chunking, _skip_sync=_skip_sync
+            job_script,
+            sbatch_args,
+            program_args,
+            git_commit,
+            chunking,
+            sync_datasets=sync_datasets,
+            _skip_sync=_skip_sync,
         )
         if job:
             save_job(job)
@@ -187,7 +197,7 @@ async def submit(
         if _skip_sync:
             remote = await Remote.connect(hostname=cluster)
         else:
-            remote = (await sync(clusters=[cluster]))[0]
+            remote = (await sync(clusters=[cluster], sync_datasets=sync_datasets))[0]
     else:
         # Submitting to the current cluster. The sbatch command will run locally.
         remote = None
@@ -245,6 +255,7 @@ async def submit_first(
     program_args: list[str],
     git_commit: str,
     chunking: int | None,
+    sync_datasets: bool = True,
     _skip_sync: bool = False,
 ) -> Job | None:
     """Submit the job on all clusters (and on every allocation of each cluster), and wait until one
@@ -252,7 +263,7 @@ async def submit_first(
     """
     # Sync with all clusters with an existing connections.
     if not _skip_sync:
-        remotes = await sync()
+        remotes = await sync(sync_datasets=sync_datasets)
     else:
         remotes = await get_active_remotes()
     cluster_to_remote: dict[str, Remote | None] = {remote.hostname: remote for remote in remotes}
@@ -291,7 +302,7 @@ async def submit_first(
 async def submit_and_keep_first(
     submissions: list[Submission],
     git_commit: str,
-    chunking: bool = False,
+    chunking: int | None = None,
 ) -> Job | None:
     """Submit all the given jobs, wait until one of them starts, then cancel the others."""
 
@@ -567,12 +578,22 @@ def get_sbatch_command(
     program_args: list[str],
     git_commit: str,
     chunking: int | None,
+    results_path: PurePosixPath | None = None,
 ) -> tuple[str, ResolvedSbatchArgs]:
     """
     Generate the command to submit the job via sbatch on the remote cluster, with the appropriate
     sbatch_arguments, environment variables and paths set.
 
     NOTE: `sbatch_args` needs to already contain the sbatch arguments from the cluster config + command-line.
+
+    `results_path` should be the cluster's `results_path` with its environment variables already
+    resolved (see `sbatch`). It has to be resolved by the caller, because a value like
+    `$SCRATCH/logs/x` would otherwise be expanded by the wrong shell: the `SBATCH_OUTPUT=...` pieces
+    below are `shlex.quote`d, and those single quotes close the `bash --login -c '...'` string, so
+    the *non-login* ssh shell ends up expanding them. On clusters where $SCRATCH is only set in a
+    login shell (Killarney, Vulcan) it expands to nothing, and the job dies with its output going to
+    an unwritable `/logs/...`. Falls back to the unresolved config value when not given, which is
+    fine for callers that only want the command for display.
     """
     # Resolve remote job script path.
     local_job_script = job_script
@@ -597,11 +618,16 @@ def get_sbatch_command(
     base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
+    # Tell the job which cluster config it is running under, so that `cluv.job` / `cluv.config`
+    # resolve the same `[tool.cluv.clusters.<name>]` section that we used to submit it. The cluster
+    # can't always be identified from inside the job: a job submitted to `trillium-gpu` reports
+    # `CC_CLUSTER=trillium`, and Killarney/Vulcan only set `CC_CLUSTER` in a login shell.
+    env_vars["CLUV_CLUSTER"] = cluster
 
     in_job_packing = False
     assert not in_job_packing, "todo"
-    # might contain unresolved env vars.
-    cluster_results_path = PurePosixPath(cluster_config.results_path)
+    # Resolved by `sbatch`; may still contain env vars when this is called just for display.
+    cluster_results_path = PurePosixPath(results_path or cluster_config.results_path)
     n_chunks = None
     # TODO: Use the `get_run_id` function with the placeholder job id %j and task index %t:
     if chunking:
@@ -635,7 +661,20 @@ def get_sbatch_command(
         )
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    sbatch_args_str = shlex.join(sbatch_args)
+    final_sbatch_args = sbatch_args
+    if env_vars and not any("--export" in flag for flag in sbatch_args):
+        # Belt and suspenders: `env_vars_prefix` above sets these as plain shell variables before
+        # `sbatch`, which is normally enough for them to reach the job (Slurm's default is to copy
+        # the submitting shell's environment). But some clusters' login nodes shadow `sbatch` with
+        # a wrapper that hardcodes `--export=NONE` (trillium-gpu does), which discards the
+        # submitting shell's environment entirely - silently dropping GIT_COMMIT, CLUV_CLUSTER,
+        # WANDB_MODE, etc. `--export=ALL,KEY=VALUE,...` restates the same variables as an explicit
+        # sbatch argument instead of relying on environment inheritance; since it comes after the
+        # wrapper's own `--export=NONE` on the final command line, it wins (last `--export` set on
+        # the command line takes effect). A harmless no-op on clusters without such a wrapper.
+        export_value = "ALL," + ",".join(f"{k}={v}" for k, v in env_vars.items())
+        final_sbatch_args = [*sbatch_args, f"--export={export_value}"]
+    sbatch_args_str = shlex.join(final_sbatch_args)
     program_args_str = shlex.join(program_args)
 
     sbatch_command = (
@@ -659,6 +698,13 @@ async def sbatch(
     # Should be set, since `remote` is None if current_cluster() is the same as the cluster argument
     # to `submit`.
     assert cluster
+    # Resolve any env vars in the results_path *before* it goes into SBATCH_OUTPUT. See the note in
+    # `get_sbatch_command` for why it can't be left for the shell that runs sbatch to expand.
+    config_results_path = get_cluv_config().get_cluster_config(cluster).results_path
+    if remote is not None:
+        results_path = await expandvars(remote, config_results_path)
+    else:
+        results_path = PurePosixPath(os.path.expandvars(str(config_results_path)))
     sbatch_command, resolved_args = get_sbatch_command(
         cluster=cluster,
         job_script=job_script,
@@ -666,6 +712,7 @@ async def sbatch(
         program_args=program_args,
         git_commit=git_commit,
         chunking=chunking,
+        results_path=results_path,
     )
 
     display = display_commands.get()

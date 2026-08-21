@@ -4,7 +4,7 @@ import subprocess
 import textwrap
 import unittest
 import unittest.mock
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest import mock
 
 import pytest
@@ -120,14 +120,64 @@ class TestGetSbatchCommand:
         )
         job_script_relative_path = sbatch_script.relative_to(fake_home)
 
+        export_value = (
+            "ALL,MY_VAR=1,SPECIAL_MILA_VAR=xyz,SBATCH_JOB_NAME=cluv-my_script,"
+            f"GIT_COMMIT=abecdef,CLUV_CLUSTER={cluster},"
+            f"SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out"
+        )
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz SBATCH_JOB_NAME=cluv-my_script "
             # Ugly, quite hard-coded.
-            f"GIT_COMMIT=abecdef SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out "
+            f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster} "
+            f"SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out "
             "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
-            f"--mem=8G $HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
+            f"--mem=8G --export={export_value} "
+            f"$HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
         assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
+
+    def test_resolved_results_path_is_used_verbatim_in_sbatch_output(
+        self, project_dir: Path
+    ) -> None:
+        """A `results_path` holding env vars has to be resolved before it reaches SBATCH_OUTPUT.
+
+        `shlex.quote` wraps a value containing `$` in single quotes, and those close the
+        `bash --login -c '...'` string, so the *non-login* ssh shell would expand it. On the clusters
+        where $SCRATCH is only set in a login shell (Killarney, Vulcan) it expands to nothing and the
+        job dies writing to an unwritable `/logs/...`. `sbatch` therefore resolves it on the remote
+        first and passes the result in.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [project]
+            name = "my_project"
+            version = "0.1.0"
+            [tool.cluv]
+            results_path = "$SCRATCH/logs/my_project"
+            [tool.cluv.clusters.killarney]
+            """
+            )
+        )
+        sbatch_script = project_dir / "my_script.sh"
+        sbatch_script.touch(0o755)
+
+        sbatch_command, _ = get_sbatch_command(
+            cluster="killarney",
+            job_script=sbatch_script,
+            sbatch_args=[],
+            program_args=[],
+            git_commit="abecdef",
+            chunking=False,
+            results_path=PurePosixPath("/scratch/me/logs/my_project"),
+        )
+        assert "SBATCH_OUTPUT=/scratch/me/logs/my_project/killarney_%j/slurm-%j.out" in (
+            sbatch_command
+        )
+        # The whole point: no unexpanded variable, and therefore no nested quoting, is left in the
+        # SBATCH_OUTPUT the remote shell will see.
+        assert "SBATCH_OUTPUT='" not in sbatch_command
+        assert "$SCRATCH" not in sbatch_command
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"
@@ -160,10 +210,16 @@ class TestGetSbatchCommand:
             chunking=None,
         )
 
+        export_value = (
+            "ALL,MY_VAR=2,SBATCH_JOB_NAME=cluv-my_script,GIT_COMMIT=abecdef,CLUV_CLUSTER=mila,"
+            f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out"
+        )
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
+            "CLUV_CLUSTER=mila "
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
-            "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh '"
+            f"sbatch --parsable --chdir=$HOME/my_project --export={export_value} "
+            "$HOME/my_project/scripts/my_script.sh '"
         )
         assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
 
@@ -279,6 +335,70 @@ class TestGetSbatchCommand:
         assert " ".join(expected_sbatch_args) in sbatch_command
         assert submission_args == ResolvedSbatchArgs(sbatch_args=expected_sbatch_args, n_chunks=4)
 
+    def test_export_all_flag_added_so_env_vars_survive_a_wrapped_sbatch(
+        self, project_dir: Path
+    ) -> None:
+        """`--export=ALL,...` restates the env vars as an explicit sbatch argument.
+
+        Some clusters' login nodes shadow `sbatch` with a wrapper that hardcodes `--export=NONE`
+        (trillium-gpu does), which drops the submitting shell's environment entirely - and with it
+        GIT_COMMIT, CLUV_CLUSTER, WANDB_MODE, etc. - before the job ever starts. Since `sbatch`
+        takes the last `--export` on its command line, appending our own after the wrapper's makes
+        cluv's variables win regardless of whether such a wrapper exists.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.env]
+            WANDB_MODE = "offline"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        sbatch_command, _ = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args=[],
+            program_args=[],
+            git_commit="abc123",
+            chunking=False,
+        )
+        export_flag = next(f for f in sbatch_command.split() if f.startswith("--export="))
+        assert export_flag == (
+            "--export=ALL,WANDB_MODE=offline,SBATCH_JOB_NAME=cluv-job,GIT_COMMIT=abc123,"
+            "CLUV_CLUSTER=mila,SBATCH_OUTPUT=results/mila_%j/slurm-%j.out"
+        )
+
+    def test_export_flag_not_added_if_already_set_by_caller(self, project_dir: Path) -> None:
+        """A user-supplied `--export=...` sbatch flag is left alone, not appended after."""
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        sbatch_command, _ = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args=["--export=NONE"],
+            program_args=[],
+            git_commit="abc123",
+            chunking=False,
+        )
+        assert sbatch_command.count("--export=") == 1
+        assert "--export=NONE" in sbatch_command
+
 
 class TestSubmitCliParsing:
     def test_job_script_can_be_omitted_when_using_separator(
@@ -299,6 +419,7 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": None,
+                "sync_datasets": True,
             }
         )
 
@@ -319,6 +440,7 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": None,
+                "sync_datasets": True,
             }
         )
 
@@ -342,6 +464,7 @@ class TestSubmitCliParsing:
                 "program_args": [],
                 "autocommit": False,
                 "chunking": None,
+                "sync_datasets": True,
             }
         )
 
@@ -365,6 +488,7 @@ class TestSubmitCliParsing:
                 "program_args": ["sleep", "10"],
                 "autocommit": False,
                 "chunking": 6,
+                "sync_datasets": True,
             }
         )
 
@@ -387,6 +511,7 @@ class TestSubmitCliParsing:
                 "program_args": ["sleep", "10"],
                 "autocommit": False,
                 "chunking": CHUNK_SIZE,
+                "sync_datasets": True,
             }
         )
 
@@ -774,6 +899,11 @@ async def test_submit_first_considers_current_cluster(
             )
 
         print(f"Running command: {full_command}")
+        # `sbatch` resolves env vars in the cluster's results_path through a login shell before
+        # putting it in SBATCH_OUTPUT (see `get_sbatch_command` for why it can't be left to the
+        # shell that runs sbatch).
+        if "bash --login -c" in full_command and "echo " in full_command:
+            return _result("/scratch/testuser/logs/my_project")
         if full_command.startswith("bash --login -c '") and "sbatch --parsable" in full_command:
             return _result(str(this_cluster_jobid))
         if full_command.startswith(f"ssh {other_cluster}") and "sbatch --parsable" in full_command:

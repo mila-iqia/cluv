@@ -55,7 +55,7 @@ markers = [
 managed = true
 
 [tool.uv.workspace]
-members = ["examples/pytorch-example", "examples/hydra_example"]
+members = ["examples/imagenet", "examples/hydra_example"]
 
 [tool.uv.sources]
 remote-slurm-executor = { git = "https://www.github.com/lebrice/remote-slurm-executor" }

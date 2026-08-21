@@ -104,7 +104,9 @@ async def sync(
     # TODO: Add an --ignore flag to ignore some clusters?
     console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
-    remotes_to_sync, tasks, task_descriptions = _build_sync_tasks(remotes, here)
+    remotes_to_sync, tasks, task_descriptions = _build_sync_tasks(
+        remotes, here, sync_datasets=sync_datasets
+    )
 
     token = console_lock.set(asyncio.Lock())
     if (
@@ -183,7 +185,7 @@ def _remotes_to_actually_sync(remotes: list[Remote]) -> list[Remote]:
 
 
 def _build_sync_tasks(
-    remotes: list[Remote], here: str | None
+    remotes: list[Remote], here: str | None, sync_datasets: bool = True
 ) -> tuple[list[Remote], list[AsyncTaskFn], list[str]]:
     """Builds one sync task per remote, skipping those that just share a filesystem with a
     remote already in the list (see `_remotes_to_actually_sync`) -- redundant, and unsafe to run
@@ -200,7 +202,10 @@ def _build_sync_tasks(
             f"[yellow]Not syncing separately with {skipped}: shares a filesystem with a cluster "
             "already being synced.[/yellow]"
         )
-    tasks = [functools.partial(sync_task_function, remote=remote) for remote in remotes_to_sync]
+    tasks = [
+        functools.partial(sync_task_function, remote=remote, sync_datasets=sync_datasets)
+        for remote in remotes_to_sync
+    ]
     task_descriptions = [f"{here or 'local'} -> {remote.hostname}" for remote in remotes_to_sync]
     return remotes_to_sync, tasks, task_descriptions
 
@@ -225,7 +230,9 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
-async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) -> list[Path]:
+async def sync_task_function(
+    report_progress: ReportProgressFn, remote: Remote, sync_datasets: bool = True
+) -> list[Path]:
     """Syncs a single cluster, and reports progress using the provided `report_progress` function."""
     config = get_cluv_config()
     cluster = remote.hostname
@@ -248,7 +255,8 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
         info = textwrap.shorten(status, 50, placeholder="...")
         report_progress(progress=progress, total=total, info=info)
 
-    num_tasks = 5 if config.data_source else 4
+    push_datasets = sync_datasets and bool(config.data_source)
+    num_tasks = 5 if push_datasets else 4
 
     project_state = read_cache().project_states.get(cluster) or ProjectStateOnCluster()
 
@@ -272,14 +280,16 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     _save()
 
     _update_progress(2, "Running 'uv sync'", num_tasks)
-    await run_uv_sync(remote, project_path, project_state)
+    await run_uv_sync(
+        remote, project_path, project_state, uv_cache_dir=cluster_config.env.get("UV_CACHE_DIR")
+    )
     _save()
 
     _update_progress(3, "Fetching results", num_tasks)
     new_runs = await fetch_results(remote, config, project_state)
     _save()
 
-    if config.data_source:
+    if push_datasets:
         _update_progress(4, "Syncing datasets", num_tasks)
         here = current_cluster()
         if ":" not in config.data_source:
@@ -315,7 +325,10 @@ async def expandvars(remote: Remote, path: str | PurePosixPath) -> PurePosixPath
 
 
 async def run_uv_sync(
-    remote: Remote, project_path: PurePosixPath, project_state: ProjectStateOnCluster
+    remote: Remote,
+    project_path: PurePosixPath,
+    project_state: ProjectStateOnCluster,
+    uv_cache_dir: str | None = None,
 ):
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
 
@@ -325,7 +338,29 @@ async def run_uv_sync(
             f"{remote.hostname}. Skipping uv sync."
         )
         return
-    await remote.run(f"bash --login -c 'uv --directory={project_path} sync --quiet'")
+    # A cluster whose job environment sets UV_CACHE_DIR (see `get_sbatch_command`) most likely does
+    # so because uv's default cache location ($HOME/.cache/uv) isn't reachable from its compute
+    # nodes - which usually also means those compute nodes have no internet access either (that's
+    # the case on trillium-gpu). If so, this `uv sync` - run here on the login node, which does have
+    # internet - is the only chance to actually populate that cache before a job needs it.
+    #
+    # Deliberately not shlex-quoted, unlike the job-time env vars in `get_sbatch_command`: this runs
+    # as a single `bash --login -c '...'` command sent directly over SSH, with no intermediate shell
+    # hop, so a value containing e.g. `$SCRATCH` is expanded correctly by this same login shell -
+    # quoting it would instead pass the literal, unexpanded string through.
+    env_prefix = f"UV_CACHE_DIR={uv_cache_dir} " if uv_cache_dir else ""
+    # --reinstall: without a custom UV_CACHE_DIR, this `uv sync` also builds the venv the login node
+    # itself would use, so a plain `uv sync` is enough - it downloads (and thereby caches) whatever
+    # the venv doesn't already have. With a custom UV_CACHE_DIR, though, the *job* builds its own
+    # separate, ephemeral venv (typically under $SLURM_TMPDIR) that starts out empty every run; if
+    # this login-node venv already satisfies the lockfile (the common case after the first sync),
+    # a plain `uv sync` here has nothing left to download and silently leaves that alternate cache
+    # empty. --reinstall forces every package through cache/download regardless, so the directory
+    # the job will actually read from gets populated either way.
+    reinstall_flag = " --reinstall" if uv_cache_dir else ""
+    await remote.run(
+        f"bash --login -c '{env_prefix}uv --directory={project_path} sync --quiet{reinstall_flag}'"
+    )
     project_state.last_uv_sync_git_commit = current_git_commit
 
 
@@ -415,6 +450,13 @@ async def clone_project(
 
     if local_project_root == local_repo_dir:
         cluster_repo_dir = project_path
+    elif project_dir_is_configured(remote.hostname):
+        # A subproject with an explicit `project_dir` for this cluster. The repo has to be cloned
+        # somewhere that contains it, so strip the subproject's relative offset back off the
+        # (already resolved) project path. Needed on clusters that refuse to run jobs out of $HOME.
+        cluster_repo_dir = repo_dir_from_project_dir(
+            project_path, local_project_root.relative_to(local_repo_dir)
+        )
     elif not local_repo_dir.is_relative_to(Path.home()):
         # Try to find the directory where the project should be cloned on the cluster
         # by reading the pyproject.toml at the repo root. Hopefully it has a cluv config with project_dir set.
@@ -597,6 +639,10 @@ async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets
             "--chmod=u+w",
             "--exclude=.git",
             "--exclude=.datalad",
+            # Mila's /network/datasets folders are datalad datasets whose git-annex object
+            # store lives in `.git.bak`. For ImageNet that is a second, 145GB copy of the
+            # very archives we are already copying.
+            "--exclude=.git.bak",
             f"{source_host}:{source_path}/",
             f"{local_datasets_path}/",
         ),
@@ -638,6 +684,10 @@ async def _push_datasets_to_remote(
             "--chmod=u+w",
             "--exclude=.git",
             "--exclude=.datalad",
+            # Mila's /network/datasets folders are datalad datasets whose git-annex object
+            # store lives in `.git.bak`. For ImageNet that is a second, 145GB copy of the
+            # very archives we are already copying.
+            "--exclude=.git.bak",
             f"{local_source}/",
             f"{remote.hostname}:{resolved_path}/",
         ),
@@ -762,3 +812,25 @@ async def remote_test(
     """Returns True if `test {flag} {path}` succeeds on the remote."""
     result = await remote.run(f"test {flag} {path}", warn=True, hide=True)
     return result.returncode == 0
+
+
+def project_dir_is_configured(cluster: str) -> bool:
+    """Whether a `project_dir` is set for this cluster (globally or per-cluster)."""
+    return get_cluv_config().get_cluster_config(cluster).project_dir is not None
+
+
+def repo_dir_from_project_dir(
+    project_dir: PurePosixPath | str, project_dir_relative_to_repo: PurePosixPath | Path
+) -> PurePosixPath:
+    """Where to clone the git repo, given where its subproject should live on a cluster.
+
+    `project_dir` points at the subproject (e.g. `examples/imagenet`), but the repository has to be
+    cloned at a path that contains it, so the subproject's relative offset is stripped back off.
+
+    >>> repo_dir_from_project_dir("/scratch/me/repos/cluv/examples/imagenet", "examples/imagenet")
+    PurePosixPath('/scratch/me/repos/cluv')
+    >>> repo_dir_from_project_dir("/scratch/me/cluv/sub", "sub")
+    PurePosixPath('/scratch/me/cluv')
+    """
+    depth = len(PurePosixPath(project_dir_relative_to_repo).parts)
+    return PurePosixPath(project_dir).parents[depth - 1]

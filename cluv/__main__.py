@@ -29,6 +29,7 @@ from .cli.run import run
 from .cli.sh import sh
 from .cli.status import status
 from .cli.submit import submit
+from .cli.submit_utils.chunking import CHUNK_SIZE
 from .cli.sync import sync
 from .utils import console
 
@@ -119,16 +120,36 @@ def main(argv: list[str] | None = None) -> None:
         # `--autocommit` / `--chunking` / `--no-sync-datasets` can end up swallowed into the
         # `sbatch_args` REMAINDER instead of being recognized as its own flag, since REMAINDER
         # consumes all remaining tokens (including ones that look like other known options) once
-        # positional parsing starts. Only the boolean flags are rescued, and both spellings of a
-        # `BooleanOptionalAction` one (`--sync-datasets` / `--no-sync-datasets`) are recognized.
+        # positional parsing starts.
+        #
+        # Boolean flags are rescued by literal token match, since a `BooleanOptionalAction`'s
+        # `--flag`/`--no-flag` spellings share one Action object with no `const`/`type` that could
+        # tell them apart - both spellings are checked. Value-taking flags (like `--chunking`) use
+        # the option's own `const`/`type` instead, so `--chunking=6` ends up with `6` (not left in
+        # `sbatch_args`) and a bare `--chunking` ends up with its `const` default (not `True`).
         for flag, current_value in list(args_dict.items()):
-            if not isinstance(current_value, bool):
-                continue
             dashed = flag.replace("_", "-")
-            for token, value in ((f"--{dashed}", True), (f"--no-{dashed}", False)):
-                if token in args_dict["sbatch_args"]:
-                    args_dict["sbatch_args"] = [a for a in args_dict["sbatch_args"] if a != token]
-                    args_dict[flag] = value
+            if isinstance(current_value, bool):
+                for token, value in ((f"--{dashed}", True), (f"--no-{dashed}", False)):
+                    if token in args_dict["sbatch_args"]:
+                        args_dict["sbatch_args"] = [
+                            a for a in args_dict["sbatch_args"] if a != token
+                        ]
+                        args_dict[flag] = value
+                continue
+            action = submit_parser._option_string_actions.get(f"--{dashed}")
+            if action is None:
+                continue
+            remaining_sbatch_args = []
+            for arg in args_dict["sbatch_args"]:
+                name, _, value = arg.partition("=")
+                if name == f"--{dashed}":
+                    args_dict[flag] = (
+                        action.type(value) if value and action.type else value or action.const
+                    )
+                else:
+                    remaining_sbatch_args.append(arg)
+            args_dict["sbatch_args"] = remaining_sbatch_args
         args_dict["program_args"] = submit_program_args
 
     if subcommand == "status" and quiet:
@@ -187,8 +208,15 @@ def add_submit_args(subparsers: Subparsers):
     )
     submit_parser.add_argument(
         "--chunking",
-        action="store_true",
-        help="Whether to split the job up into multiple consecutive short jobs.",
+        nargs="?",
+        const=CHUNK_SIZE,
+        default=None,
+        type=int,
+        metavar="HOURS",
+        help=(
+            "Split the job into multiple consecutive short jobs of HOURS hours each. "
+            f"Defaults to {CHUNK_SIZE} hours when --chunking is used without a value."
+        ),
     )
     submit_parser.add_argument(
         "--sync-datasets",

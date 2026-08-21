@@ -111,7 +111,7 @@ async def submit(
     sbatch_args: list[str],
     program_args: list[str],
     autocommit: bool = False,
-    chunking: bool = False,
+    chunking: int | None = None,
     sync_datasets: bool = True,
     _skip_sync: bool = False,
 ) -> Job | None:
@@ -135,7 +135,8 @@ async def submit(
         sbatch_args: List of additional flags to pass to `sbatch`.
         program_args: List of arguments to pass to the job script, for example `["python", "main.py"]`.
         autocommit: If True, automatically create a local commit with tracked changes before submitting.
-        chunking: Whether to split the job up into multiple consecutive short jobs.
+        chunking: Duration in hours of each chunk when splitting the job into multiple consecutive
+            short jobs. When None, chunking is disabled.
         sync_datasets: If False, don't replicate `data_source` to the cluster's `datasets_path`
             during the sync that precedes the submission. Useful when the data is already there, or
             when a `cluv sync` is already replicating it.
@@ -253,7 +254,7 @@ async def submit_first(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-    chunking: bool,
+    chunking: int | None,
     sync_datasets: bool = True,
     _skip_sync: bool = False,
 ) -> Job | None:
@@ -301,7 +302,7 @@ async def submit_first(
 async def submit_and_keep_first(
     submissions: list[Submission],
     git_commit: str,
-    chunking: bool = False,
+    chunking: int | None = None,
 ) -> Job | None:
     """Submit all the given jobs, wait until one of them starts, then cancel the others."""
 
@@ -576,7 +577,7 @@ def get_sbatch_command(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-    chunking: bool,
+    chunking: int | None,
     results_path: PurePosixPath | None = None,
 ) -> tuple[str, ResolvedSbatchArgs]:
     """
@@ -632,8 +633,8 @@ def get_sbatch_command(
     if chunking:
         assert not in_job_packing, "can't do both right now."
         env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
-        n_chunks = get_n_chunks(sbatch_args, env_vars, job_script)
-        sbatch_args = chunking_update_sbatch_args(n_chunks, sbatch_args)
+        n_chunks = get_n_chunks(sbatch_args, env_vars, job_script, chunk_size=chunking)
+        sbatch_args = chunking_update_sbatch_args(n_chunks, sbatch_args, chunk_size=chunking)
     elif not any("--output" in flag for flag in sbatch_args):
         if in_job_packing:
             env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j_%t/slurm-%j_%t.out"
@@ -690,7 +691,7 @@ async def sbatch(
     sbatch_args: list[str],
     program_args: list[str],
     git_commit: str,
-    chunking: bool,
+    chunking: int | None,
 ) -> tuple[subprocess.CompletedProcess[str], Job | None]:
     """Submit the job via sbatch on the remote cluster, and return the command output and the job info."""
     cluster = remote.hostname if remote else current_cluster()

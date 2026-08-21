@@ -1,3 +1,6 @@
+import os
+import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,6 +13,13 @@ from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars
 from cluv.remote import control_socket_is_running
 from tests.test_integration import ALL_CLUSTERS, IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
+
+
+@pytest.fixture(autouse=True)
+def reset_cluv_config():
+    """Reset the cache of the `get_cluv_config` function before each test to avoid state leakage."""
+
+    get_cluv_config.cache_clear()
 
 
 @pytest.fixture
@@ -33,12 +43,71 @@ def fake_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return fake_scratch
 
 
-@pytest.fixture(autouse=True)
-def reset_cluv_config():
-    """Reset the cluv config before each test to avoid state leakage."""
-    from cluv.config import get_cluv_config
+@pytest.fixture
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    fake_home = tmp_path / "fake_home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    return fake_home
 
-    get_cluv_config.cache_clear()
+
+@pytest.fixture(params=[True, False], ids=["with_scratch", "without_scratch"])
+def scratch(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest, fake_scratch: Path
+) -> Path | None:
+    """Fixture that sets up a fake SCRATCH directory if requested, or pretends that SCRATCH doesn't exist otherwise."""
+    use_scratch = request.param
+    if use_scratch:
+        return fake_scratch
+    if "SCRATCH" in os.environ:
+        # Remove the SCRATCH environment variable
+        monkeypatch.delenv("SCRATCH")
+    return None
+
+
+@pytest.fixture
+def project_name(request: pytest.FixtureRequest) -> str:
+    return getattr(request, "param", "my_project")
+
+
+@pytest.fixture(params=[True, False], ids=["existing_project", "new_project"])
+def is_existing_project(request: pytest.FixtureRequest) -> str:
+    return request.param
+
+
+@pytest.fixture
+def project_dir(
+    fake_home: Path, project_name: str, is_existing_project: bool, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Fixture that creates a project directory and changes into it."""
+    project_dir = fake_home / project_name
+    project_dir.mkdir()
+    if is_existing_project:
+        subprocess.run(f"uv init {project_dir}", shell=True, check=True)
+        job_script = project_dir / "scripts" / "job.sh"
+        job_script.parent.mkdir(exist_ok=False, parents=True)
+        job_script.touch()  # Touch the job script to simulate an existing project
+        # Make the job script executable:
+        job_script.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    monkeypatch.chdir(project_dir)  # Set current working dir, as the docstring above promises.
+    return project_dir
+
+
+@pytest.fixture
+def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.chdir(project_dir)  # Set current working dir
+
+    cluv.cli.init()
+    return project_dir
+
+
+@pytest.fixture(autouse=True)
+def return_to_start_dir():
+    start_dir = Path.cwd()
+    try:
+        yield
+    finally:
+        os.chdir(start_dir)
 
 
 @pytest.fixture(autouse=IN_SELF_HOSTED_GITHUB_CI)

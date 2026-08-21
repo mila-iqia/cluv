@@ -30,14 +30,22 @@ def current_cluster() -> str | None:
 
 def find_pyproject(start: Path | None = None) -> Path:
     current = (start or Path.cwd()).resolve()
-    for folder in (current, *current.parents):
-        candidate = folder / "pyproject.toml"
-        if candidate.is_file():
-            return candidate
+    pyproject = try_find_pyproject(current)
+    if pyproject:
+        return pyproject
     raise RuntimeError(
         f"Could not find pyproject.toml starting from {current}!\n"
         f"Cluv can only be used within a project managed with uv."
     )
+
+
+def try_find_pyproject(start: Path | None = None) -> Path | None:
+    current = (start or Path.cwd()).resolve()
+    for folder in (current, *current.parents):
+        candidate = folder / "pyproject.toml"
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 T = TypeVar("T")

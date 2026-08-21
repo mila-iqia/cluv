@@ -40,6 +40,7 @@ dev = [
     "ruff",
     "pytest-skip-slow>=0.0.5",
     "torchvision>=0.25.0",
+    "pytest-regressions>=2.11.0",
 ]
 
 [tool.pytest.ini_options]
@@ -143,8 +144,9 @@ env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 [tool.cluv.clusters.tamia]
 
 [tool.cluv.clusters.killarney]
+# Killarney requires submitting jobs from $SCRATCH, so we setup our project there.
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
-results_path = "$HOME/logs/cluv"
+project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.vulcan]
 

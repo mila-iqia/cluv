@@ -1,67 +1,53 @@
 ---
 name: cluv-sync
-description: Push a UV-based project (and optionally its datasets) from the local machine to every configured HPC cluster with cluv, running git push/clone/checkout/pull and uv sync remotely. Use when the user wants to sync/update code on clusters, or set up dataset replication.
+description: Push a UV-based project (and optionally its datasets) from the local machine to every connected HPC cluster with cluv sync — git push/clone/checkout, remote uv sync, and rsync of results back. Use when the user wants to update code on clusters, fetch back results, or configure dataset replication.
 ---
 
-# Syncing a project across clusters with cluv
+# Syncing a project across clusters
 
 ```bash
-cluv sync                       # sync every cluster with an active connection (see cluv login)
-cluv sync mila narval           # sync specific clusters only
-cluv sync --no-sync-datasets    # skip dataset replication for this run
+cluv sync                       # sync every cluster with an active connection
+cluv sync mila narval            # sync specific clusters only
+cluv sync --no-sync-datasets     # skip dataset replication for this run
 ```
 
 ## What it does, per cluster
 
-1. `git push` locally (once, before touching any remote).
-2. On each remote cluster, in sequence for that cluster (clusters run in parallel via
-   `asyncio.gather`, each cluster's own steps run in order):
+1. `git push` locally, once, before touching any remote.
+2. On each remote cluster (clusters run concurrently; each cluster's own steps run in order):
    - `git clone` the project if it isn't there yet, otherwise `git fetch`.
-   - `git checkout` + `git pull` to the current commit.
+   - `git checkout` + pull to the current local commit.
    - `uv sync` to update the remote virtualenv/dependencies.
-3. `rsync` any new results back from `results_path` on the remote to the local results
-   dir (the `logs` symlink from `cluv init`), for any cluster this machine has synced from before.
+3. `rsync` any new results back from that cluster's `results_path` into the local results dir
+   (the `logs` symlink created by `cluv init`).
 
-Only clusters with an **active SSH connection** are touched — run [[cluv-clusters]] (`cluv login`)
-first if a cluster hasn't been connected to yet. `sync` deliberately does not trigger new 2FA
-prompts itself (see `get_remote_without_2fa_prompt` in [[cluv-clusters]]); it operates on whatever
-is already connected.
+Only clusters with an **active SSH connection** are touched — run `cluv login` first for any
+cluster that isn't connected yet. `sync` deliberately never triggers a new 2FA prompt itself: it
+only acts on connections that already exist.
 
 ## Dataset replication
 
-Enabled by default when `data_source` is configured in `[tool.cluv]`:
+Configure a shared dataset source and per-cluster destination in `pyproject.toml`:
 
 ```toml
 [tool.cluv]
-data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"   # "host:/path", or a local path
-datasets_path = "$SCRATCH/datasets/cifar10"                               # destination on each cluster
+data_source = "mila:/network/datasets/cifar10.var/cifar10_torchvision"   # hostname:/path, or a local path
+datasets_path = "$SCRATCH/datasets/cifar10"                              # destination on each cluster
 
 [tool.cluv.clusters.killarney]
-datasets_path = "$HOME/datasets/cifar10"    # per-cluster override
+datasets_path = "$HOME/datasets/cifar10"   # override for one cluster
 ```
 
-- If `data_source` has a `hostname:` prefix, cluv first pulls the dataset from that remote cluster
-  to the local/current machine, then pushes it out to every configured cluster's `datasets_path`.
-- If `data_source` is a plain local path (no `hostname:` prefix), the remote-pull step is skipped
-  and the local directory is pushed directly to every cluster.
-- Make sure the `data_source` cluster (if remote) is logged in — `cluv login mila` — before syncing.
-- Skip it for a single run with `cluv sync --no-sync-datasets` without removing the config.
-
-## Things to know
-
-- `sync` is a one-way copy for results: it fetches from clusters to local, but never deletes
-  anything on either side. Deleting a run locally and re-syncing just re-downloads it — see
-  [[cluv-clean]] for actually removing stale results from clusters.
-- `cluv submit` calls the same sync logic before submitting a job, so the remote is always
-  up to date with the commit being submitted — no need to `cluv sync` manually right before
-  `cluv submit`.
-- If a cluster was never synced, `clean` (see [[cluv-clean]]) can't safely determine what's
-  deletable there yet — the first `cluv sync` for a cluster establishes that baseline.
+- `data_source` as `hostname:/path` means cluv pulls the dataset from that cluster first (make sure
+  you're logged into it), then pushes it to every target cluster.
+- `data_source` as a plain path (no `hostname:` prefix) is read directly from the local machine —
+  no pull step, straight push to every cluster.
+- Enabled by default whenever `data_source` is set; skip it for one run with `--no-sync-datasets`.
 
 ## Troubleshooting
 
-- **Nothing happens for a cluster**: it likely has no active connection. Run `cluv login <cluster>`
-  first, or check `cluv status` / the disabled-clusters warning (see [[cluv-clusters]]).
-- **Dirty working tree on the remote**: sync expects the remote checkout to be a plain clone of
-  this repo; uncommitted changes made directly on the cluster can make `git checkout`/`pull` fail.
-  Commit or discard changes locally and let `sync` push them, rather than editing on the cluster.
+- **A cluster wasn't synced**: it needs an active connection first — run `cluv login <cluster>`.
+- **New results aren't showing up locally**: re-run `cluv sync`; results only come back via the
+  rsync step of a sync, they aren't pushed proactively by the remote job.
+- **Dataset sync did nothing**: `data_source` must be set in `[tool.cluv]`; if it's a remote
+  `hostname:/path`, you also need a live connection to that source cluster.

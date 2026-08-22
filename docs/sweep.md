@@ -52,9 +52,16 @@ The job script is the same shape as a `cluv submit` script — no changes needed
 ## Run a sweep
 
 ```console
-cluv sweep mila scripts/job.sh --name my-sweep --ntasks-per-gpu=2 --gres=gpu:h100:1 \
+cluv sweep mila scripts/job.sh --name=my-sweep --ntasks-per-gpu=2 --gres=gpu:h100:1 \
     -- python main.py --lr=0.01,0.001,0.0001 --seed=1,2,3
 ```
+
+!!! note "Use `--name=<name>`, not `--name <name>`"
+    `sbatch-args` accepts arbitrary flags via `argparse.REMAINDER`, which swallows everything
+    after it unparsed — including `--name`, `--autocommit`, and `--chunking` themselves. cluv
+    recovers them afterwards, but only in their `--flag=value` form (the same convention
+    `--chunking=6` already uses); a space-separated `--name my-sweep` silently leaves `my-sweep`
+    stuck in `sbatch-args` instead.
 
 This expands to 9 combos (3 learning rates × 3 seeds), packs 2 per GPU (one `h100` per job), and
 submits `ceil(9 / 2) = 5` jobs — the last one only needs one of its two task slots, and the other

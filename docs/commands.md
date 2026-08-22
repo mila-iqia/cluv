@@ -202,7 +202,7 @@ script's Python entrypoint needs to add.
 
 **Usage**
 ```console
-cluv sweep <cluster> [<job.sh>] [--name <name>] [options] [sbatch-args...] [-- program-args...]
+cluv sweep <cluster> [<job.sh>] [--name=<name>] [options] [sbatch-args...] [-- program-args...]
 ```
 
 **Arguments**
@@ -224,7 +224,8 @@ cluv sweep <cluster> [<job.sh>] [--name <name>] [options] [sbatch-args...] [-- p
 
 `--name`
 :   Name for this sweep, used to build resumable results paths. Defaults to the job script's
-    filename stem.
+    filename stem. Must be passed as `--name=<name>` (not space-separated) — see the
+    [`cluv sweep` guide](sweep.md#options) for why.
 
 `--autocommit`
 :   Same as [`cluv submit`'s `--autocommit`](#cluv-submit).

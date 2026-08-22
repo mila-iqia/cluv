@@ -8,19 +8,26 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 3  # In hours
 
 
-def chunking_update_sbatch_args(n_chunks: int, sbatch_args: list[str]) -> list[str]:
+def chunking_update_sbatch_args(
+    n_chunks: int, sbatch_args: list[str], chunk_size: int = CHUNK_SIZE
+) -> list[str]:
     """Add the sbatch args (--array and --time) for chunking the job into multiple smaller jobs."""
-    logger.info(f"Chunking job into {n_chunks} smaller jobs of {CHUNK_SIZE} hours each.")
+    logger.info(f"Chunking job into {n_chunks} smaller jobs of {chunk_size} hours each.")
 
     # Remove any existing --time or -t args, and add the new one at the end.
     sbatch_args = [arg for arg in sbatch_args if not arg.startswith(("--time=", "-t="))]
-    sbatch_args.append(f"--time={CHUNK_SIZE}:00:00")
+    sbatch_args.append(f"--time={chunk_size}:00:00")
     sbatch_args.append(f"--array=0-{n_chunks - 1}%1")
 
     return sbatch_args
 
 
-def get_n_chunks(sbatch_args: list[str], env_vars: dict[str, str], job_script: Path) -> int:
+def get_n_chunks(
+    sbatch_args: list[str],
+    env_vars: dict[str, str],
+    job_script: Path,
+    chunk_size: int = CHUNK_SIZE,
+) -> int:
     """Get the number of chunks required from the current time limit."""
     # The time limit of a job can be set multiple way :
     # 1. As an arg to sbatch (with --time or -t)
@@ -42,7 +49,7 @@ def get_n_chunks(sbatch_args: list[str], env_vars: dict[str, str], job_script: P
     total_hours = time.total_seconds() / 3600  # Convert to hours
 
     # Split the total time into chunks, and round up.
-    n_chunks = int((total_hours + CHUNK_SIZE - 1) // CHUNK_SIZE)
+    n_chunks = int((total_hours + chunk_size - 1) // chunk_size)
     # Need at least one chunk, even if the time is less than CHUNK_SIZE.
     n_chunks = max(n_chunks, 1)
 

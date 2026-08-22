@@ -105,7 +105,7 @@ async def sweep(
             sbatch_args=sbatch_args,
             program_args=program_args,
             autocommit=autocommit,
-            chunking=False,
+            chunking=None,
             in_job_packing=True,
             extra_env={
                 CLUV_SWEEP_NAME_ENV_VAR: sweep_name,

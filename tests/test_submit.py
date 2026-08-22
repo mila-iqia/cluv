@@ -279,6 +279,91 @@ class TestGetSbatchCommand:
         assert " ".join(expected_sbatch_args) in sbatch_command
         assert submission_args == ResolvedSbatchArgs(sbatch_args=expected_sbatch_args, n_chunks=4)
 
+    def test_in_job_packing_uses_job_and_task_placeholders_in_output_path(
+        self, project_dir: Path
+    ) -> None:
+        p = project_dir / "pyproject.toml"
+        results_path = "results"
+        p.write_text(f'[tool.cluv]\nresults_path = "{results_path}"\n[tool.cluv.clusters.mila]\n')
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        sbatch_command, _ = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args=["--ntasks-per-gpu=2"],
+            program_args=[],
+            git_commit="abc123",
+            chunking=None,
+            in_job_packing=True,
+        )
+
+        assert f"SBATCH_OUTPUT={results_path}/mila_%j_%t/slurm-%j_%t.out" in sbatch_command
+
+    def test_in_job_packing_extra_env_included_in_command(self, project_dir: Path) -> None:
+        p = project_dir / "pyproject.toml"
+        p.write_text('[tool.cluv]\nresults_path = "results"\n[tool.cluv.clusters.mila]\n')
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        sbatch_command, _ = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args=["--ntasks-per-gpu=2"],
+            program_args=[],
+            git_commit="abc123",
+            chunking=None,
+            in_job_packing=True,
+            extra_env={"CLUV_SWEEP_NAME": "my-sweep", "CLUV_SWEEP_TASK_OFFSET": "4"},
+        )
+
+        assert "CLUV_SWEEP_NAME=my-sweep" in sbatch_command
+        assert "CLUV_SWEEP_TASK_OFFSET=4" in sbatch_command
+
+    def test_in_job_packing_warns_about_conflicting_sbatch_directives_in_job_script(
+        self, project_dir: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        p = project_dir / "pyproject.toml"
+        p.write_text('[tool.cluv]\nresults_path = "results"\n[tool.cluv.clusters.mila]\n')
+        job_script = project_dir / "job.sh"
+        job_script.write_text("#!/bin/bash\n#SBATCH --ntasks=4\n#SBATCH --gpus=2\n")
+        job_script.chmod(0o755)
+
+        with caplog.at_level("WARNING"):
+            get_sbatch_command(
+                cluster="mila",
+                job_script=job_script,
+                sbatch_args=["--ntasks-per-gpu=2"],
+                program_args=[],
+                git_commit="abc123",
+                chunking=None,
+                in_job_packing=True,
+            )
+
+        assert any("overridden" in record.getMessage().lower() for record in caplog.records)
+
+    def test_no_packing_warning_when_job_script_has_no_conflicting_directives(
+        self, project_dir: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        p = project_dir / "pyproject.toml"
+        p.write_text('[tool.cluv]\nresults_path = "results"\n[tool.cluv.clusters.mila]\n')
+        job_script = project_dir / "job.sh"
+        job_script.write_text("#!/bin/bash\necho hello\n")
+        job_script.chmod(0o755)
+
+        with caplog.at_level("WARNING"):
+            get_sbatch_command(
+                cluster="mila",
+                job_script=job_script,
+                sbatch_args=["--ntasks-per-gpu=2"],
+                program_args=[],
+                git_commit="abc123",
+                chunking=None,
+                in_job_packing=True,
+            )
+
+        assert not any("overridden" in record.getMessage().lower() for record in caplog.records)
+
 
 class TestSubmitCliParsing:
     def test_job_script_can_be_omitted_when_using_separator(
@@ -387,6 +472,103 @@ class TestSubmitCliParsing:
                 "program_args": ["sleep", "10"],
                 "autocommit": False,
                 "chunking": CHUNK_SIZE,
+            }
+        )
+
+
+class TestSweepCliParsing:
+    def test_full_command_line_parses_into_expected_args_dict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(cluv_main, "sweep", mock_sweep := mock.AsyncMock(spec=cluv_main.sweep))
+        job_script = tmp_path / "job.sh"
+        job_script.write_text("#!/bin/bash\n")
+        monkeypatch.chdir(tmp_path)
+
+        cluv_main.main(
+            [
+                "sweep",
+                "tamia",
+                "job.sh",
+                "--name=x",
+                "--ntasks-per-gpu=2",
+                "--gres=gpu:h100:1",
+                "--",
+                "python",
+                "main.py",
+                "--foo=1,2",
+            ]
+        )
+
+        mock_sweep.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": Path("job.sh"),
+                "name": "x",
+                "sbatch_args": ["--ntasks-per-gpu=2", "--gres=gpu:h100:1"],
+                "program_args": ["python", "main.py", "--foo=1,2"],
+                "autocommit": False,
+                "max_concurrent_submissions": 8,
+            }
+        )
+
+    def test_job_script_can_be_omitted_when_using_separator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(cluv_main, "sweep", mock_sweep := mock.AsyncMock(spec=cluv_main.sweep))
+
+        cluv_main.main(["sweep", "tamia", "--", "python", "main.py"])
+
+        mock_sweep.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "name": None,
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "max_concurrent_submissions": 8,
+            }
+        )
+
+    def test_name_recovered_when_swallowed_into_remainder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # REMAINDER swallows everything after the last positional unparsed, so '--name' only
+        # gets recovered in its '--name=value' form (same convention as '--chunking=6') —
+        # not as two separate space-separated tokens.
+        monkeypatch.setattr(cluv_main, "sweep", mock_sweep := mock.AsyncMock(spec=cluv_main.sweep))
+
+        cluv_main.main(["sweep", "tamia", "--name=x", "--", "python", "main.py"])
+
+        mock_sweep.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "name": "x",
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "max_concurrent_submissions": 8,
+            }
+        )
+
+    def test_autocommit_recovered_when_swallowed_into_remainder(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(cluv_main, "sweep", mock_sweep := mock.AsyncMock(spec=cluv_main.sweep))
+
+        cluv_main.main(["sweep", "tamia", "--autocommit", "--", "python", "main.py"])
+
+        mock_sweep.assert_awaited_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "name": None,
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+                "autocommit": True,
+                "max_concurrent_submissions": 8,
             }
         )
 

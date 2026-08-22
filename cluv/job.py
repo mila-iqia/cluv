@@ -11,6 +11,7 @@ from pathlib import Path, PurePath
 
 import cluv
 import cluv.config
+import cluv.sweep
 from cluv.utils import current_cluster
 
 SLURM_JOB_ID: int | None = (
@@ -115,7 +116,7 @@ def current_run_info() -> RunInfo | None:
     """
     if not SLURM_JOB_ID:
         return None  # not in a Slurm job.
-    if SLURM_JOB_ID and not SLURM_PROCID:
+    if SLURM_JOB_ID and SLURM_PROCID is None:
         # Inside a job, but we don't have all the Slurm environment variables set.
         # This happens when using `python main.py -m launcher=cluv` in the Hydra example.
         warnings.warn(
@@ -126,15 +127,26 @@ def current_run_info() -> RunInfo | None:
             )
         )
         return None
+
     cluster = current_cluster()
-    run_id = current_run_id()
-    # IDEA: maybe load the cluv config and set the checkpoint_dir
-    # from cluv.config import load_cluv_config
     assert cluster, "Example must be run on a cluster."
     cluster_config = cluv.config.current_cluster_config()
     assert cluster_config, "Example must be run on a cluster."
     assert cluster_config.results_path
     assert cluster_config.datasets_path
+
+    if sweep_context := cluv.sweep._current_sweep_context():
+        sweep_name, slug, combo = sweep_context
+        return RunInfo(
+            cluster=cluster,
+            run_id=f"{cluster}_sweep-{sweep_name}_{slug}",
+            results_path=cluster_config.results_path / "sweeps" / sweep_name / slug,
+            command=combo,
+        )
+
+    run_id = current_run_id()
+    # IDEA: maybe load the cluv config and set the checkpoint_dir
+    # from cluv.config import load_cluv_config
     return RunInfo(
         run_id=run_id,
         cluster=cluster,

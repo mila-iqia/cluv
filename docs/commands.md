@@ -189,6 +189,52 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 
 ---
 
+## [`cluv sweep`](#cluv-sweep)
+
+Run a packed, multi-job hyperparameter sweep on a remote cluster.
+
+Expands a `--flag=v1,v2,...` sweep spec after `--` into a Cartesian product of combos, packs
+several combos onto each GPU via `--ntasks-per-gpu`, and submits as many small,
+identically-shaped jobs as needed to cover them all — one job per GPU rather than one giant job.
+
+See the [`cluv sweep` guide](sweep.md) for the full picture, including the one line your job
+script's Python entrypoint needs to add.
+
+**Usage**
+```console
+cluv sweep <cluster> [<job.sh>] [--name=<name>] [options] [sbatch-args...] [-- program-args...]
+```
+
+**Arguments**
+
+`cluster`
+:   The cluster to submit the sweep's jobs on. Unlike `cluv submit`, `first` isn't supported yet.
+
+`job.sh`
+:   Path to the sbatch job script, relative to the project root. Defaults to the job script
+    configured at `job_script_path` for the target cluster. The same script works for `cluv submit`
+    and `cluv sweep` unchanged.
+
+`sbatch-args` / `program-args`
+:   Any arguments before `--` are forwarded as flags to `sbatch`, and also determine one job's
+    task-slot capacity (e.g. `--ntasks-per-gpu=2`). Arguments after `--` are passed to the job
+    script; any `--flag=v1,v2,...` among them is expanded into one combo per value.
+
+**Options**
+
+`--name`
+:   Name for this sweep, used to build resumable results paths. Defaults to the job script's
+    filename stem. Must be passed as `--name=<name>` (not space-separated) — see the
+    [`cluv sweep` guide](sweep.md#options) for why.
+
+`--autocommit`
+:   Same as [`cluv submit`'s `--autocommit`](#cluv-submit).
+
+`--max-concurrent-submissions`
+:   Maximum number of `sbatch` submissions to run concurrently (default 8).
+
+---
+
 ## [`cluv clean`](#cluv-clean)
 
 Remove run result directories from remote clusters that have been deleted from the local

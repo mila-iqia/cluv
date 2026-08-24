@@ -24,7 +24,7 @@ from cluv.cli.submit_utils.first import (
     wait_for_jobs_to_cancel,
     wait_for_running_job,
 )
-from cluv.cli.sync import get_active_remotes, sync
+from cluv.cli.sync import get_active_remotes, pull_datasets_if_needed, run_git_push_if_needed, sync
 from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.utils import console, current_cluster
@@ -198,17 +198,22 @@ async def submit(
         # with different accounts, or different GPU models, etc.
         # Submit one job per allocation and keep the first one that starts.
         job = await submit_and_keep_first(
-            [
-                Submission(
-                    remote=remote,
-                    job_script=job_script,
-                    sbatch_args=sbatch_args_from_dict(job_resources_config) + sbatch_args,
-                    program_args=program_args,
-                )
-                for job_resources_config in job_resources_options
-            ],
+            {
+                remote: [
+                    Submission(
+                        remote=remote,
+                        job_script=job_script,
+                        sbatch_args=sbatch_args_from_dict(job_resources_config) + sbatch_args,
+                        program_args=program_args,
+                    )
+                    for job_resources_config in job_resources_options
+                ]
+            },
             git_commit=git_commit,
             chunking=chunking,
+            sync_datasets=True,  # TODO: might be good to have control over this.
+            _skip_sync=False,
+            _skip_sync_common_part=False,
         )
         if job:
             save_job(job)
@@ -279,10 +284,14 @@ async def submit_first(
         ]
         for cluster, remote in cluster_to_remote.items()
     }
+
     return await submit_and_keep_first(
         submissions,
         git_commit=git_commit,
         chunking=chunking,
+        # todo: might want to add an argument to control this? For example, when submitting
+        # a job from a laptop, but you know the dataset was already synced between clusters?
+        sync_datasets=True,
         _skip_sync=_skip_sync,
     )
 
@@ -303,7 +312,7 @@ async def sync_and_sbatch(
         assert all(submission.cluster == remote.hostname for submission in submissions)
 
     if not _skip_sync and remote is not None:
-        await sync([remote.hostname], sync_datasets=sync_datasets)
+        await sync([remote.hostname], sync_datasets=sync_datasets, _skip_common_part=True)
 
     return await asyncio.gather(
         *[
@@ -324,7 +333,9 @@ async def submit_and_keep_first(
     submissions: dict[Remote | None, list[Submission]],
     git_commit: str,
     chunking: int | None,
+    sync_datasets: bool,
     _skip_sync: bool = False,
+    _skip_sync_common_part: bool = False,
 ) -> Job | None:
     """Submit all the given jobs, wait until one of them starts, then cancel the others."""
     cluster_to_remote: dict[str, Remote | None] = {}
@@ -338,6 +349,13 @@ async def submit_and_keep_first(
 
     # cluster_task_groups = {cluster: asyncio.TaskGroup() for cluster in cluster_to_remote.keys()}
 
+    # Do the common part of `sync` that should be done for all clusters, and then use `_skip_common_part=True` in each `sync` call below.
+    if not (_skip_sync or _skip_sync_common_part):
+        await run_git_push_if_needed()
+        if sync_datasets:
+            _remotes = [remote for remote in submissions.keys() if remote is not None]
+            await pull_datasets_if_needed(current_cluster(), get_cluv_config(), _remotes)
+
     cluster_tasks = {
         remote: asyncio.create_task(
             sync_and_sbatch(
@@ -345,8 +363,7 @@ async def submit_and_keep_first(
                 cluster_submissions,
                 chunking=chunking,
                 git_commit=git_commit,
-                sync_datasets=True,
-                _skip_sync=_skip_sync,
+                sync_datasets=sync_datasets,
             ),
             name=remote.hostname if remote else current_cluster(),
         )
@@ -451,6 +468,10 @@ async def submit_and_keep_first(
                 ),
             )
         return table
+
+    while not any(task.done() for task in cluster_tasks.values()):
+        logger.debug("Waiting for one of the sync+sbatch tasks to complete...")
+        await asyncio.sleep(1)
 
     try:
         with Live(get_renderable=make_table, console=console, refresh_per_second=1) as live:

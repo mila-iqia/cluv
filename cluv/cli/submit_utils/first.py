@@ -42,12 +42,27 @@ async def wait_for_running_job(
         # Initial sleep after sbatch to give time for job to appear in sacct.
         await asyncio.sleep(wait_time)
         wait_time = min(wait_time * 2, max_wait_time_seconds)
+        jobs_by_cluster: dict[str, list[Job]] = {}
+        for job in to_query:
+            jobs_by_cluster.setdefault(job.cluster, []).append(job)
 
-        job_states = await asyncio.gather(
-            *(run_sacct(cluster_to_remote[job.cluster], job.job_id) for job in to_query)
+        cluster_states = await asyncio.gather(
+            *(
+                run_sacct(
+                    cluster_to_remote[cluster],
+                    ",".join(str(job.job_id) for job in jobs),
+                )
+                for cluster, jobs in jobs_by_cluster.items()
+            )
         )
+        job_states_by_job = {
+            job: state
+            for jobs, states in zip(jobs_by_cluster.values(), cluster_states)
+            for job, state in zip(jobs, states.splitlines())
+        }
 
-        for job, job_state in zip(to_query.copy(), job_states):
+        for job in to_query.copy():
+            job_state = job_states_by_job[job]
             if (previous_state := job_to_state[job]) != job_state:
                 console.print(
                     f"Job {job.job_id} on cluster {job.cluster}: {previous_state} -> {job_state}"

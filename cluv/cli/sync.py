@@ -29,7 +29,7 @@ from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config, load_cluv_config
 from cluv.job import get_datasets_path
 from cluv.remote import Remote, list_remote_run_dirs, run
-from cluv.utils import console, console_lock, current_cluster
+from cluv.utils import console, console_lock, current_cluster, set_context
 
 milatools.cli.console = console
 milatools.utils.parallel_progress.console = console
@@ -45,8 +45,9 @@ __all__ = ["sync", "install_uv", "clone_project", "fetch_results"]
 
 async def sync(
     clusters: list[str] | None = None,
-    uv_sync_args: list[str] | None = None,
+    uv_sync_args: list[str] | None = None,  # todo: remove
     sync_datasets: bool = True,
+    _skip_common_part: bool = False,
 ) -> list[Remote]:
     """Synchronizes the current project across clusters.
 
@@ -96,9 +97,10 @@ async def sync(
         remotes = all_remotes.copy()
         clusters = [remote.hostname for remote in all_remotes]
 
-    if "GITHUB_ACTIONS" not in os.environ and not await _head_is_up_to_date():
-        # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
-        await run(("git", "push"), hide=False)
+    if not _skip_common_part:
+        await run_git_push_if_needed()
+        if sync_datasets:
+            await pull_datasets_if_needed(here, config, all_remotes)
 
     # TODO: Do we raise an error if we fail to connect to a given cluster?
     # TODO: Add an --ignore flag to ignore some clusters?
@@ -106,38 +108,11 @@ async def sync(
 
     remotes_to_sync, tasks, task_descriptions = _build_sync_tasks(remotes, here)
 
-    token = console_lock.set(asyncio.Lock())
-    if (
-        sync_datasets
-        and config.data_source
-        and ":" in config.data_source  # remote source: cluster:path (POSIX-only tool)
-        and (source_cluster := config.data_source.split(":", 1)[0]) != here
-    ):
-        _source_host, _, source_path = config.data_source.partition(":")
-        # Fetch the data from the source cluster and copy it to the local datasets_path.
-        source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
-        if not source_remote:
-            raise RuntimeError(
-                f"[red]Unable to sync datasets, need a connection to the source cluster "
-                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
-                f"Use `cluv login {source_cluster}` to create a reusable connection to the "
-                f"source cluster."
-            )
-        local_datasets_path = get_datasets_path()
-        if not local_datasets_path:
-            raise RuntimeError(
-                "`cluv.datasets_path` must be set in the Cluv config section of pyproject.toml to "
-                "sync datasets between clusters."
-            )
-        await _pull_datasets(source_remote, source_path, local_datasets_path)
-    # else: data_source is a local path; data is already available locally, no pull needed
-
     per_cluster_new_runs: list[list[Path]] = await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
         task_descriptions=task_descriptions,
         overall_progress_task_description="[green]Syncing project",
     )
-    console_lock.reset(token)
 
     # Display a consolidated summary of all newly-synced runs across all clusters.
     cwd = Path.cwd()
@@ -152,6 +127,41 @@ async def sync(
                 console.print(f"  {display_path}")
 
     return remotes
+
+
+async def pull_datasets_if_needed(here: str | None, config: CluvConfig, all_remotes: list[Remote]):
+    with set_context(console_lock, asyncio.Lock()):
+        if (
+            config.data_source
+            and ":" in config.data_source  # remote source: cluster:path (POSIX-only tool)
+            and (source_cluster := config.data_source.split(":", 1)[0]) != here
+        ):
+            _source_host, _, source_path = config.data_source.partition(":")
+            # Fetch the data from the source cluster and copy it to the local datasets_path.
+            source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
+            if not source_remote:
+                raise RuntimeError(
+                    f"[red]Unable to sync datasets, need a connection to the source cluster "
+                    f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
+                    f"Use `cluv login {source_cluster}` to create a reusable connection to the "
+                    f"source cluster."
+                )
+            local_datasets_path = get_datasets_path()
+            if not local_datasets_path:
+                raise RuntimeError(
+                    "`cluv.datasets_path` must be set in the Cluv config section of pyproject.toml to "
+                    "sync datasets between clusters."
+                )
+
+            await _pull_datasets(source_remote, source_path, local_datasets_path)
+        # else: data_source is a local path; data is already available locally, no pull needed
+        # Give back control of the console.
+
+
+async def run_git_push_if_needed():
+    if "GITHUB_ACTIONS" not in os.environ and not await _head_is_up_to_date():
+        # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
+        await run(("git", "push"), hide=False)
 
 
 # Groups of cluster hostnames that are actually distinct login nodes of the same physical

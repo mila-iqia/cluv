@@ -32,13 +32,13 @@ async def wait_for_running_job(
 ) -> tuple[Job, str] | None:
     """Watch the jobs with sacct until one of them starts (or completes).
     Returns the first job that starts with its state, or None if all jobs fail before any start.
+
+    NOTE: modifies `job_to_state` in-place.
     """
     first_running_job: Job | None = None
     wait_time = 1
-
-    to_query = list(job_to_state.keys())
-
-    while first_running_job is None and to_query:
+    to_query = None
+    while first_running_job is None and (to_query := list(job_to_state.keys())):
         # Initial sleep after sbatch to give time for job to appear in sacct.
         await asyncio.sleep(wait_time)
         wait_time = min(wait_time * 2, max_wait_time_seconds)

@@ -479,9 +479,14 @@ async def submit_and_keep_first(
                 job_to_state, cluster_to_remote, max_wait_time_seconds
             )
             live.update(make_table(), refresh=True)  # probably not entirely necessary.
-            if not wait_result:
-                console.log("All submitted jobs have failed! Exiting.")
-                return None
+
+            while not wait_result:
+                # If all tasks are done, but no job has started, then all jobs have failed.
+                if all(task.done() for task in cluster_tasks.values()):
+                    console.log("All submitted jobs have failed! Exiting.")
+                    return None
+                logger.info("Waiting for a job submission (sync + sbatch) to finish...")
+                await asyncio.sleep(1)
 
             first_running_job, first_state = wait_result
 

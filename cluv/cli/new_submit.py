@@ -410,10 +410,14 @@ async def new_sync(clusters: list[str] | None = None):
     await asyncio.gather(*[sync_per_cluster_part(remote) for remote in remotes])
 
 
-async def sync_common_part(cluster_remotes: list[Remote | None]): ...
+async def sync_common_part(cluster_remotes: list[Remote | None]):
+    raise NotImplementedError(
+        "TODO: Do the `git push`, `pull_datasets`, etc, the sync steps that are common to all the clusters."
+    )
 
 
-async def sync_per_cluster_part(cluster_remote: Remote | None): ...
+async def sync_per_cluster_part(cluster_remote: Remote | None):
+    raise NotImplementedError("TODO: Do the sync steps that are specific to each cluster.")
 
 
 async def get_cluster_to_remote(

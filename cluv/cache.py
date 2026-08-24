@@ -16,7 +16,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Job:
-    """A Job on a Slurm cluster. This object is returned by `cluv submit`."""
+    """A Job on a Slurm cluster. This object is returned by `cluv submit`.
+
+    TODO: Should `Job` be a subclass of `Submission`, but with a Job ID?
+    """
 
     job_id: int
     cluster: str

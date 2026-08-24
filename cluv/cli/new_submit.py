@@ -6,11 +6,16 @@ from cluv.cache import Job
 from cluv.cli import login
 from cluv.cli.submit import Submission, ensure_clean_git_state
 from cluv.cli.sync import get_active_remotes
+from cluv.config import get_cluv_config
 from cluv.remote import Remote
 from cluv.utils import console, current_cluster
 
 JobId = str
 JobState = str
+
+
+class JobSubmissionFailed(Exception):
+    """Raised when a job submission fails."""
 
 
 async def submit(
@@ -88,10 +93,6 @@ async def submit(
         await asyncio.sleep(1)
 
 
-class JobSubmissionFailed(Exception):
-    """Raised when a job submission fails."""
-
-
 async def submit_to_cluster(
     cluster: str,
     remote: Remote | None,
@@ -102,7 +103,7 @@ async def submit_to_cluster(
 
     Returns None if the submission failed.
     """
-    await sync_per_cluster_part([remote])
+    await sync_per_cluster_part(remote)
     for submission in submissions:
         jobs_state_table[submission] = (None, "SUBMITTING")
 
@@ -129,7 +130,6 @@ async def submit_to_cluster(
 
 def get_submissions(
     cluster: str,
-    *,
     job_script: Path | None,
     sbatch_args: list[str],
     program_args: list[str],
@@ -139,6 +139,9 @@ def get_submissions(
 
     Does *not* do the actual job submission with `sbatch`.
     """
+    job_resources_options = get_cluv_config().get_cluster_config(cluster).sbatch_args
+
+    # return [Submission() for option in job_resources_options]
 
 
 async def submit_job(submission: Submission) -> Job:

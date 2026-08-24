@@ -85,24 +85,21 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
 class Submission(NamedTuple):
     """One job to submit: on which cluster, over which connection, and with which sbatch flags."""
 
+    cluster: str
+
     remote: Remote | None
     """Remote used to run `sbatch`, or `None` to run it on the current cluster."""
 
     job_script: Path
 
-    sbatch_args: list[str]
+    sbatch_args: SbatchArgs
     """The sbatch flags from the config to use, i.e. one of the cluster's allocations."""
 
     program_args: list[str]
 
-    @property
-    def cluster(self) -> str:
-        """The cluster on which this job will be submitted."""
-        if self.remote:
-            return self.remote.hostname
-        this_cluster = current_cluster()
-        assert this_cluster
-        return this_cluster
+    sbatch_command: str
+
+    num_chunks: int | None
 
 
 async def submit(

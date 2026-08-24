@@ -9,13 +9,18 @@ import os
 import tomllib
 from dataclasses import field
 from pathlib import Path, PurePath, PurePosixPath
+from typing import Generic
 
 from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
+from typing_extensions import TypeVar
 
 from cluv.utils import current_cluster, find_pyproject
 
 logger = logging.getLogger(__name__)
+
+SbatchArgs = dict[str, str | int | float | bool]
+"""A set of sbatch flags, as a mapping from flag name to value."""
 
 
 @dataclass(frozen=True)
@@ -25,8 +30,13 @@ class PartialClusterConfig:
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
-    """Per-cluster sbatch flags, overriding the global `sbatch_args`."""
+    sbatch_args: SbatchArgs | list[SbatchArgs] = field(default_factory=dict)
+    """Per-cluster sbatch flags, overriding the global `sbatch_args`.
+
+    A list of flag sets can be used when you have access to more than one allocation on this
+    cluster (for example a `def-` and an `rrg-` account). `cluv submit <cluster>` then submits one
+    job per allocation and keeps the first one that starts, cancelling the others.
+    """
 
     results_path: str | None = None
     """Path to the results directory for a specific cluster."""
@@ -45,12 +55,12 @@ class PartialClusterConfig:
     project_dir: str | None = None
     """Path where the project should be cloned on this cluster."""
 
-    ignore: bool = False
-    """Whether to ignore this cluster when running commands on all clusters."""
+
+PathType = TypeVar("PathType", Path, PurePosixPath, default=PurePosixPath)
 
 
 @dataclass(frozen=True)
-class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
+class ClusterConfig(Generic[PathType]):
     """Per-cluster configuration options.
 
     The path fields in this class are by default 'pure' posix paths, to make it explicit that they
@@ -61,8 +71,11 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
     env: dict[str, str]
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    sbatch_args: dict[str, str | int | float | bool]
-    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
+    sbatch_args: list[SbatchArgs]
+    """Merged sbatch flags (global defaults overridden by per-cluster values).
+
+    There is one entry per allocation configured for this cluster, and always at least one.
+    """
 
     results_path: PathType
     """Path to the results directory for a specific cluster."""
@@ -80,9 +93,6 @@ class ClusterConfig[PathType: Path | PurePosixPath = PurePosixPath]:
 
     project_dir: PathType | None
     """Path where the project should be cloned on this cluster."""
-
-    ignore: bool
-    """Whether to ignore this cluster when running commands on all clusters."""
 
 
 @dataclass(frozen=True)
@@ -109,7 +119,7 @@ class CluvConfig(BaseModel):
     env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""
 
-    sbatch_args: dict[str, str | int | float | bool] = {}
+    sbatch_args: SbatchArgs = {}
     """Global sbatch flags applied on all clusters.
 
     These are passed directly to `sbatch` and complement `env` (which sets `SBATCH_*` env vars).
@@ -123,7 +133,13 @@ class CluvConfig(BaseModel):
     """Name of the symlink created in the project directory pointing to `results_path`."""
 
     data_source: str | None = None
-    """`hostname:/path` of where to get the data from."""
+    """`hostname:/path` or `/local/path` of where to get the data from.
+
+    When set to `hostname:/path`, Cluv pulls the dataset from the given remote cluster before
+    pushing it to all target clusters.
+    When set to a plain path (no `hostname:` prefix), the data is read directly from that local
+    path and pushed to each target cluster without a prior pull step.
+    """
 
     datasets_path: str | None = None
     """Path to a dataset directory, for example, `'$SCRATCH/my_dataset'`
@@ -151,7 +167,7 @@ class CluvConfig(BaseModel):
 
     @property
     def clusters_names(self) -> list[str]:
-        return [name for name, config in self.clusters.items() if not config.ignore]
+        return list(self.clusters.keys())
 
     def get_cluster_config(self, cluster: str) -> ClusterConfig:
         """Returns the cluster config for a specific cluster.
@@ -167,14 +183,19 @@ class CluvConfig(BaseModel):
         datasets_path = cluster_config.datasets_path or self.datasets_path
         job_script_path = cluster_config.job_script_path or self.job_script_path
         project_dir = cluster_config.project_dir or self.project_dir
+        # One set of sbatch args per allocation on this cluster (a single one in most cases).
+        sbatch_args_list = cluster_config.sbatch_args
+        if isinstance(sbatch_args_list, dict):
+            sbatch_args_list = [sbatch_args_list]
+
         return ClusterConfig(
             env=self.env | cluster_config.env,
-            sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
+            sbatch_args=[self.sbatch_args | sbatch_args for sbatch_args in sbatch_args_list]
+            or [dict(self.sbatch_args)],
             results_path=PurePosixPath(results_path),
             datasets_path=PurePosixPath(datasets_path) if datasets_path else None,
             job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
             project_dir=PurePosixPath(project_dir) if project_dir else None,
-            ignore=cluster_config.ignore,
         )
 
 
@@ -200,13 +221,11 @@ def set_local_env_vars(env_vars: dict[str, str]) -> None:
             value = new_value
         if key in os.environ:
             logger.warning(
-                "Overwriting local env var %s=%s with value from [tool.cluv.local.env] %s",
-                key,
-                os.environ[key],
-                value,
+                f"Overwriting local env var {key}={os.environ[key]} "
+                rf"with value from \[tool.cluv.local.env] {value}"
             )
         else:
-            logger.info("Setting local env var %s=%s from [tool.cluv.local.env]", key, value)
+            logger.info(rf"Setting local env var {key}={value} from \[tool.cluv.local.env]")
         os.environ[key] = value
 
 

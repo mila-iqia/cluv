@@ -18,7 +18,7 @@ import pytest
 import pytest_asyncio
 
 from cluv.cache import Job
-from cluv.cli.init import DEFAULT_RESULTS_PATH, init
+from cluv.cli.init import init
 from cluv.cli.login import login
 from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
@@ -83,7 +83,7 @@ async def test_login(remote: Remote):
 
 @pytest_asyncio.fixture(scope="session")
 async def cluster_status(cluster: str) -> ClusterStatus:
-    return await get_cluster_status(cluster)
+    return await get_cluster_status(cluster, {})
 
 
 @pytest.mark.slow
@@ -103,7 +103,8 @@ async def test_status_online(cluster_status: ClusterStatus, cluster: str):
 async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
     if cluster not in STATUS_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    assert cluster_status.gpu_total > 0, "Expected cluster to report GPU nodes"
+    total_gpus = sum(total for _, total in cluster_status.gpu_stats.values())
+    assert total_gpus > 0, "Expected cluster to report GPU nodes"
 
 
 @pytest.mark.slow
@@ -113,21 +114,8 @@ async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
 async def test_status_gpu_model(cluster_status: ClusterStatus, cluster: str):
     if cluster not in STATUS_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    assert cluster_status.gpu_model != "?", f"GPU model not detected: {cluster_status.gpu_model!r}"
-
-
-@pytest.mark.slow
-@pytest.mark.timeout(30)
-@pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
-@pytest.mark.asyncio
-async def test_status_jobs(cluster_status: ClusterStatus, cluster: str):
-    if cluster not in STATUS_SUPPORTED_CLUSTERS:
-        pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    # Job counts must be non-negative integers (tamia is a busy cluster)
-    assert cluster_status.jobs.running >= 0
-    assert cluster_status.jobs.pending >= 0
-    assert cluster_status.jobs.my_running >= 0
-    assert cluster_status.jobs.my_pending >= 0
+    assert cluster_status.gpu_stats, "GPU model not detected"
+    assert "?" not in cluster_status.gpu_stats
 
 
 @pytest.mark.slow
@@ -159,7 +147,7 @@ TEST_SUBMIT_TIMEOUT_SECONDS = 180
 )
 @pytest.mark.slow
 @pytest.mark.timeout(TEST_SUBMIT_TIMEOUT_SECONDS)
-async def test_submit(remote: Remote, fake_scratch: Path):
+async def test_submit(remote: Remote):
     """End-to-end: actually submit scripts/job.sh to a slurm cluster via sbatch.
 
     Requires an active SSH connection to the cluster and a clean git tree.
@@ -314,7 +302,7 @@ def test_init(
 
     generated_config = load_cluv_config(project_dir / "pyproject.toml")
 
-    assert generated_config.results_path == DEFAULT_RESULTS_PATH
+    assert generated_config.results_path == f"$SCRATCH/logs/{project_dir.name}"
     assert (project_dir / "scripts").is_dir()
     assert (project_dir / "scripts" / "job.sh").is_file()
 
@@ -351,7 +339,7 @@ def test_init_at_path(fake_home: Path) -> None:
     init(project_path)
 
     generated_config = load_cluv_config(project_path / "pyproject.toml")
-    assert generated_config.results_path == DEFAULT_RESULTS_PATH
+    assert generated_config.results_path == f"$SCRATCH/logs/{project_path.name}"
     assert (project_path / "scripts").is_dir()
     assert (project_path / "scripts" / "job.sh").is_file()
     assert (project_path / "scripts" / "safe_job.sh").is_file()

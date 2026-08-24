@@ -11,7 +11,6 @@ import pytest
 from cluv.slurm import (
     parse_disk_quota,
     parse_diskusage_report,
-    parse_partition_stats,
     parse_savail,
     parse_sinfo_nodes,
     parse_slurm_time,
@@ -35,63 +34,6 @@ rtx8000              130 / 376
 v100                  5 / 56
 """
 
-TAMIA_PARTITION_STATS = """\
-
-Node type |                     Max walltime
-          |     3 hr   |   12 hr   |   24 hr   |   72 hr   |   168 hr  |
-----------|-------------------------------------------------------------
-       Number of Queued Jobs by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     0:0    |    0:1    |    0:0    |    0:0    |    0:0    |
-GPU       |     8:-    |    9:-    |    2:-    |    0:-    |    0:-    |
-----------|-------------------------------------------------------------
-      Number of Running Jobs by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     0:0    |    0:2    |    0:0    |    0:0    |    0:0    |
-GPU       |     8:-    |   14:-    |   35:-    |    0:-    |    0:-    |
-----------|-------------------------------------------------------------
-        Number of Idle nodes by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     2:2    |    0:0    |    0:0    |    0:0    |    0:0    |
-GPU       |     1:-    |    1:-    |    1:-    |    0:-    |    0:-    |
-----------|-------------------------------------------------------------
-       Total Number of nodes by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     8:8    |    6:6    |    4:4    |    0:0    |    0:0    |
-GPU       |    65:-    |   59:-    |   49:-    |    0:-    |    0:-    |
-----------|-------------------------------------------------------------
-"""
-
-# Example with a Large Mem row (from Alliance wiki docs)
-WIKI_PARTITION_STATS = """\
-Node type |                     Max walltime
-          |     3 hr   |   12 hr   |   24 hr   |   72 hr   |   168 hr  |
-----------|-------------------------------------------------------------
-       Number of Queued Jobs by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |    12:170  |   69:7066 |   70:7335 |  386:961  |   59:509  |
-Large Mem |     0:0    |    0:0    |    0:0    |    0:15   |    0:1    |
-GPU       |     5:14   |    3:8    |   21:1    |  177:110  |    1:5    |
-----------|-------------------------------------------------------------
-      Number of Running Jobs by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |     8:32   |   10:854  |   84:10   |   15:65   |    0:674  |
-Large Mem |     0:0    |    0:0    |    0:0    |    0:1    |    0:0    |
-GPU       |     5:0    |    2:13   |   47:20   |   19:18   |    0:3    |
-----------|-------------------------------------------------------------
-        Number of Idle nodes by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |    16:9    |   15:8    |   15:8    |    7:0    |    2:0    |
-Large Mem |     3:1    |    3:1    |    0:0    |    0:0    |    0:0    |
-GPU       |     0:0    |    0:0    |    0:0    |    0:0    |    0:0    |
-----------|-------------------------------------------------------------
-       Total Number of nodes by partition Type (by node:by core)
-----------|-------------------------------------------------------------
-Regular   |   871:431  |  851:411  |  821:391  |  636:276  |  281:164  |
-Large Mem |    27:12   |   27:12   |   24:11   |   20:3    |    4:3    |
-GPU       |   156:78   |  156:78   |  144:72   |  104:52   |   13:12   |
-"""
-
 TAMIA_DISKUSAGE = """\
 
                             Description                Space         # of files
@@ -103,73 +45,6 @@ On some clusters, a break down per user may be available by adding the option '-
 
 
 # ---------------------------------------------------------------------------
-# parse_partition_stats
-# ---------------------------------------------------------------------------
-
-
-class TestParsePartitionStats:
-    def test_tamia_running_jobs(self):
-        result = parse_partition_stats(TAMIA_PARTITION_STATS)
-        # GPU running: 8 + 14 + 35 + 0 + 0 = 57
-        assert result["jobs_running"] == 57
-
-    def test_tamia_pending_jobs(self):
-        result = parse_partition_stats(TAMIA_PARTITION_STATS)
-        # GPU queued: 8 + 9 + 2 + 0 + 0 = 19
-        assert result["jobs_pending"] == 19
-
-    def test_tamia_idle_nodes(self):
-        result = parse_partition_stats(TAMIA_PARTITION_STATS)
-        # GPU idle: max(1, 1, 1, 0, 0) = 1 (same physical node in multiple partitions)
-        assert result["gpu_idle_nodes"] == 1
-
-    def test_tamia_total_nodes(self):
-        result = parse_partition_stats(TAMIA_PARTITION_STATS)
-        # GPU total: max(65, 59, 49, 0, 0) = 65
-        assert result["gpu_total_nodes"] == 65
-
-    def test_wiki_running_jobs(self):
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU running: 5+2+47+19+0 = 73
-        assert result["jobs_running"] == 73
-
-    def test_wiki_pending_jobs(self):
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU queued: 5+3+21+177+1 = 207
-        assert result["jobs_pending"] == 207
-
-    def test_wiki_idle_nodes(self):
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU idle: max(0,0,0,0,0) = 0
-        assert result["gpu_idle_nodes"] == 0
-
-    def test_wiki_total_nodes(self):
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        # GPU total: max(156,156,144,104,13) = 156
-        assert result["gpu_total_nodes"] == 156
-
-    def test_large_mem_row_ignored(self):
-        # Large Mem row must not affect GPU counts
-        result = parse_partition_stats(WIKI_PARTITION_STATS)
-        assert result["gpu_total_nodes"] == 156  # not 27
-
-    def test_empty_output(self):
-        result = parse_partition_stats("")
-        assert result == {
-            "jobs_running": 0,
-            "jobs_pending": 0,
-            "gpu_idle_nodes": 0,
-            "gpu_total_nodes": 0,
-        }
-
-    def test_no_gpu_row(self):
-        no_gpu = TAMIA_PARTITION_STATS.replace("GPU", "NOGPU")
-        result = parse_partition_stats(no_gpu)
-        assert result["jobs_running"] == 0
-        assert result["gpu_total_nodes"] == 0
-
-
-# ---------------------------------------------------------------------------
 # parse_sinfo_nodes
 # ---------------------------------------------------------------------------
 
@@ -177,10 +52,8 @@ class TestParsePartitionStats:
 class TestParseSinfoNodes:
     def test_all_alloc(self):
         output = "node01 alloc gpu:h100:4(S:0-1)\nnode02 alloc gpu:h100:4(S:0-1)\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 0
-        assert total == 8
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert result == {"H100": (0, 8)}
 
     def test_mixed_states(self):
         output = (
@@ -188,80 +61,70 @@ class TestParseSinfoNodes:
             "node02 alloc gpu:h200:8(S:0-1)\n"
             "node03 mix   gpu:h100:4(S:0-1)\n"
         )
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 4  # only the idle node
-        assert total == 4 + 8 + 4  # all three nodes
-        assert models == ["H100", "H200"]
+        result = parse_sinfo_nodes(output)
+        assert result == {"H100": (4, 8), "H200": (0, 8)}
 
     def test_idle_tilde_state(self):
         # sinfo sometimes reports "idle~" for draining idle nodes
         output = "node01 idle~ gpu:a100:8\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 8
-        assert total == 8
+        result = parse_sinfo_nodes(output)
+        assert result == {"A100": (8, 8)}
 
     def test_multiple_models_sorted(self):
         output = "node01 idle gpu:v100:2\nnode02 idle gpu:a100:4\nnode03 idle gpu:h100:8\n"
-        _, _, models = parse_sinfo_nodes(output)
-        assert models == ["A100", "H100", "V100"]
+        result = parse_sinfo_nodes(output)
+        assert list(result.keys()) == ["A100", "H100", "V100"]
 
     def test_gres_without_socket_spec(self):
         # Some nodes report GRES without the (S:...) suffix
         output = "node01 idle gpu:h100:4\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 4
-        assert total == 4
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert result == {"H100": (4, 4)}
 
     def test_empty_output(self):
-        idle, total, models = parse_sinfo_nodes("")
-        assert idle == 0
-        assert total == 0
-        assert models == []
+        assert parse_sinfo_nodes("") == {}
 
     def test_no_gpu_gres(self):
         # Lines without gpu: in GRES should be skipped
         output = "node01 idle cpu:32\nnode02 idle (null)\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert idle == 0
-        assert total == 0
-        assert models == []
+        assert parse_sinfo_nodes(output) == {}
 
     def test_nvidia_prefix_normalized(self):
         # Full GRES name with nvidia_ prefix → model name is just the base
         output = "node01 idle gpu:nvidia_a100:8\n"
-        idle, total, models = parse_sinfo_nodes(output)
-        assert models == ["A100"]
-        assert total == 8
+        result = parse_sinfo_nodes(output)
+        assert result == {"A100": (8, 8)}
 
-    def test_mig_node_physical_gpu_count(self):
-        # Rorqual-style MIG node: 3 MIG profiles from 4 physical H100s
-        # sum(g_val * count) = 3*4 + 2*4 + 1*8 = 28; 28 // 7 = 4 physical GPUs
+    def test_mig_node_reports_each_profile_as_its_own_type(self):
+        # Rorqual-style MIG node: each MIG profile is its own GPU type, counted
+        # in slices (not reconstructed into a physical GPU count).
         output = (
             "rg12501 idle "
             "gpu:nvidia_h100_80gb_hbm3_3g.40gb:4(S:0-3),"
             "gpu:nvidia_h100_80gb_hbm3_2g.20gb:4(S:0-3),"
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
-        idle, total, models = parse_sinfo_nodes(output)
-        assert total == 4, f"Expected 4 physical GPUs, got {total}"
-        assert idle == 4
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert result == {
+            "H100-1g.10gb": (8, 8),
+            "H100-2g.20gb": (4, 4),
+            "H100-3g.40gb": (4, 4),
+        }
 
     def test_mig_model_normalization(self):
-        # MIG GRES name should normalize to the base model (H100)
+        # MIG GRES names should normalize to "<base>-<profile>", one type per profile
         output = (
             "rg01 alloc "
             "gpu:nvidia_h100_80gb_hbm3_3g.40gb:4(S:0-3),"
             "gpu:nvidia_h100_80gb_hbm3_2g.20gb:4(S:0-3),"
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
-        _, _, models = parse_sinfo_nodes(output)
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert list(result.keys()) == ["H100-1g.10gb", "H100-2g.20gb", "H100-3g.40gb"]
 
     def test_mixed_regular_and_mig_nodes(self):
-        # Mix of regular H100 nodes and MIG nodes (rorqual-like)
-        # Regular node: 4 GPUs; MIG node: 4 physical GPUs
+        # Mix of regular H100 nodes and MIG nodes (rorqual-like): the regular
+        # node counts as "H100", MIG slices count as their own profile types.
         output = (
             "rg00 idle gpu:h100:4(S:0-3)\n"
             "rg01 idle "
@@ -269,10 +132,13 @@ class TestParseSinfoNodes:
             "gpu:nvidia_h100_80gb_hbm3_2g.20gb:4(S:0-3),"
             "gpu:nvidia_h100_80gb_hbm3_1g.10gb:8(S:0-3)\n"
         )
-        idle, total, models = parse_sinfo_nodes(output)
-        assert total == 8  # 4 + 4
-        assert idle == 8
-        assert models == ["H100"]
+        result = parse_sinfo_nodes(output)
+        assert result == {
+            "H100": (4, 4),
+            "H100-1g.10gb": (8, 8),
+            "H100-2g.20gb": (4, 4),
+            "H100-3g.40gb": (4, 4),
+        }
 
     def test_deduplication_via_sort_u(self):
         # Same node appearing multiple times (once per Slurm partition) should
@@ -286,9 +152,8 @@ class TestParseSinfoNodes:
         # contract that sort -u must be done upstream (in _REMOTE_SCRIPT).
         # Here we just verify the format is parsed correctly for one entry.
         output_deduped = "node01 idle gpu:h100:4\n"
-        idle, total, models = parse_sinfo_nodes(output_deduped)
-        assert total == 4
-        assert idle == 4
+        result = parse_sinfo_nodes(output_deduped)
+        assert result == {"H100": (4, 4)}
 
 
 # ---------------------------------------------------------------------------
@@ -298,37 +163,40 @@ class TestParseSinfoNodes:
 
 class TestParseSavail:
     def test_total_gpus(self):
-        _, total, _ = parse_savail(MILA_SAVAIL)
+        result = parse_savail(MILA_SAVAIL)
         # 32+136+8+16+352+376+56 = 976
-        assert total == 976
+        assert sum(total for _, total in result.values()) == 976
 
     def test_idle_gpus(self):
-        idle, _, _ = parse_savail(MILA_SAVAIL)
+        result = parse_savail(MILA_SAVAIL)
         # 15+13+0+0+10+130+5 = 173
-        assert idle == 173
+        assert sum(idle for idle, _ in result.values()) == 173
 
     def test_models_sorted(self):
-        _, _, models = parse_savail(MILA_SAVAIL)
-        assert models == ["A100", "A100L", "A6000", "H100", "L40S", "RTX8000", "V100"]
+        result = parse_savail(MILA_SAVAIL)
+        assert list(result.keys()) == [
+            "A100",
+            "A100L",
+            "A6000",
+            "H100",
+            "L40S",
+            "RTX8000",
+            "V100",
+        ]
 
     def test_header_and_separator_skipped(self):
         # The "GPU  Avail / Total" header and "===" separator must not be parsed as data
-        _, _, models = parse_savail(MILA_SAVAIL)
-        assert "GPU" not in models
-        assert "AVAIL" not in models
+        result = parse_savail(MILA_SAVAIL)
+        assert "GPU" not in result
+        assert "AVAIL" not in result
 
     def test_zero_available_still_counts_total(self):
         output = "a6000   0 / 8\nh100    0 / 16\n"
-        idle, total, models = parse_savail(output)
-        assert idle == 0
-        assert total == 24
-        assert models == ["A6000", "H100"]
+        result = parse_savail(output)
+        assert result == {"A6000": (0, 8), "H100": (0, 16)}
 
     def test_empty_output(self):
-        idle, total, models = parse_savail("")
-        assert idle == 0
-        assert total == 0
-        assert models == []
+        assert parse_savail("") == {}
 
 
 class TestParseDiskQuota:
@@ -415,10 +283,16 @@ class TestParseDiskusageReport:
 
 
 class TestParseTime:
-    def test_parse_slurm_time(self) -> None:
-        td = parse_slurm_time("12:28:45")
-        assert td == timedelta(hours=12, minutes=28, seconds=45)
-
-    def test_parse_slurm_time_with_day(self) -> None:
-        td = parse_slurm_time("07-12:28:45")
-        assert td == timedelta(days=7, hours=12, minutes=28, seconds=45)
+    @pytest.mark.parametrize(
+        ("input", "expected"),
+        [
+            ("12:28:45", timedelta(hours=12, minutes=28, seconds=45)),
+            ("07-12:28:45", timedelta(days=7, hours=12, minutes=28, seconds=45)),
+            ("07-12", timedelta(days=7, hours=12)),
+            ("07-12:28", timedelta(days=7, hours=12, minutes=28)),
+            ("28:12", timedelta(minutes=28, seconds=12)),
+            ("28", timedelta(minutes=28)),
+        ],
+    )
+    def test_parse_slurm_time(self, input: str, expected: timedelta) -> None:
+        assert parse_slurm_time(input) == expected

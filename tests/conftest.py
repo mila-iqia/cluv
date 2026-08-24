@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
+import cluv.cli.clean
+import cluv.cli.submit
 import cluv.config
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars
@@ -41,7 +43,7 @@ def reset_cluv_config():
 
 @pytest.fixture(autouse=IN_SELF_HOSTED_GITHUB_CI)
 def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
-    monkeypatch: pytest.MonkeyPatch, reset_cluv_config: None
+    monkeypatch: pytest.MonkeyPatch, reset_cluv_config: None, request: pytest.FixtureRequest
 ):
     """The self-hosted runner is running from ~/action-runners/.../_work/cluv/cluv.
 
@@ -52,6 +54,10 @@ def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
     As a consequence of this, the ~/repos/cluv path on the clusters might be changed by the test runners.
     This is kind-of to be expected though, and is not different than doing a `cluv sync` ourselves.
     """
+
+    # Only do this mocking if the test that is going to be run is marked with @pytest.mark.integration.
+    if request.node.get_closest_marker("integration") is None:
+        return  # don't patch get_cluv_config to not interfere with unit tests.
 
     def mock_get_cluv_config() -> cluv.config.CluvConfig:
         config = get_cluv_config()
@@ -67,17 +73,20 @@ def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
         return config
 
     monkeypatch.setattr(cluv.config, get_cluv_config.__name__, mock_get_cluv_config)
+    monkeypatch.setattr(cluv.cli.submit, get_cluv_config.__name__, mock_get_cluv_config)
+    monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, mock_get_cluv_config)
 
 
 @pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)
 async def cluster(request: pytest.FixtureRequest) -> str:
     """Fixture that gives the hostname of the Slurm cluster to run tests with.
 
-    - If the SLURM_CLUSTER environment variable is not set, all tests that depend on this fixture
-      will be skipped.
-    - If it is set and there is not an active SSH connection to that cluster, this fixture will
-      fail, causing all tests that use it to fail, since they require a live connection to a
-      cluster.
+    - In self-hosted CI, only the `REQUIRED_CLUSTERS` are ever tested, and this fixture fails
+      (rather than skips) if one of them isn't connected. Other clusters are skipped outright,
+      without even checking connectivity, so that a stray SSH connection to a slow cluster
+      (e.g. a DRAC cluster like Narval) can't make CI opportunistically (and slowly) test it.
+    - On a dev machine, this fixture opportunistically runs tests against whichever clusters
+      have an active SSH connection, and skips the rest.
 
     NOTE: This fixture can also be (indirectly) parametrized by tests that want to run with a remote
     connected to only some clusters in particular. For example:
@@ -94,17 +103,20 @@ async def cluster(request: pytest.FixtureRequest) -> str:
             "No cluster specified. Set the SLURM_CLUSTER environment variable to a "
             "cluster with an active SSH connection to run these tests."
         )
-    existing_ssh_connection = await control_socket_is_running(cluster)
-    if existing_ssh_connection:
-        assert isinstance(cluster, str)
-        return cluster
-    if cluster not in REQUIRED_CLUSTERS:
-        pytest.skip(
-            f"No active SSH connection to {cluster}, but it is not necessary to test against it."
-        )
+    assert isinstance(cluster, str)
+
     if IN_SELF_HOSTED_GITHUB_CI:
-        pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
-    # On a dev machine. Just skip and display some instructions.
+        # Only ever test the required clusters in CI: don't opportunistically pick up
+        # whatever else happens to have a live SSH connection on the runner.
+        if cluster not in REQUIRED_CLUSTERS:
+            pytest.skip(f"{cluster} is not a required cluster; skipping it in CI.")
+        if not await control_socket_is_running(cluster):
+            pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
+        return cluster
+
+    # On a dev machine: opportunistically test against whatever we're connected to.
+    if await control_socket_is_running(cluster):
+        return cluster
     pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
 
 

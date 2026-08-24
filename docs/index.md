@@ -1,22 +1,36 @@
 # cluv
 
-This is a quick overview. For more information, check out the [introduction](guides/introduction.md).
+A powerful and lightweight CLI tool to sync and submit UV-based Python projects across HPC clusters.
 
+This is a quick overview. For more information, check out the [introduction](guides/introduction.md).
 
 ## Installation
 
-1. (optional) Install UV: https://docs.astral.sh/uv/getting-started/installation/
+Cluv can be installed on a local machine or on a remote cluster.
 
-2. Install this package:
+Add the package to your project with `uv add`:
 
 ```console
-uv tool install git+https://github.com/mila-iqia/cluv
+uv add cluster-uv
 ```
 
-3. Navigate to an existing project, and add the cluv config to your `pyproject.toml`:
+Install as a command-line tool in an isolated environment:
 
 ```console
-cluv init
+uv tool install cluster-uv
+```
+
+If you want the bleeding edge version from GitHub, use:
+
+```console
+uv add git+https://github.com/mila-iqia/cluv
+```
+
+### Update
+Run this once in a while to get the latest features and bugfixes.
+
+```console
+uv tool update cluster-uv
 ```
 
 ## Usage
@@ -47,16 +61,16 @@ cluv sync
 ```
 
 Need to set up dataset replication with `cluv sync`? See the
-[dataset sync guide](guides/syncing-datasets.md).
+["Syncing datasets"](guides/syncing-datasets.md) guide.
 
 
 ### Launch a Hydra sweep on a remote cluster
 
 ```console
-python main.py -m launcher=cluv lr=0.01,0.001 +seed=1,2,3
+python main.py -m launcher=cluv lr=0.01,0.001 seed=1,2,3
 ```
 
-See the [Hydra launcher guide](guides/hydra-launcher.md) for setup and usage.
+See the [Hydra launcher](hydra-launcher.md) page for setup and usage.
 
 
 ### Sync your project on a specific cluster
@@ -64,10 +78,20 @@ See the [Hydra launcher guide](guides/hydra-launcher.md) for setup and usage.
 cluv sync rorqual
 ```
 
+### Clean up old run results from the clusters
+```console
+cluv clean
+```
+
+See the ["Cleaning runs"](guides/cleaning-runs.md) guide for details on how this decides what's safe to delete.
+
 ### Submit a job to a specific cluster
 ```console
 cluv submit rorqual scripts/job.sh --time=00:10:00 -- python main.py
 ```
+
+See the ["Writing a job script"](guides/submit/job-scripts.md) guide for what `job.sh` should contain, and
+["Configuring job submission"](guides/submit/config.md) for how to use the config to submit jobs.
 
 ### Run a command in the synced project a specific cluster
 ```console
@@ -77,4 +101,47 @@ cluv run mila -- ls logs
 ### Check the status of your clusters and jobs
 ```console
 cluv status
+```
+
+### Run a raw shell command on every connected cluster
+```console
+cluv sh -- squeue --me
+```
+
+### How the commands are used together
+
+``` mermaid
+    graph LR
+        init(<b>cluv init</b> <br> Init project)
+        sync(<b>cluv sync</b> <br> Sync project on clusters)
+        login(<b>cluv login</b> <br> Connect to clusters)
+        submit(<b>cluv submit</b> <br> Submit jobs to clusters)
+        status(<b>cluv status</b> <br> See clusters and jobs status)
+        disable(<b>cluv disable</b> <br> Disable access to clusters)
+        enable(<b>cluv enable</b> <br> Enable access to clusters)
+        clean(<b>cluv clean</b> <br> Clean old logs on clusters)
+        run(<b>cluv run</b> <br> Run commands on clusters)
+        sh(<b>cluv sh</b> <br> Run raw shell commands on clusters)
+
+        init ===> login
+        init ==> disable
+        init ==> enable
+
+        login ===> sync
+        login ===> submit
+        login ===> status
+        login ===> clean
+        login ===> run
+        login ===> sh
+
+        click init "commands/#cluv-init"
+        click login "commands/#cluv-login"
+        click sync "commands/#cluv-sync"
+        click submit "commands/#cluv-submit"
+        click status "commands/#cluv-status"
+        click disable "commands/#cluv-disable"
+        click enable "commands/#cluv-enable"
+        click clean "commands/#cluv-clean"
+        click run "commands/#cluv-run"
+        click sh "commands/#cluv-sh"
 ```

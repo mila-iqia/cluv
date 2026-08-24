@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import dataclasses
 import functools
 import os
 import re
 import subprocess
+import warnings
 from dataclasses import dataclass
 from pathlib import Path, PurePath
 
@@ -75,27 +78,14 @@ class RunInfo:
         return cluv.config.get_cluv_config().get_cluster_config(self.cluster)
 
 
-@dataclass(frozen=True)
+@dataclass()
 class JobInfo:
     """Information about a job, which contains one or more tasks/"runs"."""
 
     cluster: str
-    job_id: int
-    array_job_id: int | None
+    job_id: str
     tasks: list[RunInfo]
-
-    @property
-    def state(self):
-        from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-
-        # Note: This doesn't call sacct too often, there is a caching mechanism in submitit.
-        return RemoteSlurmJob(
-            self.cluster,
-            folder="",
-            job_id=str(self.job_id),
-            tasks=list(range(len(self.tasks))),
-            remote_dir_sync=None,  # type: ignore
-        ).state
+    n_chunks: int | None = None
 
 
 def get_results_path() -> Path:
@@ -125,6 +115,17 @@ def current_run_info() -> RunInfo | None:
     """
     if not SLURM_JOB_ID:
         return None  # not in a Slurm job.
+    if SLURM_JOB_ID and not SLURM_PROCID:
+        # Inside a job, but we don't have all the Slurm environment variables set.
+        # This happens when using `python main.py -m launcher=cluv` in the Hydra example.
+        warnings.warn(
+            RuntimeWarning(
+                f"{current_run_info.__name__}() was called (probably by the omegaconf resolver) "
+                f"while inside a slurm job, but $SLURM_PROCID is not set. Returning None. "
+                f"(This happens for example when using the VsCode integrated terminal to submit jobs.)"
+            )
+        )
+        return None
     cluster = current_cluster()
     run_id = current_run_id()
     # IDEA: maybe load the cluv config and set the checkpoint_dir
@@ -166,11 +167,27 @@ def _in_job_chunking() -> bool:
 
 def current_run_id():
     cluster = current_cluster()
+    if cluster is None:
+        raise RuntimeError(
+            "Could not determine the current cluster. Are you running this on a Slurm cluster?\n"
+            "(This can also happen if you are running the Hydra example and forgot to pass the "
+            "`-m` / `--multirun` flag to Hydra to enable the launcher.)"
+        )
     doing_job_packing = "SLURM_NTASKS_PER_GPU" in os.environ
     doing_job_chunking = _in_job_chunking()
+    if "SLURM_JOB_ID" not in os.environ:
+        raise RuntimeError("SLURM_PROCID is not set. Are you running inside a Slurm job? ")
+    job_id = int(os.environ["SLURM_JOB_ID"])
+
+    if "SLURM_PROCID" not in os.environ:
+        raise RuntimeError(
+            "Inside a Slurm job, but $SLURM_PROCID is not set! "
+            "If you are running this from the VsCode interactive terminal "
+            "(which doesn't have all the SLURM environment variables by default) "
+            "make sure to use `srun` to launch your command.\n"
+        )
     task_index = int(os.environ["SLURM_PROCID"])
     array_job_id = os.environ.get("SLURM_ARRAY_JOB_ID")  # not set when not in a job array.
-    job_id = int(os.environ["SLURM_JOB_ID"])
     assert cluster is not None
     return get_run_id(
         cluster=cluster,
@@ -186,7 +203,7 @@ def get_run_id(
     cluster: str,
     job_id: int | str,
     task_index: int | str = 0,
-    array_job_id: str | None = None,
+    array_job_id: int | str | None = None,
     doing_job_packing: bool = False,
     doing_job_chunking: bool = False,
 ) -> str:

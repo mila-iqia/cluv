@@ -23,11 +23,12 @@ from milatools.utils.parallel_progress import (
     run_async_tasks_with_progress_bar,
 )
 
-from cluv.cache import ProjectStateOnCluster, read_cache, write_cache
+from cluv.cache import ProjectStateOnCluster, get_disabled_clusters, read_cache, write_cache
+from cluv.cli.disable import print_disabled_clusters
 from cluv.cli.login import get_remote_without_2fa_prompt, login
 from cluv.config import CluvConfig, find_pyproject, get_cluv_config, load_cluv_config
 from cluv.job import get_datasets_path
-from cluv.remote import Remote, get_ssh_options_for_host, run
+from cluv.remote import Remote, list_remote_run_dirs, run
 from cluv.utils import console, console_lock, current_cluster
 
 milatools.cli.console = console
@@ -71,27 +72,34 @@ async def sync(
     here = current_cluster()
     config = get_cluv_config()
 
+    # Show disabled clusters early so the user is aware.
+    disabled = get_disabled_clusters()
+
     if clusters:
         if here in clusters:
             clusters.remove(here)
-        remotes_to_sync = await login(clusters)
-        # Keep a list of the active remotes, even if the user passed a clusters to sync with,
-        # because we may need a remote to the "data source" cluster later when syncing datasets.
-        active_remotes = await get_active_remotes()
+        # Filter out explicitly-requested clusters that are disabled.
+        enabled_clusters = [c for c in clusters if c not in disabled]
+        # Pass the already-fetched disabled dict so login does not print the warning a second time.
+        remotes = await login(enabled_clusters, disabled=disabled) if enabled_clusters else []
+        # Keep track of *all* active remotes too, even ones not requested for this sync, because
+        # we may need a remote to the "data source" cluster later when syncing datasets. Fetched
+        # *after* login() above, so it also sees a connection that login() just created (fixes
+        # #114: a snapshot taken before login() would miss a cluster connected for the first time
+        # by this very command).
+        all_remotes = await get_active_remotes()
     else:
         # When no cluster is passed, sync with clusters for which we have an active SSH connection.
-        active_remotes = await get_active_remotes()
-        remotes_to_sync = active_remotes  # only the active remotes.
-        clusters = [remote.hostname for remote in remotes_to_sync]
-
-    active_remotes = {remote.hostname: remote for remote in active_remotes}
-    remotes_to_sync = {remote.hostname: remote for remote in remotes_to_sync}
-
-    if not remotes_to_sync:
-        raise RuntimeError(
-            "[red]Not currently connected to any Slurm cluster.[/red] "
-            "Use `cluv login` to login and create reusable connections."
-        )
+        all_remotes = await get_active_remotes()
+        if not all_remotes:
+            print_disabled_clusters(disabled)
+            raise RuntimeError(
+                "[red]Not currently connected to any Slurm cluster.[/red] "
+                "Use `cluv login` to login and create reusable connections."
+            )
+        print_disabled_clusters(disabled)
+        remotes = all_remotes.copy()
+        clusters = [remote.hostname for remote in all_remotes]
 
     if "GITHUB_ACTIONS" not in os.environ and not await _head_is_up_to_date():
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
@@ -101,25 +109,24 @@ async def sync(
     # TODO: Add an --ignore flag to ignore some clusters?
     console.log(f"[green]Synchronizing with the following clusters:[/green] {clusters}")
 
-    tasks: list[AsyncTaskFn] = []
-    task_descriptions: list[str] = []
-    for hostname, remote in remotes_to_sync.items():
-        tasks.append(functools.partial(sync_task_function, remote=remote))
-        task_descriptions.append(f"{here or 'local'} -> {hostname}")
+    remotes_to_sync, tasks, task_descriptions = _build_sync_tasks(remotes, here)
 
     token = console_lock.set(asyncio.Lock())
     if (
         sync_datasets
-        and config.data_source  # cluster:path
+        and config.data_source
+        and ":" in config.data_source  # remote source: cluster:path (POSIX-only tool)
         and (source_cluster := config.data_source.split(":", 1)[0]) != here
     ):
         source_cluster, _, source_path = config.data_source.partition(":")
-        # Fetch the data from the source cluster and copy it to the local datasets_path.
-        source_remote = active_remotes.get(source_cluster)
+        # Fetch the data from the source cluster and copy it to the local datasets_path. Look
+        # this up among *all* active remotes (not just `remotes_to_sync`), since the source
+        # cluster may not be one of the clusters requested for this particular sync.
+        source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
         if not source_remote:
             raise RuntimeError(
                 f"[red]Unable to sync datasets, need a connection to the source cluster "
-                f"({source_cluster})[/red]. Current connections: {list(remotes_to_sync.keys())}\n"
+                f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
                 f"Use `cluv login {source_cluster}` to create a reusable connection to the "
                 f"source cluster."
             )
@@ -130,6 +137,7 @@ async def sync(
                 "sync datasets between clusters."
             )
         await _pull_datasets(source_remote, source_path, local_datasets_path)
+    # else: data_source is a local path; data is already available locally, no pull needed
 
     per_cluster_new_runs: list[list[Path]] = await run_async_tasks_with_progress_bar(
         async_task_fns=tasks,
@@ -140,9 +148,9 @@ async def sync(
 
     # Display a consolidated summary of all newly-synced runs across all clusters.
     cwd = Path.cwd()
-    for (hostname, remote), new_runs in zip(remotes_to_sync.items(), per_cluster_new_runs):
+    for remote, new_runs in zip(remotes_to_sync, per_cluster_new_runs):
         if new_runs:
-            console.print(f"[green]Newly synced runs from [bold]{hostname}[/bold]:[/green]")
+            console.print(f"[green]Newly synced runs from [bold]{remote.hostname}[/bold]:[/green]")
             for run_path in sorted(new_runs):
                 try:
                     display_path = run_path.relative_to(cwd)
@@ -150,14 +158,73 @@ async def sync(
                     display_path = run_path
                 console.print(f"  {display_path}")
 
-    return list(remotes_to_sync.values())
+    return remotes
+
+
+# Groups of cluster hostnames that are actually distinct login nodes of the same physical
+# cluster, sharing a single filesystem (confirmed live via SSH: `trillium` and `trillium-gpu`
+# mount the identical NFS export at $HOME). Syncing with more than one cluster in the same group
+# at a time is pointless (it's the same on-disk checkout) and unsafe (concurrent `git`/`uv sync`
+# commands from two hosts race on that shared checkout).
+CLUSTERS_SHARING_A_FILESYSTEM: list[frozenset[str]] = [
+    frozenset({"trillium", "trillium-gpu"}),
+]
+
+
+def _remotes_to_actually_sync(remotes: list[Remote]) -> list[Remote]:
+    """Drops remotes that are just another login node for one already in the list.
+
+    See `CLUSTERS_SHARING_A_FILESYSTEM`. Keeps the first remote seen from each group and
+    preserves the order of `remotes` otherwise.
+    """
+    seen_groups: set[frozenset[str]] = set()
+    to_sync: list[Remote] = []
+    for remote in remotes:
+        group = next((g for g in CLUSTERS_SHARING_A_FILESYSTEM if remote.hostname in g), None)
+        if group is not None:
+            if group in seen_groups:
+                continue
+            seen_groups.add(group)
+        to_sync.append(remote)
+    return to_sync
+
+
+def _build_sync_tasks(
+    remotes: list[Remote], here: str | None
+) -> tuple[list[Remote], list[AsyncTaskFn], list[str]]:
+    """Builds one sync task per remote, skipping those that just share a filesystem with a
+    remote already in the list (see `_remotes_to_actually_sync`) -- redundant, and unsafe to run
+    concurrently. `remotes` itself is left for the caller to return unfiltered: a skipped remote
+    can still be a genuinely different Slurm cluster to submit jobs to (e.g.
+    `trillium`/`trillium-gpu`).
+
+    Returns `(remotes_to_sync, tasks, task_descriptions)`.
+    """
+    remotes_to_sync = _remotes_to_actually_sync(remotes)
+    skipped = [r.hostname for r in remotes if r not in remotes_to_sync]
+    if skipped:
+        console.log(
+            f"[yellow]Not syncing separately with {skipped}: shares a filesystem with a cluster "
+            "already being synced.[/yellow]"
+        )
+    tasks = [functools.partial(sync_task_function, remote=remote) for remote in remotes_to_sync]
+    task_descriptions = [f"{here or 'local'} -> {remote.hostname}" for remote in remotes_to_sync]
+    return remotes_to_sync, tasks, task_descriptions
 
 
 async def get_active_remotes() -> list[Remote]:
-    """Returns the Remotes for each cluster which has an active SSH connection."""
+    """Returns the Remotes for each cluster which has an active SSH connection.
+
+    Disabled clusters (see `cluv disable`) are excluded. Note that this can include more than one
+    cluster from the same `CLUSTERS_SHARING_A_FILESYSTEM` group (e.g. both `trillium` and
+    `trillium-gpu`): they're genuinely different Slurm clusters to submit jobs to, even though
+    `sync()` only syncs the underlying (shared) checkout once.
+    """
     clusters = get_cluv_config().clusters_names
     if (this_cluster := current_cluster()) and this_cluster in clusters:
         clusters.remove(this_cluster)
+    disabled = get_disabled_clusters()
+    clusters = [c for c in clusters if c not in disabled]
     connections = await asyncio.gather(
         *(get_remote_without_2fa_prompt(cluster) for cluster in clusters)
     )
@@ -190,11 +257,17 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
 
     num_tasks = 5 if config.data_source else 4
 
-    cache = read_cache()
-    project_state = cache.project_states.setdefault(cluster, ProjectStateOnCluster())
+    project_state = read_cache().project_states.get(cluster) or ProjectStateOnCluster()
 
     def _save():
-        assert cache.project_states[cluster] is project_state
+        # Re-read the cache right before writing, instead of reusing the snapshot read at the
+        # top of this function: multiple clusters' sync_task_function calls run concurrently in
+        # the same event loop, each starting from its own initial read, so writing back a stale
+        # full snapshot would clobber other clusters' updates. read_cache/write_cache are
+        # synchronous (no `await` in between), so this merge-and-write is atomic with respect to
+        # the other concurrently-running cluster tasks.
+        cache = read_cache()
+        cache.project_states[cluster] = project_state
         write_cache(cache)
 
     _update_progress(0, "Checking/Installing UV", num_tasks)
@@ -210,15 +283,24 @@ async def sync_task_function(report_progress: ReportProgressFn, remote: Remote) 
     _save()
 
     _update_progress(3, "Fetching results", num_tasks)
-    new_runs = await fetch_results(remote, config)
+    new_runs = await fetch_results(remote, config, project_state)
+    _save()
 
     if config.data_source:
         _update_progress(4, "Syncing datasets", num_tasks)
         here = current_cluster()
-        local_dataset_path = (config.get_cluster_config(here) if here else config).datasets_path
-        if not local_dataset_path:
-            raise RuntimeError("data_source is set, so dataset_path should also be set!")
-        local_dataset_path = Path(os.path.expandvars(local_dataset_path))
+        if ":" not in config.data_source:
+            # data_source is a local path; use it directly as the source.
+            # Note: this tool targets POSIX (Linux/macOS) systems only; Windows drive-letter
+            # paths (e.g. C:\...) are not supported.
+            local_dataset_path = Path(os.path.expandvars(config.data_source))
+        else:
+            local_dataset_path = (
+                config.get_cluster_config(here) if here else config
+            ).datasets_path
+            if not local_dataset_path:
+                raise RuntimeError("data_source is set, so datasets_path should also be set!")
+            local_dataset_path = Path(os.path.expandvars(local_dataset_path))
         await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
         _save()
 
@@ -572,11 +654,13 @@ async def _push_datasets_to_remote(
     project_state.last_pushed_datasets = last_push_datetime
 
 
-async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
+async def fetch_results(
+    remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
+) -> list[Path]:
     """Fetches results from a remote cluster to local using rsync via the results symlink.
 
     Returns the list of newly-synced run directories (those that did not exist locally before
-    the rsync ran).
+    the rsync ran). Also updates `project_state.last_fetch_watermark` (see `cluv clean`).
     """
     results_path_here = Path(os.path.expandvars(config.results_path))
     results_path_here.mkdir(parents=True, exist_ok=True)
@@ -622,6 +706,10 @@ async def fetch_results(remote: Remote, config: CluvConfig) -> list[Path]:
         warn=True,
         hide="out",  # hide the stdout
     )
+
+    remote_runs = await list_remote_run_dirs(remote, results_path_on_cluster)
+    if remote_runs:
+        project_state.last_fetch_watermark = max(mtime for _, mtime in remote_runs)
 
     if not results_path_here.exists():
         return []
@@ -681,12 +769,3 @@ async def remote_test(
     """Returns True if `test {flag} {path}` succeeds on the remote."""
     result = await remote.run(f"test {flag} {path}", warn=True, hide=True)
     return result.returncode == 0
-
-
-def get_loglevel():
-    return logging.getLogger("cluv").getEffectiveLevel()
-
-
-async def host_uses_controlmaster(hostname: str) -> bool:
-    applied_options_for_host = get_ssh_options_for_host(hostname)
-    return applied_options_for_host.get("controlmaster", "no").lower() != "no"

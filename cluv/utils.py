@@ -4,8 +4,10 @@ import contextvars
 import os
 import socket
 import sys
+from collections.abc import Iterator, Sequence
 from contextvars import ContextVar
 from pathlib import Path
+from typing import TypeVar
 
 import rich.console
 
@@ -18,6 +20,7 @@ console_lock: contextvars.ContextVar[asyncio.Lock | None] = contextvars.ContextV
 
 
 def current_cluster() -> str | None:
+    """Returns the name of the current cluster (Mila,DRAC), or `None` if not on a cluster (or on an unknown cluster)."""
     if socket.gethostname().endswith(".server.mila.quebec"):
         return "mila"
     if "CC_CLUSTER" in os.environ:
@@ -37,11 +40,22 @@ def find_pyproject(start: Path | None = None) -> Path:
     )
 
 
+T = TypeVar("T")
+
+
 @contextlib.contextmanager
-def set_context[T](var: ContextVar[T], value: T):
+def set_context(var: ContextVar[T], value: T):
     """Equivalent of contextlib.ContextVar.set() context manager for Python < 3.14."""
     token = var.set(value)
     try:
         yield
     finally:
         var.reset(token)
+
+
+def batched(iterable: Sequence[T], n: int) -> Iterator[tuple[T, ...]]:
+    """Backport of `itertools.batched` (added in Python 3.12) for our Python 3.11 baseline."""
+    if n < 1:
+        raise ValueError("n must be at least one")
+    for i in range(0, len(iterable), n):
+        yield tuple(iterable[i : i + n])

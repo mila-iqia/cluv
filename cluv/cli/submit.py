@@ -416,18 +416,29 @@ def get_submissions(
     return submissions
 
 
+_SBATCH_ARG_ALIASES = {"t": "time"}
+"""Short-flag spellings that are aliases of a canonical long flag, normalized on the way into
+`merge_sbatch_args`'s output so `-t`/`--time` can't end up as two separate, conflicting keys."""
+
+
 def merge_sbatch_args(from_config: SbatchArgs, from_cli: list[str]) -> SbatchArgs:
-    """Merge the sbatch args from the config and from the CLI, with CLI args taking precedence."""
-    merged = dict(from_config)
+    """Merge the sbatch args from the config and from the CLI, with CLI args taking precedence.
+
+    `-t` is normalized to `time` (its long-flag alias) as it's merged in, so `--time=1:00:00
+    -t=2:00:00` -- config or CLI, either order -- resolves to a single `time` value (the last
+    one written) instead of leaving two separate keys for what's really the same sbatch option.
+    """
+    merged = {_SBATCH_ARG_ALIASES.get(key, key): value for key, value in from_config.items()}
     index = 0
     while index < len(from_cli):
         flag = from_cli[index]
         if flag.startswith("--"):
             key, _, value = flag[2:].partition("=")
+            key = _SBATCH_ARG_ALIASES.get(key, key)
             merged[key] = value if value else True
             index += 1
         elif flag.startswith("-"):
-            key = flag[1:]
+            key = _SBATCH_ARG_ALIASES.get(flag[1:], flag[1:])
             has_separate_value = index + 1 < len(from_cli) and not from_cli[index + 1].startswith(
                 "-"
             )

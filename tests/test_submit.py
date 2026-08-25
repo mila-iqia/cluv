@@ -100,6 +100,13 @@ class TestMergeSbatchArgs:
     def test_no_cli_args_is_a_passthrough(self) -> None:
         assert merge_sbatch_args({"time": "1:00:00"}, []) == {"time": "1:00:00"}
 
+    def test_short_time_alias_normalized_to_long_form(self) -> None:
+        """`-t` is `--time`'s short-flag spelling; both must resolve to one `time` key,
+        picking whichever was written last, instead of leaving two separate keys behind."""
+        assert merge_sbatch_args({}, ["--time=01:00:00", "-t", "10:00:00"]) == {"time": "10:00:00"}
+        assert merge_sbatch_args({}, ["-t", "10:00:00", "--time=01:00:00"]) == {"time": "01:00:00"}
+        assert merge_sbatch_args({"t": "1:00:00"}, []) == {"time": "1:00:00"}
+
 
 class TestGetSbatchCommand:
     def test_generate_command_for_selected_cluster_with_correct_args_and_vars(

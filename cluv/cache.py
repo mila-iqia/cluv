@@ -101,6 +101,7 @@ def load_jobs() -> list[Job]:
     if not path.exists():
         return []
     jobs = []
+    skipped = 0
     for line in path.read_text().splitlines():
         try:
             data = json.loads(line)
@@ -109,7 +110,12 @@ def load_jobs() -> list[Job]:
             data.setdefault("remote", None)
             jobs.append(Job(**data))
         except Exception:
-            pass
+            skipped += 1
+    if skipped:
+        # Most likely records written by a version of cluv with a different Job schema
+        # (e.g. before a field was added/renamed) -- surfaced so "no jobs shown" is
+        # diagnosable instead of silently empty.
+        logger.warning(f"Skipped {skipped} unreadable job record(s) in {path}.")
     return jobs
 
 

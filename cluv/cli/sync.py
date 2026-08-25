@@ -70,28 +70,33 @@ async def sync(
     - Gathers results from all other clusters to the Mila cluster using rsync.
     """
     here = current_cluster()
-    if clusters and here in clusters:
-        clusters.remove(here)
-
     config = get_cluv_config()
 
     # Show disabled clusters early so the user is aware.
     disabled = get_disabled_clusters()
 
-    # When no cluster is passed, sync with clusters for which we have an active SSH connection.
-    all_remotes = await get_active_remotes()
     if clusters:
+        if here in clusters:
+            clusters.remove(here)
         # Filter out explicitly-requested clusters that are disabled.
         enabled_clusters = [c for c in clusters if c not in disabled]
         # Pass the already-fetched disabled dict so login does not print the warning a second time.
         remotes = await login(enabled_clusters, disabled=disabled) if enabled_clusters else []
-    elif not all_remotes:
-        print_disabled_clusters(disabled)
-        raise RuntimeError(
-            "[red]Not currently connected to any Slurm cluster.[/red] "
-            "Use `cluv login` to login and create reusable connections."
-        )
+        # Keep track of *all* active remotes too, even ones not requested for this sync, because
+        # we may need a remote to the "data source" cluster later when syncing datasets. Fetched
+        # *after* login() above, so it also sees a connection that login() just created (fixes
+        # #114: a snapshot taken before login() would miss a cluster connected for the first time
+        # by this very command).
+        all_remotes = await get_active_remotes()
     else:
+        # When no cluster is passed, sync with clusters for which we have an active SSH connection.
+        all_remotes = await get_active_remotes()
+        if not all_remotes:
+            print_disabled_clusters(disabled)
+            raise RuntimeError(
+                "[red]Not currently connected to any Slurm cluster.[/red] "
+                "Use `cluv login` to login and create reusable connections."
+            )
         print_disabled_clusters(disabled)
         remotes = all_remotes.copy()
         clusters = [remote.hostname for remote in all_remotes]
@@ -113,8 +118,10 @@ async def sync(
         and ":" in config.data_source  # remote source: cluster:path (POSIX-only tool)
         and (source_cluster := config.data_source.split(":", 1)[0]) != here
     ):
-        _source_host, _, source_path = config.data_source.partition(":")
-        # Fetch the data from the source cluster and copy it to the local datasets_path.
+        source_cluster, _, source_path = config.data_source.partition(":")
+        # Fetch the data from the source cluster and copy it to the local datasets_path. Look
+        # this up among *all* active remotes (not just `remotes_to_sync`), since the source
+        # cluster may not be one of the clusters requested for this particular sync.
         source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
         if not source_remote:
             raise RuntimeError(
@@ -697,7 +704,7 @@ async def fetch_results(
             f"{results_path_here}/",
         ),
         warn=True,
-        hide=False,
+        hide="out",  # hide the stdout
     )
 
     remote_runs = await list_remote_run_dirs(remote, results_path_on_cluster)

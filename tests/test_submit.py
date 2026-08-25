@@ -125,7 +125,7 @@ class TestGetSbatchCommand:
             # Ugly, quite hard-coded.
             f"GIT_COMMIT=abecdef SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out "
             "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
-            f"--mem=8G $HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
+            f'--mem=8G $HOME/{job_script_relative_path} "$@"\' -- program_arg_1 program_arg_2'
         )
         assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
 
@@ -163,7 +163,7 @@ class TestGetSbatchCommand:
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
-            "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh '"
+            "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh' --"
         )
         assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
 
@@ -278,6 +278,36 @@ class TestGetSbatchCommand:
 
         assert " ".join(expected_sbatch_args) in sbatch_command
         assert submission_args == ResolvedSbatchArgs(sbatch_args=expected_sbatch_args, n_chunks=4)
+
+    def test_empty_string_program_arg_is_preserved(self, project_dir: Path) -> None:
+        """Empty string program args must survive the bash -c quoting round-trip."""
+        p = project_dir / "pyproject.toml"
+        p.write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.fir]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        sbatch_command, _ = get_sbatch_command(
+            cluster="fir",
+            job_script=job_script,
+            sbatch_args=[],
+            program_args=["model_name", "", "tag"],
+            git_commit="abc123",
+            chunking=False,
+        )
+
+        # The empty string must appear as '' in the command (outside the single-quoted script),
+        # not be silently dropped or merged with adjacent args.
+        assert sbatch_command.endswith("-- model_name '' tag")
+        # The inner bash -c script must use "$@" to receive the positional args.
+        assert '"$@"' in sbatch_command
 
 
 class TestSubmitCliParsing:

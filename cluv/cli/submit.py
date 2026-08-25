@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import datetime
+import difflib
 import logging
 import os
 import shlex
@@ -9,6 +10,7 @@ import sys
 from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 
+import rich.box
 import rich.syntax
 import rich.table
 import rich.text
@@ -73,20 +75,105 @@ def _state_style(state: JobState) -> str:
     return "red"
 
 
+_COMMAND_DIFF_CONTEXT = 3
+"""Always show this many leading/trailing words of a diffed command verbatim, match or not."""
+
+_COMMAND_DIFF_MIN_ELIDE = 3
+"""Don't bother eliding an interior run of matching words shorter than this."""
+
+_COMMAND_DIFF_ELLIPSIS = "⋯"
+
+
+def _diff_command(baseline: str, curr: str) -> rich.text.Text:
+    """Render `curr` against `baseline` (the first row's command): interior runs of
+    `_COMMAND_DIFF_MIN_ELIDE`+ matching words collapse to `_COMMAND_DIFF_ELLIPSIS`, changed
+    words are highlighted, and the first/last `_COMMAND_DIFF_CONTEXT` words always render
+    verbatim as anchors -- even when they match -- so a diffed row still visibly starts and ends
+    the same way the full first row does.
+    """
+    baseline_tokens = baseline.split()
+    curr_tokens = curr.split()
+    n = len(curr_tokens)
+    lead_end = min(_COMMAND_DIFF_CONTEXT, n)
+    trail_start = max(n - _COMMAND_DIFF_CONTEXT, lead_end)
+
+    matcher = difflib.SequenceMatcher(None, baseline_tokens, curr_tokens, autojunk=False)
+    text = rich.text.Text()
+
+    def emit(tok: str, *, changed: bool) -> None:
+        if len(text):
+            text.append(" ")
+        text.append(tok, style="bold yellow" if changed else None)
+
+    def emit_ellipsis() -> None:
+        if len(text):
+            text.append(" ")
+        text.append(_COMMAND_DIFF_ELLIPSIS, style="dim italic")
+
+    for tag, _i1, _i2, j1, j2 in matcher.get_opcodes():
+        if tag != "equal":
+            for tok in curr_tokens[j1:j2]:
+                emit(tok, changed=True)
+            continue
+        # Equal run: split at the leading/trailing context boundaries so those zones always
+        # render verbatim, even though they matched.
+        k = j1
+        while k < j2:
+            if k < lead_end:
+                end = min(j2, lead_end)
+            elif k >= trail_start:
+                end = j2
+            else:
+                end = min(j2, trail_start)
+                if end - k >= _COMMAND_DIFF_MIN_ELIDE:
+                    emit_ellipsis()
+                    k = end
+                    continue
+            for tok in curr_tokens[k:end]:
+                emit(tok, changed=False)
+            k = end
+    return text
+
+
 def render_job_table(
     rows: list[SubmissionProgress], *, cancelling: bool = False
 ) -> rich.table.Table:
     """Render the current state of every submission as a single table.
 
+    Each row's `sbatch_command` renders in full for the first row, and diffed against *that
+    first row* for every row after (see `_diff_command`) -- these commands share most of their
+    content across clusters and allocations, so this keeps the table readable instead of
+    repeating near-identical multi-line commands over and over. Diffing against the first row
+    (rather than chaining row-to-row) means any row can be compared directly against the one
+    full command visible in the table, without mentally summing up intermediate diffs.
+
     A plain `rich.Live` for now; the natural place to plug in a registry that fuses several
     concurrent `submit`/`submit_first` calls' rows into one shared live region later on.
     """
     title = "Waiting for jobs to cancel..." if cancelling else "Submitting jobs..."
-    table = rich.table.Table("Cluster", "Command", "Job ID", "Status", title=title)
+    table = rich.table.Table(
+        "Cluster",
+        "Command",
+        "Job ID",
+        "Status",
+        title=title,
+        box=rich.box.ROUNDED,
+        show_lines=True,
+        header_style="bold white on #1a1a2e",
+        title_style="bold cyan",
+        expand=True,
+    )
+    baseline_command: str | None = None
     for row in rows:
+        command = row.submission.sbatch_command
+        if baseline_command is None:
+            command_cell = rich.syntax.Syntax(command, "bash")
+            baseline_command = command
+        else:
+            command_cell = _diff_command(baseline_command, command)
         table.add_row(
             row.cluster,
-            rich.syntax.Syntax(row.submission.sbatch_command, "bash"),
+            command_cell,
             str(row.job_id) if row.job_id is not None else "-",
             rich.text.Text(row.state, style=_state_style(row.state)),
         )

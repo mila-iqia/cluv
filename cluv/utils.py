@@ -76,7 +76,7 @@ class HasCluster(Protocol):
 JobLike = TypeVar("JobLike", bound=HasCluster)
 
 
-def group_by_cluster(objects_with_cluster_field: list[JobLike]) -> dict[str, list[JobLike]]:
+def group_by_cluster(objects_with_cluster_field: Sequence[JobLike]) -> dict[str, list[JobLike]]:
     grouped: dict[str, list[JobLike]] = {}
     for job_submission in objects_with_cluster_field:
         grouped.setdefault(job_submission.cluster, []).append(job_submission)

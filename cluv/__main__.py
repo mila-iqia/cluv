@@ -25,10 +25,10 @@ from .cli.clean import clean
 from .cli.disable import disable, enable
 from .cli.init import init
 from .cli.login import login
+from .cli.new_submit import submit
 from .cli.run import run
 from .cli.sh import sh
 from .cli.status import status
-from .cli.submit import submit
 from .cli.submit_utils.chunking import CHUNK_SIZE
 from .cli.sync import sync
 from .utils import console

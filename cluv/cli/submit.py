@@ -36,12 +36,12 @@ class JobSubmissionFailed(Exception):
 
 
 @dataclasses.dataclass
-class JobRow:
-    """Live, mutable view of one `Submission`'s progress.
+class SubmissionProgress:
+    """Live, mutable tracking of one `Submission`'s progress.
 
-    Tracks a submission from before it's even synced (``state="SYNCING"``, no job id yet),
-    through submission (``job_id`` known, state polled from `sacct`), to running and,
-    possibly, cancellation.
+    Tracks a submission from before it's even synced (``state="SYNCING"``, no `job` yet),
+    through submission (``job`` known, state polled from `sacct`), to running and, possibly,
+    cancellation.
 
     A single flat list of these -- covering every submission, on every cluster, for one
     `submit()` call -- is all a live display needs to render the whole picture, from a plain
@@ -52,30 +52,16 @@ class JobRow:
 
     submission: Submission
     state: JobState = "SYNCING"
-    job_id: int | None = None
-    submitted_at: datetime.datetime | None = None
+    job: Job | None = None
     error: str | None = None
 
     @property
     def cluster(self) -> str:
         return self.submission.cluster
 
-    def as_job(self) -> Job | None:
-        """A `Job` snapshot of this row, once it has actually been submitted."""
-        if self.job_id is None or self.submitted_at is None:
-            return None
-        return Job(
-            cluster=self.submission.cluster,
-            remote=self.submission.remote,
-            job_script=self.submission.job_script,
-            sbatch_args=self.submission.sbatch_args,
-            program_args=self.submission.program_args,
-            sbatch_command=self.submission.sbatch_command,
-            n_chunks=self.submission.n_chunks,
-            git_commit=self.submission.git_commit,
-            job_id=self.job_id,
-            submitted_at=self.submitted_at,
-        )
+    @property
+    def job_id(self) -> int | None:
+        return self.job.job_id if self.job is not None else None
 
 
 def _state_style(state: JobState) -> str:
@@ -86,7 +72,9 @@ def _state_style(state: JobState) -> str:
     return "red"
 
 
-def render_job_table(rows: list[JobRow], *, cancelling: bool = False) -> rich.table.Table:
+def render_job_table(
+    rows: list[SubmissionProgress], *, cancelling: bool = False
+) -> rich.table.Table:
     """Render the current state of every submission as a single table.
 
     A plain `rich.Live` for now; the natural place to plug in a registry that fuses several
@@ -103,8 +91,8 @@ def render_job_table(rows: list[JobRow], *, cancelling: bool = False) -> rich.ta
     return table
 
 
-def _group_by_cluster(rows: list[JobRow]) -> dict[str, list[JobRow]]:
-    grouped: dict[str, list[JobRow]] = {}
+def _group_by_cluster(rows: list[SubmissionProgress]) -> dict[str, list[SubmissionProgress]]:
+    grouped: dict[str, list[SubmissionProgress]] = {}
     for row in rows:
         grouped.setdefault(row.cluster, []).append(row)
     return grouped
@@ -131,7 +119,7 @@ async def submit(
     cluster_to_remote = await get_cluster_to_remote(cluster)
 
     rows = [
-        JobRow(submission=submission)
+        SubmissionProgress(submission=submission)
         for cluster_name, remote in cluster_to_remote.items()
         for submission in get_submissions(
             cluster_name,
@@ -184,19 +172,19 @@ async def submit(
         f"Job {first_running_row.job_id} on cluster {first_running_row.cluster} is running.",
         style="green",
     )
-    job = first_running_row.as_job()
+    job = first_running_row.job
     assert job is not None
     save_job(job)
     return job
 
 
 async def wait_for_first_running_job(
-    rows: list[JobRow],
+    rows: list[SubmissionProgress],
     cluster_to_remote: dict[str, Remote | None],
     tasks: list[asyncio.Task],
     found_running_job: asyncio.Event,
     max_wait_time_seconds: int = 60,
-) -> JobRow | None:
+) -> SubmissionProgress | None:
     """Poll `sacct` until one submitted job starts running, or every submission has failed.
 
     Mutates `rows` in place with the latest known job id / state, so a live display can render
@@ -234,7 +222,7 @@ async def wait_for_first_running_job(
 
 
 async def wait_for_jobs_to_cancel(
-    rows: list[JobRow],
+    rows: list[SubmissionProgress],
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
 ) -> None:
@@ -272,15 +260,15 @@ async def wait_for_jobs_to_cancel(
     console.log(f"Cancelled {len(rows)} other job submission(s).")
 
 
-async def run_scancel(rows: list[JobRow]) -> None:
+async def run_scancel(rows: list[SubmissionProgress]) -> None:
     """Cancel the (already-submitted) jobs behind `rows`, grouped by remote."""
     if not rows:
         return
-    by_remote: dict[Remote | None, list[JobRow]] = {}
+    by_remote: dict[Remote | None, list[SubmissionProgress]] = {}
     for row in rows:
         by_remote.setdefault(row.submission.remote, []).append(row)
 
-    async def cancel(remote: Remote | None, cluster_rows: list[JobRow]) -> None:
+    async def cancel(remote: Remote | None, cluster_rows: list[SubmissionProgress]) -> None:
         job_ids = [row.job_id for row in cluster_rows]
         scancel_command = f"scancel {' '.join(map(str, job_ids))}"
         if remote is not None:
@@ -296,7 +284,7 @@ async def run_scancel(rows: list[JobRow]) -> None:
 async def submit_to_cluster(
     cluster: str,
     remote: Remote | None,
-    rows: list[JobRow],
+    rows: list[SubmissionProgress],
     found_running_job: asyncio.Event,
     _skip_sync: bool = False,
 ) -> None:
@@ -325,8 +313,7 @@ async def submit_to_cluster(
     assert len(results) == len(rows)
     for row, result in zip(rows, results):
         if isinstance(result, Job):
-            row.job_id = result.job_id
-            row.submitted_at = result.submitted_at
+            row.job = result
             row.state = "PENDING"
         elif isinstance(result, JobSubmissionFailed):
             row.error = str(result)

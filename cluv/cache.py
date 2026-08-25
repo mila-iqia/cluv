@@ -9,30 +9,44 @@ import platformdirs
 import pydantic
 import yaml
 
+from cluv.config import SbatchArgs
+from cluv.remote import Remote
 from cluv.utils import find_pyproject
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class Job:
-    """A Job on a Slurm cluster. This object is returned by `cluv submit`.
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class Submission:
+    """One job to submit: on which cluster, over which connection, and with which sbatch flags."""
 
-    TODO: Should `Job` be a subclass of `Submission`, but with a Job ID?
+    cluster: str
+
+    remote: Remote | None
+    """Remote used to run `sbatch`, or `None` to run it on the current cluster."""
+
+    job_script: Path
+
+    sbatch_args: SbatchArgs
+    """The sbatch flags actually used, after merging the config and the CLI."""
+
+    program_args: list[str]
+
+    sbatch_command: str
+
+    n_chunks: int | None
+
+    git_commit: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class Job(Submission):
+    """A Job on a Slurm cluster. Returned by `cluv submit`, and persisted to the on-disk
+    job-history cache (see `save_job`/`load_jobs`, used e.g. by `cluv status`).
     """
 
     job_id: int
-    cluster: str
-    job_script: str
-    git_commit: str
-    submitted_at: str  # ISO 8601 UTC
-    sbatch_args: list[str]
-    program_args: list[str]
-
-    n_chunks: int | None = None
-
-    def __hash__(self) -> int:
-        return hash((self.cluster, self.job_id))
+    submitted_at: datetime
 
 
 @dataclass()
@@ -72,8 +86,14 @@ class CacheContent:
 def save_job(job: Job) -> None:
     path = _get_cached_jobs_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    record = asdict(job)
+    record["job_script"] = str(job.job_script)
+    record["submitted_at"] = job.submitted_at.isoformat()
+    # `remote` isn't meaningful once persisted (a stale SSH-multiplexing handle); `cluster`
+    # already identifies where the job ran, and callers reconnect by hostname when needed.
+    record.pop("remote", None)
     with path.open("a") as f:
-        f.write(json.dumps(asdict(job)) + "\n")
+        f.write(json.dumps(record) + "\n")
 
 
 def load_jobs() -> list[Job]:
@@ -83,7 +103,11 @@ def load_jobs() -> list[Job]:
     jobs = []
     for line in path.read_text().splitlines():
         try:
-            jobs.append(Job(**json.loads(line)))
+            data = json.loads(line)
+            data["job_script"] = Path(data["job_script"])
+            data["submitted_at"] = datetime.fromisoformat(data["submitted_at"])
+            data.setdefault("remote", None)
+            jobs.append(Job(**data))
         except Exception:
             pass
     return jobs

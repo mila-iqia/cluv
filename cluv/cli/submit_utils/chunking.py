@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+from cluv.config import SbatchArgs
 from cluv.slurm import parse_slurm_time
 
 logger = logging.getLogger(__name__)
@@ -8,63 +9,45 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 3  # In hours
 
 
-def chunking_update_sbatch_args(
-    n_chunks: int, sbatch_args: list[str], chunk_size: int = CHUNK_SIZE
-) -> list[str]:
-    """Add the sbatch args (--array and --time) for chunking the job into multiple smaller jobs."""
-    logger.info(f"Chunking job into {n_chunks} smaller jobs of {chunk_size} hours each.")
+def apply_chunking(
+    sbatch_args: SbatchArgs,
+    job_script: Path | None,
+    chunking: int | None,
+    env_vars: dict[str, str] | None = None,
+) -> tuple[int | None, SbatchArgs]:
+    """Split a job into consecutive chunks of `chunking` hours each, if requested.
 
-    # Remove any existing --time or -t args, and add the new one at the end.
-    sbatch_args = [arg for arg in sbatch_args if not arg.startswith(("--time=", "-t="))]
-    sbatch_args.append(f"--time={chunk_size}:00:00")
-    sbatch_args.append(f"--array=0-{n_chunks - 1}%1")
+    The time limit of the (unchunked) job can come from, in order of precedence: the `time`/`t`
+    sbatch arg, the `SBATCH_TIMELIMIT` env var, or a `#SBATCH --time=...` directive in the job
+    script header.
 
-    return sbatch_args
+    Returns the number of chunks (`None` when `chunking` is `None`, i.e. chunking is disabled)
+    and `sbatch_args` updated with the `--time`/`--array` directives needed to run them.
+    """
+    if chunking is None:
+        return None, sbatch_args
 
-
-def get_n_chunks(
-    sbatch_args: list[str],
-    env_vars: dict[str, str],
-    job_script: Path,
-    chunk_size: int = CHUNK_SIZE,
-) -> int:
-    """Get the number of chunks required from the current time limit."""
-    # The time limit of a job can be set multiple way :
-    # 1. As an arg to sbatch (with --time or -t)
-    # 2. As an env variable in the Cluv or the cluster config (with SBATCH_TIMELIMIT)
-    # 3. As a directive in the job script header (#SBATCH --time)
-    slurm_time = (
-        get_time_from_sbatch_args(sbatch_args)
-        or env_vars.get("SBATCH_TIMELIMIT")
-        or get_time_from_job_script_header(job_script)
+    time_limit = (
+        sbatch_args.get("time")
+        or sbatch_args.get("t")
+        or (env_vars or {}).get("SBATCH_TIMELIMIT")
+        or (job_script and get_time_from_job_script_header(job_script))
     )
-    logger.info("Found SLURM time limit: %s", slurm_time)
-
-    if not slurm_time:
+    if not time_limit:
         raise ValueError(
             "Could not find a time value for the job, which is required for chunking."
         )
 
-    time = parse_slurm_time(slurm_time)
-    total_hours = time.total_seconds() / 3600  # Convert to hours
+    total_hours = parse_slurm_time(str(time_limit)).total_seconds() / 3600
+    # Split the total time into chunks, and round up. Need at least one chunk, even if the total
+    # time is less than `chunking`.
+    n_chunks = max(int((total_hours + chunking - 1) // chunking), 1)
+    logger.info(f"Chunking job into {n_chunks} smaller jobs of {chunking} hours each.")
 
-    # Split the total time into chunks, and round up.
-    n_chunks = int((total_hours + chunk_size - 1) // chunk_size)
-    # Need at least one chunk, even if the time is less than CHUNK_SIZE.
-    n_chunks = max(n_chunks, 1)
-
-    return n_chunks
-
-
-def get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
-    """Return the SLURM time limit from the sbatch args if it exists."""
-    # Last occurrence of --time or -t takes precedence, so we iterate in reverse.
-    for arg in reversed(sbatch_args):
-        if arg.startswith(("--time=", "-t=")):
-            # Like "--time=00:10:00" or "-t=1-02:00:00"
-            return arg.split("=")[1]
-
-    return None
+    sbatch_args = {k: v for k, v in sbatch_args.items() if k not in ("time", "t")}
+    sbatch_args["time"] = f"{chunking}:00:00"
+    sbatch_args["array"] = f"0-{n_chunks - 1}%1"
+    return n_chunks, sbatch_args
 
 
 def get_time_from_job_script_header(job_script: Path) -> str | None:

@@ -1,4 +1,5 @@
 import asyncio
+import importlib
 import shlex
 import subprocess
 import textwrap
@@ -12,24 +13,27 @@ import pytest
 import cluv.__main__ as cluv_main
 import cluv.cli.init
 import cluv.cli.submit
-import cluv.cli.submit_utils.first
 import cluv.remote
 import cluv.slurm
 import cluv.utils
 from cluv.cli.submit import (
-    ResolvedSbatchArgs,
     build_submit_command,
     ensure_clean_git_state,
     get_sbatch_command,
+    merge_sbatch_args,
     sbatch_args_from_dict,
     submit,
-    submit_first,
 )
-from cluv.cli.submit_utils.chunking import CHUNK_SIZE
-from cluv.cli.sync import sync
+from cluv.cli.submit_utils.chunking import CHUNK_SIZE, apply_chunking
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.utils import current_cluster
 from tests.test_integration import IN_GITHUB_CLOUD_CI
+
+# `cluv/cli/__init__.py` does `from .sync import sync`, which overwrites the `sync` attribute of
+# the `cluv.cli` package with that function -- so plain attribute access (`cluv.cli.sync.foo`)
+# would hit the function, not the module. Go through `importlib` instead, like
+# `tests/test_sync_shared_filesystem.py` does.
+sync_module = importlib.import_module("cluv.cli.sync")
 
 
 @pytest.fixture(autouse=True)
@@ -86,6 +90,17 @@ class TestSbatchArgsFromDict:
         assert result == ["--time=2:00:00", "--gpus=1", "--exclusive"]
 
 
+class TestMergeSbatchArgs:
+    def test_cli_overrides_config_on_same_key(self) -> None:
+        merged = merge_sbatch_args(
+            {"time": "1:00:00", "mem": "16G"}, ["--time=2:00:00", "--exclusive", "-N", "2"]
+        )
+        assert merged == {"time": "2:00:00", "mem": "16G", "exclusive": True, "N": "2"}
+
+    def test_no_cli_args_is_a_passthrough(self) -> None:
+        assert merge_sbatch_args({"time": "1:00:00"}, []) == {"time": "1:00:00"}
+
+
 class TestGetSbatchCommand:
     def test_generate_command_for_selected_cluster_with_correct_args_and_vars(
         self, project_dir: Path, fake_home: Path
@@ -109,14 +124,13 @@ class TestGetSbatchCommand:
         sbatch_script = project_dir / "my_script.sh"
         sbatch_script.touch(0o755)
         cluster = "mila"
-        sbatch_args = ["--account=my_account", "--mem=8G"]
-        sbatch_command, submission_args = get_sbatch_command(
+        sbatch_args = {"account": "my_account", "mem": "8G"}
+        sbatch_command = get_sbatch_command(
             cluster=cluster,
             job_script=sbatch_script,
             sbatch_args=sbatch_args,
             program_args=["program_arg_1", "program_arg_2"],
             git_commit="abecdef",
-            chunking=None,
         )
         job_script_relative_path = sbatch_script.relative_to(fake_home)
 
@@ -127,7 +141,6 @@ class TestGetSbatchCommand:
             "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
             f"--mem=8G $HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
-        assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"
@@ -150,14 +163,12 @@ class TestGetSbatchCommand:
         job_script.parent.mkdir()
         job_script.touch(0o755)
 
-        sbatch_args = []
-        sbatch_command, submission_args = get_sbatch_command(
+        sbatch_command = get_sbatch_command(
             cluster="mila",
             job_script=job_script,
-            sbatch_args=sbatch_args,
+            sbatch_args={},
             program_args=[],
             git_commit="abecdef",
-            chunking=None,
         )
 
         assert sbatch_command == (
@@ -165,10 +176,9 @@ class TestGetSbatchCommand:
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
             "sbatch --parsable --chdir=$HOME/my_project  $HOME/my_project/scripts/my_script.sh '"
         )
-        assert submission_args == ResolvedSbatchArgs(sbatch_args=sbatch_args)
 
-    def test_config_sbatch_args_prepended_to_cli_args(self, project_dir: Path) -> None:
-        """Config-derived sbatch flags are prepended; CLI flags come last and can override."""
+    def test_config_sbatch_args_merged_with_cli_args_cli_wins(self, project_dir: Path) -> None:
+        """Config-derived sbatch flags are the base; CLI flags override same-key values."""
         p = project_dir / "pyproject.toml"
         results_path = "results"
         p.write_text(
@@ -188,28 +198,22 @@ class TestGetSbatchCommand:
         )
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
-        config_sbatch_args = sbatch_args_from_dict(
-            load_cluv_config(p).get_cluster_config("mila").sbatch_args[0]
-        )
-        sbatch_command, submission_args = get_sbatch_command(
+        config_sbatch_args = load_cluv_config(p).get_cluster_config("mila").sbatch_args[0]
+
+        merged = merge_sbatch_args(from_config=config_sbatch_args, from_cli=["--time=1:00:00"])
+        assert merged == {"time": "1:00:00", "requeue": True, "gpus": "a100:2"}
+
+        sbatch_command = get_sbatch_command(
             cluster="mila",
             job_script=job_script,
-            sbatch_args=config_sbatch_args + ["--time=1:00:00"],  # CLI overrides the config time
+            sbatch_args=merged,
             program_args=[],
             git_commit="abc123",
-            chunking=None,
         )
-        # Config flags come first (time, requeue, gpus), then CLI flag (--time=1:00:00).
-        # sbatch uses last occurrence, so the CLI time wins.
-        assert "--time=3:00:00" in sbatch_command
+        assert "--time=1:00:00" in sbatch_command
         assert "--requeue" in sbatch_command
         assert "--gpus=a100:2" in sbatch_command
-        assert "--time=1:00:00" in sbatch_command
-        # Config flags appear before CLI flags in the command string
-        assert sbatch_command.index("--time=3:00:00") < sbatch_command.index("--time=1:00:00")
-        assert submission_args == ResolvedSbatchArgs(
-            sbatch_args=["--time=3:00:00", "--requeue", "--gpus=a100:2", "--time=1:00:00"]
-        )
+        assert "--time=3:00:00" not in sbatch_command
 
     def test_cluster_sbatch_args_override_global(self, project_dir: Path) -> None:
         """Cluster-level sbatch_args override global ones; empty string removes a flag."""
@@ -231,23 +235,22 @@ class TestGetSbatchCommand:
         )
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
-        config_sbatch_args = sbatch_args_from_dict(
-            load_cluv_config(p).get_cluster_config("cpu_cluster").sbatch_args[0]
-        )
-        sbatch_command, submission_args = get_sbatch_command(
+        config_sbatch_args = load_cluv_config(p).get_cluster_config("cpu_cluster").sbatch_args[0]
+
+        sbatch_command = get_sbatch_command(
             cluster="cpu_cluster",
             job_script=job_script,
-            sbatch_args=config_sbatch_args + [],
+            sbatch_args=config_sbatch_args,
             program_args=[],
             git_commit="abc123",
-            chunking=None,
         )
         # gpus removed by cluster override, time still present
         assert "--gpus" not in sbatch_command
         assert "--time=2:00:00" in sbatch_command
-        assert submission_args == ResolvedSbatchArgs(sbatch_args=["--time=2:00:00"])
 
-    def test_use_correct_time_value_when_chunking(self, project_dir: Path) -> None:
+    def test_chunked_job_uses_array_output_pattern(self, project_dir: Path) -> None:
+        """When `sbatch_args` carries an `array` key (as set by `apply_chunking`), the output
+        path uses %A/%a (array job id / task id) instead of %j."""
         p = project_dir / "pyproject.toml"
         results_path = "results"
         p.write_text(
@@ -255,8 +258,6 @@ class TestGetSbatchCommand:
                 f"""\
                 [tool.cluv]
                 results_path = "{results_path}"
-                [tool.cluv.sbatch_args]
-                time = "5:00:00"
                 [tool.cluv.clusters.mila]
                 """
             )
@@ -265,19 +266,21 @@ class TestGetSbatchCommand:
         job_script.parent.mkdir()
         job_script.write_text("#SBATCH --time=20:00:00")
 
-        sbatch_command, submission_args = get_sbatch_command(
+        n_chunks, chunked_args = apply_chunking(
+            {"time": "10:00:00"}, job_script=job_script, chunking=3
+        )
+        assert n_chunks == 4
+
+        sbatch_command = get_sbatch_command(
             cluster="mila",
             job_script=job_script,
-            sbatch_args=["--time=10:00:00"],
+            sbatch_args=chunked_args,
             program_args=[],
             git_commit="abecdef",
-            chunking=3,
         )
 
-        expected_sbatch_args = ["--time=3:00:00", "--array=0-3%1"]
-
-        assert " ".join(expected_sbatch_args) in sbatch_command
-        assert submission_args == ResolvedSbatchArgs(sbatch_args=expected_sbatch_args, n_chunks=4)
+        assert f"{results_path}/mila_%A/slurm-%A_%a.out" in sbatch_command
+        assert "--time=3:00:00 --array=0-3%1" in sbatch_command
 
 
 class TestSubmitCliParsing:
@@ -401,6 +404,17 @@ class TestBuildSubmitCommand:
                 program_args=["--flag"],
             )
             == "cluv submit mila scripts/job.sh -- --flag"
+        )
+
+    def test_build_submit_command_without_job_script(self) -> None:
+        assert (
+            build_submit_command(
+                cluster="mila",
+                job_script=None,
+                sbatch_args=["--mem=8G"],
+                program_args=[],
+            )
+            == "cluv submit mila --mem=8G"
         )
 
 
@@ -579,13 +593,27 @@ def mock_current_cluster(request: pytest.FixtureRequest, monkeypatch: pytest.Mon
     cluster = getattr(request, "param", "mila")
     mock = unittest.mock.Mock(spec=current_cluster, return_value=cluster)
     monkeypatch.setattr(cluv.utils, current_cluster.__name__, mock)
-    monkeypatch.setattr(cluv.cli.submit, current_cluster.__name__, mock)
+    # `get_cluster_to_remote()` (which resolves `current_cluster()`) lives in `cluv.cli.sync`.
+    monkeypatch.setattr(sync_module, current_cluster.__name__, mock)
     yield cluster
     mock.assert_called()
 
 
+@pytest.fixture
+def no_active_remotes(monkeypatch: pytest.MonkeyPatch):
+    """Sidesteps real SSH control-socket checks: pretend no cluster has an active connection."""
+    monkeypatch.setattr(
+        sync_module,
+        sync_module.get_active_remotes.__name__,
+        unittest.mock.AsyncMock(return_value=[]),
+    )
+
+
 async def test_can_submit_on_current_cluster(
-    monkeypatch: pytest.MonkeyPatch, mock_current_cluster: str, cluv_project_dir: Path
+    monkeypatch: pytest.MonkeyPatch,
+    mock_current_cluster: str,
+    cluv_project_dir: Path,
+    no_active_remotes,
 ) -> None:
     dummy_commit = "dummy_git_commit"
     monkeypatch.setattr(
@@ -614,19 +642,21 @@ async def test_can_submit_on_current_cluster(
         assert (
             "ssh" not in full_command
         )  # Should not SSH since we're submitting to the current cluster.
-        assert " ".join(program_args) in full_command
-        assert " ".join(sbatch_args) in full_command
-        assert "sbatch --parsable" in full_command
-        return subprocess.CompletedProcess(
-            program_and_args, returncode=0, stdout=f"{jobid}", stderr=""
-        )
+        if "sbatch --parsable" in full_command:
+            assert " ".join(program_args) in full_command
+            assert " ".join(sbatch_args) in full_command
+            return subprocess.CompletedProcess(
+                program_and_args, returncode=0, stdout=f"{jobid}", stderr=""
+            )
+        if full_command.startswith(f"sacct -j {jobid}"):
+            return subprocess.CompletedProcess(
+                program_and_args, returncode=0, stdout="RUNNING", stderr=""
+            )
+        raise AssertionError(f"Unexpected command: {full_command}")
 
-    monkeypatch.setattr(
-        cluv.remote, cluv.remote.run.__name__, mock := unittest.mock.Mock(wraps=fake_run)
-    )
-    monkeypatch.setattr(
-        cluv.cli.submit, cluv.cli.submit.run.__name__, mock := unittest.mock.Mock(wraps=fake_run)
-    )
+    run_name = cluv.remote.run.__name__
+    for module in (cluv.remote, cluv.slurm, cluv.cli.submit):
+        monkeypatch.setattr(module, run_name, mock := unittest.mock.Mock(wraps=fake_run))
 
     job_script = cluv_project_dir / "my_script.sh"
     job_script.parent.mkdir(exist_ok=True)
@@ -639,16 +669,17 @@ async def test_can_submit_on_current_cluster(
         sbatch_args=sbatch_args,
         program_args=program_args,
         chunking=None,
+        _skip_sync=True,
     )
 
     assert returned_job
     assert returned_job.job_id == jobid
     mock_ensure_clean_git_state.assert_called_once()
-    mock.assert_called_once()
+    mock.assert_called()
 
 
 async def test_submit_races_the_allocations_of_a_cluster(
-    monkeypatch: pytest.MonkeyPatch, project_dir: Path
+    monkeypatch: pytest.MonkeyPatch, project_dir: Path, no_active_remotes
 ) -> None:
     """A cluster with two allocations gets one job per allocation, and the loser is cancelled."""
     cluster = "narval"
@@ -667,7 +698,7 @@ async def test_submit_races_the_allocations_of_a_cluster(
     # Submit from the cluster itself, so that everything runs locally (no ssh, no sync).
     current_cluster_mock = unittest.mock.Mock(spec=current_cluster, return_value=cluster)
     monkeypatch.setattr(cluv.utils, current_cluster.__name__, current_cluster_mock)
-    monkeypatch.setattr(cluv.cli.submit, current_cluster.__name__, current_cluster_mock)
+    monkeypatch.setattr(sync_module, current_cluster.__name__, current_cluster_mock)
     monkeypatch.setattr(
         cluv.cli.submit, ensure_clean_git_state.__name__, lambda **kwargs: "dummy_git_commit"
     )
@@ -695,27 +726,37 @@ async def test_submit_races_the_allocations_of_a_cluster(
                 return _result(str(rrg_job_id))
             assert "--account=def-bengioy" in full_command
             return _result(str(def_job_id))
-        if full_command.startswith(f"sacct -j {rrg_job_id} --format=State"):
-            return _result("CANCELLED" if rrg_job_id in cancelled else "PENDING")
-        if full_command.startswith(f"sacct -j {def_job_id} --format=State"):
-            return _result("RUNNING")
+        if full_command.startswith("sacct -j") and "--format=State" in full_command:
+            # `sacct` calls are batched: one call per cluster, covering every job id still
+            # being watched on it, joined by commas.
+            ids = [
+                int(x) for x in full_command.split("sacct -j ", 1)[1].split(" ", 1)[0].split(",")
+            ]
+            states = []
+            for job_id in ids:
+                if job_id == rrg_job_id:
+                    states.append("CANCELLED" if rrg_job_id in cancelled else "PENDING")
+                else:
+                    assert job_id == def_job_id
+                    states.append("RUNNING")
+            return _result("\n".join(states))
         if full_command == f"scancel {rrg_job_id}":
             cancelled.append(rrg_job_id)
             return _result("")
         pytest.fail(f"Unexpected command: {full_command}")
 
     run_name = cluv.remote.run.__name__
-    for module in (cluv.remote, cluv.slurm, cluv.cli.submit, cluv.cli.submit_utils.first):
+    for module in (cluv.remote, cluv.slurm, cluv.cli.submit):
         monkeypatch.setattr(module, run_name, unittest.mock.AsyncMock(wraps=fake_run))
 
     returned_job = await submit(
-        cluster=cluster, job_script=job_script, sbatch_args=[], program_args=[]
+        cluster=cluster, job_script=job_script, sbatch_args=[], program_args=[], _skip_sync=True
     )
 
     assert returned_job
     assert returned_job.job_id == def_job_id
     # The allocation that was used is saved with the job.
-    assert returned_job.sbatch_args == ["--time=1:00:00", "--account=def-bengioy"]
+    assert returned_job.sbatch_args == {"time": "1:00:00", "account": "def-bengioy"}
     assert cancelled == [rrg_job_id]
 
 
@@ -740,10 +781,14 @@ async def test_submit_first_considers_current_cluster(
     cluv_project_dir: Path,
     runs_first_on_current_cluster: bool,
 ) -> None:
-    """Test that `submit first` also considers the current cluster as an option.
+    """Test that `submit(cluster="first", ...)` also considers the current cluster as an option.
 
     Test that it submits a job locally, and also cancels the local job.
     """
+    monkeypatch.setattr(
+        cluv.cli.submit, ensure_clean_git_state.__name__, lambda **kwargs: "dummy_git_commit"
+    )
+
     run_commands: list[tuple[str, ...]] = []
     this_cluster_jobid = 123
     other_cluster_jobid = 456
@@ -821,21 +866,15 @@ async def test_submit_first_considers_current_cluster(
         cluv.cli.submit.run.__name__,
         _mock := unittest.mock.AsyncMock(wraps=fake_run),
     )
-    monkeypatch.setattr(
-        cluv.cli.submit_utils.first,
-        cluv.cli.submit_utils.first.run.__name__,
-        _mock := unittest.mock.AsyncMock(wraps=fake_run),
-    )
 
-    # Pack `cluv sync` so it returns a Remote that is not for the current cluster.
+    # Make `get_active_remotes()` return a Remote that is not for the current cluster, instead
+    # of trying to connect for real.
     other_cluster = "mila" if mock_current_cluster != "mila" else "tamia"
-    # Should be fine to use a 'real' remote here, since we patch the `run` function that is used
-    # everywhere. There shouldn't be an actual call to `ssh other_cluster` that goes though.
     other_cluster_remote = cluv.remote.Remote(hostname=other_cluster)
     monkeypatch.setattr(
-        cluv.cli.submit,
-        sync.__name__,
-        mock_sync := unittest.mock.AsyncMock(return_value=[other_cluster_remote]),
+        sync_module,
+        sync_module.get_active_remotes.__name__,
+        mock_get_active_remotes := unittest.mock.AsyncMock(return_value=[other_cluster_remote]),
     )
 
     job_script = cluv_project_dir / "my_script.sh"
@@ -845,16 +884,16 @@ async def test_submit_first_considers_current_cluster(
 
     sbatch_args = ["--account=my_account", "--mem=8G"]
     program_args = ["program_arg_1", "program_arg_2"]
-    dummy_commit = "dummy_git_commit"
-    returned_job = await submit_first(
+    returned_job = await submit(
+        cluster="first",
         job_script=job_script,
         sbatch_args=sbatch_args,
         program_args=program_args,
-        git_commit=dummy_commit,
         chunking=None,
+        _skip_sync=True,
     )
     assert returned_job
-    mock_sync.assert_awaited_once()
+    mock_get_active_remotes.assert_awaited_once()
     if runs_first_on_current_cluster:
         assert returned_job.job_id == this_cluster_jobid
     else:

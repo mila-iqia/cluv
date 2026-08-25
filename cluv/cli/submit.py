@@ -22,6 +22,7 @@ from cluv.cache import Job, save_job
 from cluv.cli.submit_utils.chunking import chunking_update_sbatch_args, get_n_chunks
 from cluv.cli.submit_utils.first import cancel_job
 from cluv.cli.sync import (
+    CLUSTERS_SHARING_A_FILESYSTEM,
     get_active_remotes,
     prepare_sync,
     print_new_runs,
@@ -292,19 +293,53 @@ async def submit_first(
     output_lock = asyncio.Lock()
     """Keeps each command and its output together in the console instead of interleaving them."""
 
+    # Clusters that are really just distinct login nodes of the same physical cluster share a
+    # filesystem: syncing more than one of them at once is redundant and races on that shared
+    # checkout (see `CLUSTERS_SHARING_A_FILESYSTEM`). Since this race syncs every cluster
+    # concurrently (unlike `sync()`, which already dedupes via `_build_sync_tasks`), pick one
+    # "primary" per group here to do the actual sync; the others wait for it, then submit without
+    # syncing themselves.
+    remote_clusters = [cluster for cluster, entry in race.items() if entry.remote is not None]
+    sync_group_of_cluster: dict[str, frozenset[str]] = {
+        cluster: group
+        for cluster in remote_clusters
+        for group in CLUSTERS_SHARING_A_FILESYSTEM
+        if cluster in group
+    }
+    sync_primary_of_group: dict[frozenset[str], str] = {}
+    sync_done_by_group: dict[frozenset[str], asyncio.Event] = {}
+    for cluster in remote_clusters:
+        group = sync_group_of_cluster.get(cluster)
+        if group is not None and group not in sync_primary_of_group:
+            sync_primary_of_group[group] = cluster
+            sync_done_by_group[group] = asyncio.Event()
+
     async def sync_then_submit(cluster: str) -> Job | None:
         """Syncs one cluster, then submits every allocation configured for it and keeps whichever
         job is kept (the only one, or the first of its allocations to start)."""
         # Tasks get their own copy of the context, so this doesn't affect the caller.
         console_lock.set(output_lock)
         entry = race[cluster]
+        sync_group = sync_group_of_cluster.get(cluster)
         if entry.remote is not None and not _skip_sync:
-            entry.status = "Syncing..."
-            new_runs = await sync_task_function(
-                report_progress=functools.partial(_report_sync_progress, entry),
-                remote=entry.remote,
-            )
-            print_new_runs(cluster, new_runs)
+            if sync_group is not None and sync_primary_of_group[sync_group] != cluster:
+                # Another cluster in this race shares our filesystem and is already syncing it;
+                # our own code is already up to date once that finishes, so just wait for it.
+                primary = sync_primary_of_group[sync_group]
+                entry.status = f"Waiting for {primary} (shares a filesystem)..."
+                await sync_done_by_group[sync_group].wait()
+            else:
+                entry.status = "Syncing..."
+                try:
+                    new_runs = await sync_task_function(
+                        report_progress=functools.partial(_report_sync_progress, entry),
+                        remote=entry.remote,
+                    )
+                    print_new_runs(cluster, new_runs)
+                finally:
+                    # Let any secondary waiting on us proceed, whether or not our sync succeeded.
+                    if sync_group is not None:
+                        sync_done_by_group[sync_group].set()
         if race_is_over.is_set():
             entry.status = "Not submitted (another job already started)"
             return None

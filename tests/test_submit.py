@@ -993,6 +993,92 @@ async def test_submit_first_doesnt_wait_for_the_slowest_cluster_to_sync(
     mock_run.assert_awaited()
 
 
+async def test_submit_first_only_syncs_once_for_clusters_sharing_a_filesystem(
+    monkeypatch: pytest.MonkeyPatch,
+    cluv_project_dir: Path,
+) -> None:
+    """Two clusters racing in `submit first` that share a filesystem (see
+    `CLUSTERS_SHARING_A_FILESYSTEM`) must not sync concurrently -- that races on the same on-disk
+    checkout. Only one of them should actually run `sync_task_function`; the other should wait for
+    it and then still be a candidate to win the race.
+    """
+    # Reuse two clusters already present in the default test config (see `cluv_project_dir`) so
+    # `get_cluv_config().get_cluster_config(...)` resolves; only their "shares a filesystem"
+    # membership is faked here.
+    shared_a, shared_b = "rorqual", "vulcan"
+    monkeypatch.setattr(
+        cluv.cli.submit, "CLUSTERS_SHARING_A_FILESYSTEM", [frozenset({shared_a, shared_b})]
+    )
+    monkeypatch.setattr(cluv.utils, current_cluster.__name__, lambda: None)
+    monkeypatch.setattr(cluv.cli.submit, current_cluster.__name__, lambda: None)
+
+    async def fake_sync_task_function(report_progress, remote: cluv.remote.Remote) -> list[Path]:
+        report_progress(progress=0, total=4, info="Running 'uv sync'")
+        return []
+
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        sync_task_function.__name__,
+        mock_sync_task := unittest.mock.AsyncMock(wraps=fake_sync_task_function),
+    )
+
+    jobid_by_cluster = {shared_a: 111, shared_b: 222}
+
+    async def fake_run(
+        program_and_args: tuple[str, ...],
+        input: str | None = None,
+        warn: bool = False,
+        hide: cluv.remote.Hide = False,
+        **other_kwargs,
+    ) -> subprocess.CompletedProcess[str]:
+        full_command = shlex.join(program_and_args)
+
+        def _result(stdout: str):
+            return subprocess.CompletedProcess(
+                program_and_args, returncode=0, stdout=stdout, stderr=""
+            )
+
+        if "sbatch --parsable" in full_command:
+            cluster = shared_a if shared_a in program_and_args else shared_b
+            return _result(str(jobid_by_cluster[cluster]))
+        for cluster, jobid in jobid_by_cluster.items():
+            if f"sacct -j {jobid}" in full_command:
+                return _result("RUNNING" if cluster == shared_a else "CANCELLED")
+        if "scancel" in full_command:
+            return _result("")
+        pytest.fail(f"Unexpected command: {full_command}")
+
+    monkeypatch.setattr(
+        cluv.remote, cluv.remote.run.__name__, unittest.mock.AsyncMock(wraps=fake_run)
+    )
+
+    real_sleep = asyncio.sleep
+    monkeypatch.setattr(asyncio, "sleep", lambda x: real_sleep(0.01 * x))
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        prepare_sync.__name__,
+        unittest.mock.AsyncMock(
+            return_value=[cluv.remote.Remote(hostname=c) for c in (shared_a, shared_b)]
+        ),
+    )
+
+    job_script = cluv_project_dir / "my_script.sh"
+    job_script.write_text("#!/bin/bash\necho Hello World\n")
+
+    returned_job = await asyncio.wait_for(
+        submit_first(
+            job_script=job_script, sbatch_args=[], program_args=[], git_commit="dummy_git_commit"
+        ),
+        timeout=30,
+    )
+
+    assert returned_job is not None
+    assert returned_job.cluster == shared_a
+    # Only one of the two clusters actually ran the sync step; the other waited for it instead.
+    mock_sync_task.assert_awaited_once()
+    assert mock_sync_task.await_args.kwargs["remote"].hostname == shared_a
+
+
 async def test_submit_first_returns_none_when_no_cluster_can_submit(
     monkeypatch: pytest.MonkeyPatch,
     cluv_project_dir: Path,

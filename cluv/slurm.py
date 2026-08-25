@@ -89,12 +89,13 @@ def parse_slurm_time(time: str) -> timedelta:
 
 async def run_saccts(
     remote: Remote | None,
-    jobs: list[int],
+    jobs: list[int] | list[int | None],
     format: str = "State",
 ) -> list[str]:
     """Run sacct on the given job id(s) and return the output as a list of lines."""
     if not jobs:
         return []
+    jobs = [job for job in jobs if job is not None]
     jobs_str = ",".join(str(job) for job in jobs)
     sacct_command = f"sacct -j {jobs_str} --format={format} --parsable2 --noheader --allocations"
     if remote:

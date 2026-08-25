@@ -19,7 +19,7 @@ from cluv.cli.sync import get_cluster_to_remote, sync_common_part, sync_per_clus
 from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.slurm import FAILED_JOB_STATES, run_saccts
-from cluv.utils import console
+from cluv.utils import console, group_by_cluster
 
 logger = logging.getLogger(__name__)
 
@@ -91,13 +91,6 @@ def render_job_table(
     return table
 
 
-def _group_by_cluster(rows: list[SubmissionProgress]) -> dict[str, list[SubmissionProgress]]:
-    grouped: dict[str, list[SubmissionProgress]] = {}
-    for row in rows:
-        grouped.setdefault(row.cluster, []).append(row)
-    return grouped
-
-
 async def submit(
     cluster: str,
     job_script: Path | None,
@@ -118,7 +111,7 @@ async def submit(
     git_commit = ensure_clean_git_state(autocommit=autocommit, submit_command=submit_command)
     cluster_to_remote = await get_cluster_to_remote(cluster)
 
-    rows = [
+    job_submissions = [
         SubmissionProgress(submission=submission)
         for cluster_name, remote in cluster_to_remote.items()
         for submission in get_submissions(
@@ -141,7 +134,11 @@ async def submit(
             submit_to_cluster(
                 cluster_name,
                 remote,
-                rows=[row for row in rows if row.cluster == cluster_name],
+                job_submissions=[
+                    job_submission
+                    for job_submission in job_submissions
+                    if job_submission.cluster == cluster_name
+                ],
                 found_running_job=found_running_job,
                 _skip_sync=_skip_sync,
             )
@@ -152,11 +149,11 @@ async def submit(
     cancelling = False
 
     def _render() -> rich.table.Table:
-        return render_job_table(rows, cancelling=cancelling)
+        return render_job_table(job_submissions, cancelling=cancelling)
 
     with Live(get_renderable=_render, console=console, refresh_per_second=1):
         first_running_row = await wait_for_first_running_job(
-            rows, cluster_to_remote, tasks, found_running_job
+            job_submissions, cluster_to_remote, tasks, found_running_job
         )
         if first_running_row is None:
             console.log("All job submissions have failed! Exiting.")
@@ -164,7 +161,9 @@ async def submit(
 
         cancelling = True
         other_rows = [
-            row for row in rows if row is not first_running_row and row.job_id is not None
+            row
+            for row in job_submissions
+            if row is not first_running_row and row.job_id is not None
         ]
         await wait_for_jobs_to_cancel(other_rows, cluster_to_remote)
 
@@ -179,7 +178,7 @@ async def submit(
 
 
 async def wait_for_first_running_job(
-    rows: list[SubmissionProgress],
+    job_submissions: list[SubmissionProgress],
     cluster_to_remote: dict[str, Remote | None],
     tasks: list[asyncio.Task],
     found_running_job: asyncio.Event,
@@ -195,8 +194,8 @@ async def wait_for_first_running_job(
     """
     delay = 1
     while True:
-        submitted = [row for row in rows if row.job_id is not None]
-        by_cluster = _group_by_cluster(submitted)
+        submitted = [row for row in job_submissions if row.job_id is not None]
+        by_cluster = group_by_cluster(submitted)
         if by_cluster:
             states_per_cluster = await asyncio.gather(
                 *(
@@ -222,12 +221,14 @@ async def wait_for_first_running_job(
 
 
 async def wait_for_jobs_to_cancel(
-    rows: list[SubmissionProgress],
+    job_submissions: list[SubmissionProgress],
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
 ) -> None:
     """Cancel every (already-submitted) job in `rows`, and wait until they're all done."""
-    to_cancel = [row for row in rows if not row.state.startswith(("CANCELLED", "COMPLETED"))]
+    to_cancel = [
+        job for job in job_submissions if not job.state.startswith(("CANCELLED", "COMPLETED"))
+    ]
     if not to_cancel:
         return
 
@@ -235,7 +236,7 @@ async def wait_for_jobs_to_cancel(
 
     delay = 1
     while to_cancel:
-        by_cluster = _group_by_cluster(to_cancel)
+        by_cluster = group_by_cluster(to_cancel)
         states_per_cluster = await asyncio.gather(
             *(
                 run_saccts(cluster_to_remote[cluster], [row.job_id for row in cluster_rows])
@@ -257,7 +258,7 @@ async def wait_for_jobs_to_cancel(
             await asyncio.sleep(delay)
             delay = min(delay * 2, max_wait_time_seconds)
 
-    console.log(f"Cancelled {len(rows)} other job submission(s).")
+    console.log(f"Cancelled {len(job_submissions)} other job submission(s).")
 
 
 async def run_scancel(rows: list[SubmissionProgress]) -> None:
@@ -284,7 +285,7 @@ async def run_scancel(rows: list[SubmissionProgress]) -> None:
 async def submit_to_cluster(
     cluster: str,
     remote: Remote | None,
-    rows: list[SubmissionProgress],
+    job_submissions: list[SubmissionProgress],
     found_running_job: asyncio.Event,
     _skip_sync: bool = False,
 ) -> None:
@@ -298,20 +299,20 @@ async def submit_to_cluster(
             f"Skipping submission of jobs to cluster {cluster} because a job "
             f"has already started on another cluster."
         )
-        for row in rows:
+        for row in job_submissions:
             row.state = "SKIPPED"
         return
 
-    for row in rows:
+    for row in job_submissions:
         row.state = "SUBMITTING"
 
     results = await asyncio.gather(
-        *(submit_job(row.submission) for row in rows),
+        *(submit_job(row.submission) for row in job_submissions),
         return_exceptions=True,
     )
 
-    assert len(results) == len(rows)
-    for row, result in zip(rows, results):
+    assert len(results) == len(job_submissions)
+    for row, result in zip(job_submissions, results):
         if isinstance(result, Job):
             row.job = result
             row.state = "PENDING"

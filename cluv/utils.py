@@ -7,7 +7,7 @@ import sys
 from collections.abc import Iterator, Sequence
 from contextvars import ContextVar
 from pathlib import Path
-from typing import TypeVar
+from typing import Protocol, TypeVar
 
 import rich.console
 
@@ -59,3 +59,17 @@ def batched(iterable: Sequence[T], n: int) -> Iterator[tuple[T, ...]]:
         raise ValueError("n must be at least one")
     for i in range(0, len(iterable), n):
         yield tuple(iterable[i : i + n])
+
+
+class HasCluster(Protocol):
+    cluster: str
+
+
+JobLike = TypeVar("JobLike", bound=HasCluster)
+
+
+def group_by_cluster(objects_with_cluster_field: list[JobLike]) -> dict[str, list[JobLike]]:
+    grouped: dict[str, list[JobLike]] = {}
+    for job_submission in objects_with_cluster_field:
+        grouped.setdefault(job_submission.cluster, []).append(job_submission)
+    return grouped

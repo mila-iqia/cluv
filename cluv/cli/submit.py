@@ -9,6 +9,7 @@ import sys
 from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
 
+import rich.syntax
 import rich.table
 import rich.text
 from rich.live import Live
@@ -81,10 +82,11 @@ def render_job_table(
     concurrent `submit`/`submit_first` calls' rows into one shared live region later on.
     """
     title = "Waiting for jobs to cancel..." if cancelling else "Submitting jobs..."
-    table = rich.table.Table("Cluster", "Job ID", "Status", title=title)
+    table = rich.table.Table("Cluster", "Command", "Job ID", "Status", title=title)
     for row in rows:
         table.add_row(
             row.cluster,
+            rich.syntax.Syntax(row.submission.sbatch_command, "bash"),
             str(row.job_id) if row.job_id is not None else "-",
             rich.text.Text(row.state, style=_state_style(row.state)),
         )

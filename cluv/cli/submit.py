@@ -99,9 +99,9 @@ def render_job_table(
     title = "Waiting for jobs to cancel..." if cancelling else "Submitting jobs..."
     table = rich.table.Table(
         "Cluster",
-        "Command",
         "Job ID",
         "Status",
+        "Command",
         title=title,
         box=rich.box.ROUNDED,
         show_lines=True,
@@ -112,9 +112,9 @@ def render_job_table(
     for row in rows:
         table.add_row(
             row.cluster,
-            _short_command(row.submission),
             str(row.job_id) if row.job_id is not None else "-",
             rich.text.Text(row.state, style=_state_style(row.state)),
+            _short_command(row.submission),
         )
     return table
 

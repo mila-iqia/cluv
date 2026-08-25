@@ -136,7 +136,6 @@ async def pull_datasets_if_needed(here: str | None, config: CluvConfig, all_remo
 
             await _pull_datasets(source_remote, source_path, local_datasets_path)
         # else: data_source is a local path; data is already available locally, no pull needed
-        # Give back control of the console.
 
 
 async def run_git_push_if_needed():

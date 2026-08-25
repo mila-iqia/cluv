@@ -181,8 +181,8 @@ async def submit(
         await wait_for_jobs_to_cancel(other_rows, cluster_to_remote)
 
     console.print(
-        f"[green]Job {first_running_row.job_id} on cluster {first_running_row.cluster} is "
-        f"running.[/green]"
+        f"Job {first_running_row.job_id} on cluster {first_running_row.cluster} is running.",
+        style="green",
     )
     job = first_running_row.as_job()
     assert job is not None

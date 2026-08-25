@@ -62,7 +62,15 @@ def batched(iterable: Sequence[T], n: int) -> Iterator[tuple[T, ...]]:
 
 
 class HasCluster(Protocol):
-    cluster: str
+    """A plain `cluster: str` attribute would require callers to have a *settable* `cluster`
+    (Protocol members are mutable by default), which read-only `@property def cluster` types
+    like `SubmissionProgress` can't satisfy under strict structural typing. Declaring it as a
+    property here only requires it to be readable, matching how every current implementer
+    actually exposes it.
+    """
+
+    @property
+    def cluster(self) -> str: ...
 
 
 JobLike = TypeVar("JobLike", bound=HasCluster)

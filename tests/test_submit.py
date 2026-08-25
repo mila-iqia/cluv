@@ -685,6 +685,82 @@ async def test_can_submit_on_current_cluster(
     mock.assert_called()
 
 
+async def test_submit_cancels_in_flight_jobs_when_interrupted(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_current_cluster: str,
+    cluv_project_dir: Path,
+    no_active_remotes,
+) -> None:
+    """A user stopping `cluv submit` (Ctrl+C) while a job is already submitted shouldn't leave
+    it running unattended -- it should get scancel'd on the way out."""
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        ensure_clean_git_state.__name__,
+        lambda *args, **kwargs: "dummy_git_commit",
+    )
+    here = mock_current_cluster
+    monkeypatch.setenv("CC_CLUSTER", here)
+
+    jobid = 999
+
+    async def fake_run(
+        program_and_args: tuple[str, ...], **kwargs
+    ) -> subprocess.CompletedProcess[str]:
+        full_command = shlex.join(program_and_args)
+        if "sbatch --parsable" in full_command:
+            return subprocess.CompletedProcess(
+                program_and_args, returncode=0, stdout=f"{jobid}", stderr=""
+            )
+        if full_command == f"scancel {jobid}":
+            return subprocess.CompletedProcess(
+                program_and_args, returncode=0, stdout="", stderr=""
+            )
+        raise AssertionError(f"Unexpected command: {full_command}")
+
+    run_name = cluv.remote.run.__name__
+    for module in (cluv.remote, cluv.slurm, cluv.cli.submit):
+        monkeypatch.setattr(module, run_name, unittest.mock.AsyncMock(wraps=fake_run))
+
+    async def fake_wait_for_first_running_job(job_submissions, *_args, **_kwargs):
+        # Let the concurrently-scheduled submission task actually run and get a job id
+        # before "the user hits Ctrl+C" -- otherwise nothing would be in flight to cancel.
+        for _ in range(50):
+            if any(row.job_id is not None for row in job_submissions):
+                break
+            await asyncio.sleep(0.01)
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        cluv.cli.submit.wait_for_first_running_job.__name__,
+        fake_wait_for_first_running_job,
+    )
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        cluv.cli.submit.run_scancel.__name__,
+        mock_run_scancel := unittest.mock.AsyncMock(wraps=cluv.cli.submit.run_scancel),
+    )
+
+    job_script = cluv_project_dir / "my_script.sh"
+    job_script.parent.mkdir(exist_ok=True)
+    job_script.write_text("#!/bin/bash\necho Hello World\n")
+    job_script.touch(0o755)
+
+    with pytest.raises(asyncio.CancelledError):
+        await submit(
+            cluster=here,
+            job_script=job_script,
+            sbatch_args=[],
+            program_args=[],
+            chunking=None,
+            _skip_sync=True,
+        )
+
+    mock_run_scancel.assert_awaited_once()
+    (cancelled_rows,) = mock_run_scancel.await_args.args
+    assert [row.job_id for row in cancelled_rows] == [jobid]
+
+
 async def test_submit_races_the_allocations_of_a_cluster(
     monkeypatch: pytest.MonkeyPatch, project_dir: Path, no_active_remotes
 ) -> None:

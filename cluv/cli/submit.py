@@ -180,21 +180,29 @@ async def submit(
     def _render() -> rich.table.Table:
         return render_job_table(job_submissions, cancelling=cancelling)
 
-    with Live(get_renderable=_render, console=console, refresh_per_second=1):
-        first_running_row = await wait_for_first_running_job(
-            job_submissions, cluster_to_remote, tasks, found_running_job
-        )
-        if first_running_row is None:
-            console.log("All job submissions have failed! Exiting.")
-            return None
+    try:
+        with Live(get_renderable=_render, console=console, refresh_per_second=1):
+            first_running_row = await wait_for_first_running_job(
+                job_submissions, cluster_to_remote, tasks, found_running_job
+            )
+            if first_running_row is None:
+                console.log("All job submissions have failed! Exiting.")
+                return None
 
-        cancelling = True
-        other_rows = [
-            row
-            for row in job_submissions
-            if row is not first_running_row and row.job_id is not None
-        ]
-        await wait_for_jobs_to_cancel(other_rows, cluster_to_remote)
+            cancelling = True
+            other_rows = [
+                row
+                for row in job_submissions
+                if row is not first_running_row and row.job_id is not None
+            ]
+            await wait_for_jobs_to_cancel(other_rows, cluster_to_remote)
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # The user stopped `cluv submit` while jobs were still in flight -- cancel everything
+        # that got a job id so far instead of leaving them running unattended.
+        console.log("Interrupted by user. Cancelling all submitted jobs...")
+        submitted_rows = [row for row in job_submissions if row.job_id is not None]
+        await run_scancel(submitted_rows)
+        raise
 
     console.print(
         f"Job {first_running_row.job_id} on cluster {first_running_row.cluster} is running.",

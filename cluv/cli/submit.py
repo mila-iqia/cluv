@@ -126,7 +126,8 @@ async def submit(
     ]
 
     if not _skip_sync:
-        await sync_common_part(list(cluster_to_remote.values()))
+        remotes = [r for r in cluster_to_remote.values() if r]
+        await sync_common_part(remotes)
 
     found_running_job = asyncio.Event()
     tasks = [

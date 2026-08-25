@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 __all__ = ["sync", "install_uv", "clone_project", "fetch_results"]
 
 
+# Groups of cluster hostnames that are actually distinct login nodes of the same physical
+# cluster, sharing a single filesystem (confirmed live via SSH: `trillium` and `trillium-gpu`
+# mount the identical NFS export at $HOME). Syncing with more than one cluster in the same group
+# at a time is pointless (it's the same on-disk checkout) and unsafe (concurrent `git`/`uv sync`
+# commands from two hosts race on that shared checkout).
+CLUSTERS_SHARING_A_FILESYSTEM: list[frozenset[str]] = [
+    frozenset({"trillium", "trillium-gpu"}),
+]
+
 # TODO: Control the 'hide' and 'display' / etc using the --verbose flag value, in addition to the loglevel.
 # TODO: Pipe the commands and their outputs / stderr to separate files for each cluster, so people can easily inspect
 # what might have gone wrong. Also include a message at the end like "Check <logs_dir>/{cluster}.log for details."
@@ -71,10 +80,10 @@ async def sync(
             c: r for c, r in cluster_to_remote.items() if c not in disabled and c != here
         }
 
-    remotes = [remote for remote in cluster_to_remote.values() if remote is not None]
+    remotes = [remote for remote in cluster_to_remote.values() if remote]
     if not remotes:
         raise RuntimeError(
-            "[red]Not currently connected to any Slurm cluster.[/red] "
+            "Not currently connected to any Slurm cluster. "
             "Use `cluv login` to login and create reusable connections."
         )
 
@@ -102,12 +111,15 @@ async def pull_datasets_if_needed(here: str | None, config: CluvConfig, all_remo
     with set_context(console_lock, asyncio.Lock()):
         if (
             config.data_source
-            and ":" in config.data_source  # remote source: cluster:path (POSIX-only tool)
+            and ":" in config.data_source  # "[cluster:]path" (POSIX-only tool)
             and (source_cluster := config.data_source.split(":", 1)[0]) != here
         ):
             _source_host, _, source_path = config.data_source.partition(":")
             # Fetch the data from the source cluster and copy it to the local datasets_path.
-            source_remote = next((r for r in all_remotes if r.hostname == source_cluster), None)
+            source_remote = next(
+                (r for r in all_remotes if r.hostname == source_cluster),
+                await get_remote_without_2fa_prompt(_source_host),
+            )
             if not source_remote:
                 raise RuntimeError(
                     f"[red]Unable to sync datasets, need a connection to the source cluster "
@@ -131,16 +143,6 @@ async def run_git_push_if_needed():
     if "GITHUB_ACTIONS" not in os.environ and not await _head_is_up_to_date():
         # NOTE: Skip this step in the GitHub CI, since the commit is already pushed (and we have errors).
         await run(("git", "push"), hide=False)
-
-
-# Groups of cluster hostnames that are actually distinct login nodes of the same physical
-# cluster, sharing a single filesystem (confirmed live via SSH: `trillium` and `trillium-gpu`
-# mount the identical NFS export at $HOME). Syncing with more than one cluster in the same group
-# at a time is pointless (it's the same on-disk checkout) and unsafe (concurrent `git`/`uv sync`
-# commands from two hosts race on that shared checkout).
-CLUSTERS_SHARING_A_FILESYSTEM: list[frozenset[str]] = [
-    frozenset({"trillium", "trillium-gpu"}),
-]
 
 
 def _remotes_to_actually_sync(remotes: list[Remote]) -> list[Remote]:
@@ -209,15 +211,12 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
-async def sync_common_part(
-    cluster_remotes: list[Remote | None], sync_datasets: bool = True
-) -> None:
+async def sync_common_part(remotes: list[Remote], sync_datasets: bool = True) -> None:
     """Sync steps that only need to happen once, regardless of how many clusters we're syncing
     or submitting to: push the local commit, and pull the dataset from its source cluster if
     needed.
     """
     config = get_cluv_config()
-    remotes = [remote for remote in cluster_remotes if remote is not None]
     await run_git_push_if_needed()
     if sync_datasets:
         await pull_datasets_if_needed(current_cluster(), config, remotes)

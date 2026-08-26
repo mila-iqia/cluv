@@ -449,10 +449,10 @@ def sbatch_args_from_args_list(sbatch_args_list: list[str]) -> SbatchArgs:
     # Maybe use argparse, and keep it simple! No need to recreate every single sbatch flag,
     #
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    # parser.add_argument("-c", "--cpus-per-task", dest="cpus-per-task", default=argparse.SUPPRESS)
-    # parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
-    # parser.add_argument("-N", "--nodes", dest="nodes", default=argparse.SUPPRESS)
-    # parser.add_argument("-A", "--account", dest="account", default=argparse.SUPPRESS)
+    parser.add_argument("-c", "--cpus-per-task", dest="cpus-per-task", default=argparse.SUPPRESS)
+    parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
+    parser.add_argument("-N", "--nodes", dest="nodes", default=argparse.SUPPRESS)
+    parser.add_argument("-A", "--account", dest="account", default=argparse.SUPPRESS)
     args, unknown = parser.parse_known_args(sbatch_args_list)
     sbatch_args: SbatchArgs = vars(args)
 
@@ -521,7 +521,7 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     >>> sbatch_args_from_dict({"exclusive": True})
     ['--exclusive']
     >>> sbatch_args_from_dict({"N": "2"})
-    ['-N', '2']
+    ['-N=2']
     >>> sbatch_args_from_dict({"gpus": "", "requeue": False})
     []
     >>> sbatch_args_from_dict({"n": True})

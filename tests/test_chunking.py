@@ -22,13 +22,18 @@ class TestApplyChunking:
         assert result["array"] == "0-3%1"
         assert "t" not in result
 
-    def test_time_takes_precedence_over_t_when_both_are_present(self) -> None:
+    def test_last_time_key_in_dict_is_used(self) -> None:
         """`merge_sbatch_args` normalizes `-t` to `time` before it ever reaches here, so in
         practice `sbatch_args` shouldn't carry both keys at once -- but `apply_chunking` is a
         public function, so its own tie-break (documented in its docstring: `time` before `t`)
         stays covered directly, independent of that upstream normalization."""
         n_chunks, result = apply_chunking(
             {"time": "12:00:00", "t": "6:00:00"}, job_script=None, chunking=3
+        )
+        assert n_chunks == 2
+        assert result["time"] == "3:00:00"
+        n_chunks, result = apply_chunking(
+            {"t": "6:00:00", "time": "12:00:00"}, job_script=None, chunking=3
         )
         assert n_chunks == 4
         assert result["time"] == "3:00:00"

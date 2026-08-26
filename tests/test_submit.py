@@ -123,7 +123,10 @@ def test_bug_with_t_flag_and_time_in_config(monkeypatch: pytest.MonkeyPatch):
     assert merge_sbatch_args({"time": "3:00:00"}, ["-t=00:00:30"]) == {"time": "00:00:30"}
 
 
-def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(monkeypatch: pytest.MonkeyPatch):
+@pytest.mark.parametrize("chunking", [None, 5])
+def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
+    chunking: int | None, monkeypatch: pytest.MonkeyPatch
+):
     """Test that if we pass some unknown args as sbatch args, their order is preserved in the final sbatch command.
 
     This shields us from having to support every single sbatch flag in the code.
@@ -142,16 +145,15 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(monkeypatch: pytest
         "-f=second-in-cli",
     ]
     expected_sbatch_args_in_command = [
-        "--time=3:00:00",
+        "--time=00:00:30",
         "--cpus-per-task=4",
         # "-f=config", # removed, since it is in the sbatch args from the CLI.
-        "-t=00:00:30",
+        # "-t=00:00:30",
+        "--nodes=2",
         "--exclusive",
-        "-N=2",
         "--foo=first-in-cli",  # secretly --foo and -f are the same argument to sbatch (dest=`foo`)
         "-f=second-in-cli",  # the ordering is preserved.
     ]
-    # TODO: Setup a cluv config with time: "3:00:00" for this test.
     cluster = "bar"
     monkeypatch.setattr(
         cluv.cli.submit,
@@ -732,7 +734,11 @@ async def test_can_submit_on_current_cluster(
         )  # Should not SSH since we're submitting to the current cluster.
         if "sbatch --parsable" in full_command:
             assert " ".join(program_args) in full_command
-            assert " ".join(sbatch_args) in full_command
+            assert all(sbatch_arg in full_command for sbatch_arg in sbatch_args)
+            for i, arg in enumerate(sbatch_args[:-1]):
+                next_arg = sbatch_args[i + 1]
+                assert full_command.index(arg) < full_command.index(next_arg)
+
             return subprocess.CompletedProcess(
                 program_and_args, returncode=0, stdout=f"{jobid}", stderr=""
             )

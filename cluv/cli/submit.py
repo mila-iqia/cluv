@@ -1,3 +1,4 @@
+import argparse
 import asyncio
 import dataclasses
 import datetime
@@ -429,6 +430,51 @@ _SBATCH_ARG_ALIASES = {"t": "time"}
 `merge_sbatch_args`'s output so `-t`/`--time` can't end up as two separate, conflicting keys."""
 
 
+def sbatch_args_from_args_list(sbatch_args_list: list[str]) -> SbatchArgs:
+    """Convert a list of sbatch flags (from the CLI) to a dict of sbatch options.
+
+    Behaves like argparse, where if the flags are passed multiple times, the last value is kept.
+    Aliases for common commands are also kept.
+
+    >>> sbatch_args_from_args_list(["--time=2:00:00", "-t=00:00:30"])
+    {'time': '00:00:30'}
+    >>> sbatch_args_from_args_list(["--time=2:00:00", "--gpus=1"])
+    {'time': '2:00:00', 'gpus': '1'}
+    >>> sbatch_args_from_args_list(["--exclusive"])
+    {'exclusive': True}
+    >>> sbatch_args_from_args_list(["-N", "2"])
+    {'N': '2'}
+    >>> sbatch_args_from_args_list(["--gpus=", "--requeue=False"])
+    {}
+    >>> sbatch_args_from_args_list(["-n"])
+    {'n': True}
+    >>> sbatch_args_from_args_list(["--array=0-3%2", "-a=0-1%1"])
+    {'array': "0-3%2", "a": "0-1%1"}
+    """
+    # Maybe use argparse, and keep it simple! No need to recreate every single sbatch flag,
+    #
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
+    parser.add_argument("-c", "--cpus-per-task", dest="cpus-per-task", default=argparse.SUPPRESS)
+    parser.add_argument("-N", "--nodes", dest="nodes", default=argparse.SUPPRESS)
+    parser.add_argument("-A", "--account", dest="nodes", default=argparse.SUPPRESS)
+    args, unknown = parser.parse_known_args(sbatch_args_list)
+    sbatch_args: SbatchArgs = vars(args)
+    for value in unknown:
+        if value.startswith("--"):
+            key, _, val = value[2:].partition("=")
+        elif value.startswith("-"):
+            value = value.removeprefix("-")
+            key, _, val = value.partition("=")
+            if not val.strip():
+                val = True  # --exclusive --> {exclusive: True}
+        else:
+            continue
+        if val is not None:
+            sbatch_args[key] = val
+    return sbatch_args
+
+
 def merge_sbatch_args(from_config: SbatchArgs, from_cli: list[str]) -> SbatchArgs:
     """Merge the sbatch args from the config and from the CLI, with CLI args taking precedence.
 
@@ -436,28 +482,12 @@ def merge_sbatch_args(from_config: SbatchArgs, from_cli: list[str]) -> SbatchArg
     -t=2:00:00` -- config or CLI, either order -- resolves to a single `time` value (the last
     one written) instead of leaving two separate keys for what's really the same sbatch option.
     """
-    merged = {_SBATCH_ARG_ALIASES.get(key, key): value for key, value in from_config.items()}
-    index = 0
-    while index < len(from_cli):
-        flag = from_cli[index]
-        if flag.startswith("--"):
-            key, _, value = flag[2:].partition("=")
-            key = _SBATCH_ARG_ALIASES.get(key, key)
-            merged[key] = value if value else True
-            index += 1
-        elif flag.startswith("-"):
-            key = _SBATCH_ARG_ALIASES.get(flag[1:], flag[1:])
-            has_separate_value = index + 1 < len(from_cli) and not from_cli[index + 1].startswith(
-                "-"
-            )
-            if has_separate_value:
-                merged[key] = from_cli[index + 1]
-                index += 2
-            else:
-                merged[key] = True
-                index += 1
-        else:
-            raise ValueError(f"Not a valid sbatch flag: {flag!r}")
+    sbatch_args_from_cli = sbatch_args_from_args_list(from_cli)
+    merged: SbatchArgs = from_config.copy()
+    for key, value in sbatch_args_from_cli.items():
+        if key in merged:
+            _val = merged.pop(key)
+        merged[key] = value
     return merged
 
 

@@ -20,12 +20,20 @@ from cluv.cli.submit import (
     build_submit_command,
     ensure_clean_git_state,
     get_sbatch_command,
+    get_submissions,
     merge_sbatch_args,
     sbatch_args_from_dict,
     submit,
 )
 from cluv.cli.submit_utils.chunking import CHUNK_SIZE, apply_chunking
-from cluv.config import get_cluv_config, load_cluv_config
+from cluv.config import (
+    CluvConfig,
+    PartialClusterConfig,
+    SbatchArgs,
+    get_cluv_config,
+    load_cluv_config,
+)
+from cluv.remote import Remote
 from cluv.utils import current_cluster
 from tests.test_integration import IN_GITHUB_CLOUD_CI
 
@@ -106,6 +114,52 @@ class TestMergeSbatchArgs:
         assert merge_sbatch_args({}, ["--time=01:00:00", "-t", "10:00:00"]) == {"time": "10:00:00"}
         assert merge_sbatch_args({}, ["-t", "10:00:00", "--time=01:00:00"]) == {"time": "01:00:00"}
         assert merge_sbatch_args({"t": "1:00:00"}, []) == {"time": "1:00:00"}
+
+
+def test_bug_with_t_flag_and_time_in_config(monkeypatch: pytest.MonkeyPatch):
+    """Passing -t=00:00:30 while there is a `time: "3:00:00` in the config produces a sbatch command that looks like
+    sbatch --time=3:00:00 --t=00:00:30, and this --t is incorrect!.
+    """
+    sbatch_args = ["-t=00:00:30"]
+    assert merge_sbatch_args({"time": "3:00:00"}, sbatch_args) == {"time": "00:00:30"}
+
+
+def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(monkeypatch: pytest.MonkeyPatch):
+    """Test that if we pass some unknown args as sbatch args, their order is preserved in the final sbatch command.
+
+    This shields us from having to support every single sbatch flag in the code.
+    """
+    sbatch_args_from_cli = ["-t=00:00:30", "--exclusive", "-N", "2", "--foo=1", "-f=2"]
+    sbatch_args_in_config: SbatchArgs = {"time": "3:00:00", "cpus-per-task": 4}
+    # TODO: Setup a cluv config with time: "3:00:00" for this test.
+    cluster = "bar"
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        get_cluv_config.__name__,
+        unittest.mock.Mock(
+            get_cluv_config,
+            return_value=CluvConfig(
+                results_path="foo",
+                clusters={cluster: PartialClusterConfig(sbatch_args=sbatch_args_in_config)},
+            ),
+        ),
+    )
+    submissions = get_submissions(
+        cluster=cluster,
+        remote=unittest.mock.AsyncMock(Remote, hostname=cluster),
+        chunking=None,
+        sbatch_args=sbatch_args_from_cli,
+        job_script=Path("my_script.sh"),
+        program_args=["python", "main.py", "--help"],
+        git_commit="foo",
+    )
+    for submission in submissions:
+        # Assert that the order of the flags is preserved in the final sbatch command.
+        joined_cli_flags = " ".join(sbatch_args_from_cli)
+        assert joined_cli_flags in submission.sbatch_command
+        assert submission.sbatch_command.index(
+            "--cpus-per-task=4"
+        ) < submission.sbatch_command.index(joined_cli_flags)
 
 
 class TestGetSbatchCommand:

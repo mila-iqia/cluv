@@ -30,6 +30,7 @@ from .cli.sh import sh
 from .cli.status import status
 from .cli.submit import submit
 from .cli.submit_utils.chunking import CHUNK_SIZE
+from .cli.sweep import sweep
 from .cli.sync import sync
 from .utils import console
 
@@ -43,15 +44,17 @@ def main(argv: list[str] | None = None) -> None:
         argv = sys.argv[1:]
 
     # argparse consumes '--' before REMAINDER sees it, so we extract program
-    # args (everything after the first '--' following 'submit') before parsing.
-    submit_program_args: list[str] = []
-    try:
-        sub_idx = argv.index("submit")
-        sep_idx = argv.index("--", sub_idx + 1)
-        submit_program_args = list(argv[sep_idx + 1 :])
-        argv = list(argv[:sep_idx])
-    except ValueError:
-        pass
+    # args (everything after the first '--' following 'submit'/'sweep') before parsing.
+    subcommand_program_args: list[str] = []
+    for subcommand_name in ("submit", "sweep"):
+        try:
+            sub_idx = argv.index(subcommand_name)
+            sep_idx = argv.index("--", sub_idx + 1)
+            subcommand_program_args = list(argv[sep_idx + 1 :])
+            argv = list(argv[:sep_idx])
+            break
+        except ValueError:
+            continue
 
     parser = simple_parsing.ArgumentParser(
         description=__doc__,
@@ -89,6 +92,9 @@ def main(argv: list[str] | None = None) -> None:
     submit_parser = add_submit_args(subparsers)
     _add_v_arg(submit_parser)
 
+    sweep_parser = add_sweep_args(subparsers)
+    _add_v_arg(sweep_parser)
+
     status_parser = add_status_args(subparsers)
     _add_v_arg(status_parser)
 
@@ -108,7 +114,7 @@ def main(argv: list[str] | None = None) -> None:
     subcommand = args_dict.pop("<command>")
     function: Callable = args_dict.pop("func")
 
-    if subcommand == "submit":
+    if subcommand in ("submit", "sweep"):
         # job script is an optional positional argument. When not passed, an sbatch argument like
         # --gpus will be parsed as the job script. We rectify that here.
         job_script: Path | None = args_dict["job_script"]
@@ -117,14 +123,18 @@ def main(argv: list[str] | None = None) -> None:
             job_script = None
             args_dict["job_script"] = None
 
-        # `--autocommit` / `--chunking` can end up swallowed into the `sbatch_args` REMAINDER instead of
-        # being recognized as its own flag, since REMAINDER consumes all remaining tokens
-        # (including ones that look like other known options) once positional parsing starts.
-        # Recover them here using the option's own `const`/`type`, so a value-taking flag like
-        # `--chunking=6` ends up with `6` (not left in `sbatch_args`) and a bare `--chunking` ends
-        # up with its `const` default (not `True`).
+        # `--autocommit` / `--chunking` / `--name` can end up swallowed into the `sbatch_args`
+        # REMAINDER instead of being recognized as its own flag, since REMAINDER consumes all
+        # remaining tokens (including ones that look like other known options) once positional
+        # parsing starts. Recover them here using the option's own `const`/`type`, so a
+        # value-taking flag like `--chunking=6` ends up with `6` (not left in `sbatch_args`), a
+        # bare `--chunking` ends up with its `const` default (not `True`), and `--name=x` ends up
+        # with `"x"`. Only the `--flag=value` form is recovered this way (matching `--chunking`'s
+        # own convention) — `--flag value` (space-separated) is recovered by argparse itself
+        # whenever the job script isn't omitted.
+        active_parser = submit_parser if subcommand == "submit" else sweep_parser
         for flag in args_dict.keys():
-            action = submit_parser._option_string_actions.get(f"--{flag}")
+            action = active_parser._option_string_actions.get(f"--{flag}")
             if action is None:
                 continue
             remaining_sbatch_args = []
@@ -137,7 +147,7 @@ def main(argv: list[str] | None = None) -> None:
                 else:
                     remaining_sbatch_args.append(arg)
             args_dict["sbatch_args"] = remaining_sbatch_args
-        args_dict["program_args"] = submit_program_args
+        args_dict["program_args"] = subcommand_program_args
 
     if subcommand == "status" and quiet:
         console.print("Warning: --quiet has no effect with the 'status' command.", style="yellow")
@@ -213,6 +223,56 @@ def add_submit_args(subparsers: Subparsers):
     )
     submit_parser.set_defaults(func=submit)
     return submit_parser
+
+
+def add_sweep_args(subparsers: Subparsers):
+    sweep_parser = subparsers.add_parser(
+        "sweep",
+        help="Run a packed, multi-job hyperparameter sweep on a remote cluster.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+        usage="cluv sweep <cluster> [<job.sh>] [--name <name>] [sbatch-args...] [-- program-args...]",
+    )
+    sweep_parser.add_argument(
+        "cluster",
+        metavar="<cluster>",
+        help="The cluster to submit the sweep's jobs on.",
+    )
+    sweep_parser.add_argument(
+        "job_script",
+        metavar="<job.sh>",
+        nargs="?",
+        default=None,
+        type=Path,
+        help="Path to the sbatch job script (relative to project root). Defaults to the job script specified in the config at 'job_script_path'.",
+    )
+    sweep_parser.add_argument(
+        "--name",
+        default=None,
+        metavar="<name>",
+        help="Name for this sweep, used to build resumable results paths. Defaults to the job "
+        "script's filename stem. Must be passed as --name=<name>, not space-separated.",
+    )
+    sweep_parser.add_argument(
+        "--autocommit",
+        action="store_true",
+        help="Create a local commit with tracked changes before submitting the sweep's jobs.",
+    )
+    sweep_parser.add_argument(
+        "--max-concurrent-submissions",
+        type=int,
+        default=8,
+        metavar="<n>",
+        help="Maximum number of `sbatch` submissions to run concurrently.",
+    )
+    sweep_parser.add_argument(
+        "sbatch_args",
+        nargs=argparse.REMAINDER,
+        metavar="...",
+        help="sbatch flags (before --) and/or program arguments, with sweep specs like "
+        "--foo=1,2 (after --).",
+    )
+    sweep_parser.set_defaults(func=sweep)
+    return sweep_parser
 
 
 def add_status_args(subparsers: Subparsers):

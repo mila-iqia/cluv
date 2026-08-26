@@ -79,7 +79,7 @@ class TestSbatchArgsFromDict:
         assert sbatch_args_from_dict({"time": "2:00:00"}) == ["--time=2:00:00"]
 
     def test_short_key_string_value(self) -> None:
-        assert sbatch_args_from_dict({"N": "2"}) == ["-N", "2"]
+        assert sbatch_args_from_dict({"N": "2"}) == ["-N=2"]
 
     def test_true_long_key_is_bare_flag(self) -> None:
         assert sbatch_args_from_dict({"exclusive": True}) == ["--exclusive"]
@@ -103,7 +103,7 @@ class TestMergeSbatchArgs:
         merged = merge_sbatch_args(
             {"time": "1:00:00", "mem": "16G"}, ["--time=2:00:00", "--exclusive", "-N", "2"]
         )
-        assert merged == {"time": "2:00:00", "mem": "16G", "exclusive": True, "N": "2"}
+        assert merged == {"time": "2:00:00", "mem": "16G", "exclusive": True, "nodes": "2"}
 
     def test_no_cli_args_is_a_passthrough(self) -> None:
         assert merge_sbatch_args({"time": "1:00:00"}, []) == {"time": "1:00:00"}
@@ -120,8 +120,7 @@ def test_bug_with_t_flag_and_time_in_config(monkeypatch: pytest.MonkeyPatch):
     """Passing -t=00:00:30 while there is a `time: "3:00:00` in the config produces a sbatch command that looks like
     sbatch --time=3:00:00 --t=00:00:30, and this --t is incorrect!.
     """
-    sbatch_args = ["-t=00:00:30"]
-    assert merge_sbatch_args({"time": "3:00:00"}, sbatch_args) == {"time": "00:00:30"}
+    assert merge_sbatch_args({"time": "3:00:00"}, ["-t=00:00:30"]) == {"time": "00:00:30"}
 
 
 def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(monkeypatch: pytest.MonkeyPatch):
@@ -129,8 +128,29 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(monkeypatch: pytest
 
     This shields us from having to support every single sbatch flag in the code.
     """
-    sbatch_args_from_cli = ["-t=00:00:30", "--exclusive", "-N", "2", "--foo=1", "-f=2"]
-    sbatch_args_in_config: SbatchArgs = {"time": "3:00:00", "cpus-per-task": 4}
+    sbatch_args_in_config: SbatchArgs = {
+        "time": "3:00:00",
+        "cpus-per-task": 4,
+        "f": "config",
+    }
+    sbatch_args_from_cli = [
+        "-t=00:00:30",
+        "--exclusive",
+        "-N",
+        "2",
+        "--foo=first-in-cli",
+        "-f=second-in-cli",
+    ]
+    expected_sbatch_args_in_command = [
+        "--time=3:00:00",
+        "--cpus-per-task=4",
+        # "-f=config", # removed, since it is in the sbatch args from the CLI.
+        "-t=00:00:30",
+        "--exclusive",
+        "-N=2",
+        "--foo=first-in-cli",  # secretly --foo and -f are the same argument to sbatch (dest=`foo`)
+        "-f=second-in-cli",  # the ordering is preserved.
+    ]
     # TODO: Setup a cluv config with time: "3:00:00" for this test.
     cluster = "bar"
     monkeypatch.setattr(
@@ -155,11 +175,18 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(monkeypatch: pytest
     )
     for submission in submissions:
         # Assert that the order of the flags is preserved in the final sbatch command.
-        joined_cli_flags = " ".join(sbatch_args_from_cli)
-        assert joined_cli_flags in submission.sbatch_command
-        assert submission.sbatch_command.index(
-            "--cpus-per-task=4"
-        ) < submission.sbatch_command.index(joined_cli_flags)
+        # joined_cli_flags = " ".join(expected_sbatch_args_in_command)
+        # assert joined_cli_flags in submission.sbatch_command
+        print(f"Submission command: {submission.sbatch_command}")
+        for i, expected_part in enumerate(expected_sbatch_args_in_command[:-1]):
+            next_expected_part = expected_sbatch_args_in_command[i + 1]
+            print(expected_part, next_expected_part)
+            assert submission.sbatch_command.index(
+                expected_part
+            ) < submission.sbatch_command.index(next_expected_part), (
+                expected_part,
+                next_expected_part,
+            )
 
 
 class TestGetSbatchCommand:

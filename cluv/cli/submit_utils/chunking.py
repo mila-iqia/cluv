@@ -1,3 +1,4 @@
+import argparse
 import logging
 from pathlib import Path
 
@@ -21,18 +22,31 @@ def apply_chunking(
     sbatch arg, the `SBATCH_TIMELIMIT` env var, or a `#SBATCH --time=...` directive in the job
     script header.
 
-    Returns the number of chunks (`None` when `chunking` is `None`, i.e. chunking is disabled)
-    and `sbatch_args` updated with the `--time`/`--array` directives needed to run them.
-    """
-    if chunking is None:
-        return None, sbatch_args
+    raises:
+    - ValueError if `chunking` is true-ish and there is already an --array directive in the
+      sbatch args.
 
-    time_limit = (
-        sbatch_args.get("time")
-        or sbatch_args.get("t")
-        or (env_vars or {}).get("SBATCH_TIMELIMIT")
-        or (job_script and get_time_from_job_script_header(job_script))
-    )
+    Returns:
+    - the number of chunks (`None` when `chunking` is `None`, i.e. chunking is disabled)
+    - `sbatch_args_from_config` with all previous '-t' or 'time' keys replaced by a single 'time'
+       key with the chunk length (in hours) and 'array' with the right value.
+    """
+    if not chunking:
+        return None, sbatch_args
+    if "array" in sbatch_args:
+        raise ValueError(
+            "Cannot use the `--chunking` option if there is already an 'array' key in the job configuration."
+        )
+    time_limit = None
+    # Use the last value from either --time or -t
+    for key, val in sbatch_args.items():
+        if key in ("time", "t"):
+            time_limit = val
+    # If still not found, use the env vars or the job script header.
+    if time_limit is None:
+        time_limit = (env_vars or {}).get("SBATCH_TIMELIMIT") or (
+            job_script and get_time_from_job_script_header(job_script)
+        )
     if not time_limit:
         raise ValueError(
             "Could not find a time value for the job, which is required for chunking."
@@ -44,10 +58,27 @@ def apply_chunking(
     n_chunks = max(int((total_hours + chunking - 1) // chunking), 1)
     logger.info(f"Chunking job into {n_chunks} smaller jobs of {chunking} hours each.")
 
-    sbatch_args = {k: v for k, v in sbatch_args.items() if k not in ("time", "t")}
-    sbatch_args["time"] = f"{chunking}:00:00"
-    sbatch_args["array"] = f"0-{n_chunks - 1}%1"
-    return n_chunks, sbatch_args
+    sbatch_args_from_config = {k: v for k, v in sbatch_args.items() if k not in ("time", "t")}
+    sbatch_args_from_config["time"] = f"{chunking}:00:00"
+    sbatch_args_from_config["array"] = f"0-{n_chunks - 1}%1"
+    return n_chunks, sbatch_args_from_config
+
+
+def get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
+    """Return the SLURM time limit from the sbatch args if it exists."""
+    # Last occurrence of --time or -t takes precedence, so we iterate in reverse.
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
+    args, _ = parser.parse_known_args(sbatch_args)
+    return getattr(args, "time", None)
+    # for i, arg in reversed(list(enumerate(sbatch_args))):
+    #     if arg.startswith(("--time=", "-t=")):
+    #         # Like "--time=00:10:00" or "-t=1-02:00:00"
+    #         return arg.split("=")[1]
+    #     if arg.strip() in ("--time", "-t"):
+    #         # Like ["--time", "00:10:00"] or ["-t", "1-02:00:00"]
+    #         return sbatch_args[i + 1] if i + 1 < len(sbatch_args) else None
+    return None
 
 
 def get_time_from_job_script_header(job_script: Path) -> str | None:

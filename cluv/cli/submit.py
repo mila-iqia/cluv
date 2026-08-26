@@ -397,16 +397,14 @@ def get_submissions(
         )
 
     for job_resources in job_resources_options:
-        job_sbatch_args: SbatchArgs = merge_sbatch_args(
-            from_config=job_resources, from_cli=sbatch_args
-        )
-        n_chunks, job_sbatch_args = apply_chunking(
-            job_sbatch_args, job_script=job_script, chunking=chunking
+        job_resources = merge_sbatch_args(from_config=job_resources, from_cli=sbatch_args)
+        n_chunks, job_resources = apply_chunking(
+            job_resources, job_script=job_script, chunking=chunking
         )
         sbatch_command = get_sbatch_command(
             cluster,
             job_script=job_script,
-            sbatch_args=job_sbatch_args,
+            sbatch_args=job_resources,
             program_args=program_args,
             git_commit=git_commit,
         )
@@ -415,7 +413,7 @@ def get_submissions(
                 cluster=cluster,
                 remote=remote,
                 job_script=job_script,
-                sbatch_args=job_sbatch_args,
+                sbatch_args=job_resources,
                 program_args=program_args,
                 sbatch_command=sbatch_command,
                 n_chunks=n_chunks,
@@ -423,11 +421,6 @@ def get_submissions(
             )
         )
     return submissions
-
-
-_SBATCH_ARG_ALIASES = {"t": "time"}
-"""Short-flag spellings that are aliases of a canonical long flag, normalized on the way into
-`merge_sbatch_args`'s output so `-t`/`--time` can't end up as two separate, conflicting keys."""
 
 
 def sbatch_args_from_args_list(sbatch_args_list: list[str]) -> SbatchArgs:
@@ -443,34 +436,54 @@ def sbatch_args_from_args_list(sbatch_args_list: list[str]) -> SbatchArgs:
     >>> sbatch_args_from_args_list(["--exclusive"])
     {'exclusive': True}
     >>> sbatch_args_from_args_list(["-N", "2"])
-    {'N': '2'}
-    >>> sbatch_args_from_args_list(["--gpus=", "--requeue=False"])
-    {}
+    {'nodes': '2'}
+    >>> sbatch_args_from_args_list(["-f", "2"])
+    {'f': '2'}
+    >>> sbatch_args_from_args_list(["--gpus", "--requeue=False"])
+    {'gpus': True, 'requeue': 'False'}
     >>> sbatch_args_from_args_list(["-n"])
     {'n': True}
     >>> sbatch_args_from_args_list(["--array=0-3%2", "-a=0-1%1"])
-    {'array': "0-3%2", "a": "0-1%1"}
+    {'array': '0-3%2', 'a': '0-1%1'}
     """
     # Maybe use argparse, and keep it simple! No need to recreate every single sbatch flag,
     #
-    parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
-    parser.add_argument("-c", "--cpus-per-task", dest="cpus-per-task", default=argparse.SUPPRESS)
-    parser.add_argument("-N", "--nodes", dest="nodes", default=argparse.SUPPRESS)
-    parser.add_argument("-A", "--account", dest="nodes", default=argparse.SUPPRESS)
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    # parser.add_argument("-c", "--cpus-per-task", dest="cpus-per-task", default=argparse.SUPPRESS)
+    # parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
+    # parser.add_argument("-N", "--nodes", dest="nodes", default=argparse.SUPPRESS)
+    # parser.add_argument("-A", "--account", dest="account", default=argparse.SUPPRESS)
     args, unknown = parser.parse_known_args(sbatch_args_list)
     sbatch_args: SbatchArgs = vars(args)
-    for value in unknown:
+
+    # First, join any stragglers like ['-f', '2'] into ['-f=2'] so we can parse them consistently.
+    # Edge case: ['-f', '-g'] stays the same.
+    joined_unknown_args: list[str] = []
+    skip_next = False
+    for i, arg in enumerate(unknown):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg.startswith("-") and i + 1 < len(unknown) and not unknown[i + 1].startswith("-"):
+            joined_unknown_args.append(f"{arg}={unknown[i + 1]}")
+            skip_next = True
+        else:
+            joined_unknown_args.append(arg)
+
+    for value in joined_unknown_args:
         if value.startswith("--"):
             key, _, val = value[2:].partition("=")
         elif value.startswith("-"):
             value = value.removeprefix("-")
             key, _, val = value.partition("=")
-            if not val.strip():
-                val = True  # --exclusive --> {exclusive: True}
         else:
             continue
+        if not val.strip():
+            val = True  # --exclusive --> {exclusive: True}
         if val is not None:
+            if key in sbatch_args:
+                # remove the value so the ordering is preserved based on the positioning in `sbatch_args_list`.
+                sbatch_args.pop(key)
             sbatch_args[key] = val
     return sbatch_args
 
@@ -482,13 +495,15 @@ def merge_sbatch_args(from_config: SbatchArgs, from_cli: list[str]) -> SbatchArg
     -t=2:00:00` -- config or CLI, either order -- resolves to a single `time` value (the last
     one written) instead of leaving two separate keys for what's really the same sbatch option.
     """
-    sbatch_args_from_cli = sbatch_args_from_args_list(from_cli)
-    merged: SbatchArgs = from_config.copy()
-    for key, value in sbatch_args_from_cli.items():
-        if key in merged:
-            _val = merged.pop(key)
-        merged[key] = value
-    return merged
+    sbatch_args_from_config = sbatch_args_from_dict(from_config)
+    return sbatch_args_from_args_list(sbatch_args_from_config + from_cli)
+    # merged: SbatchArgs = from_config.copy()
+    # for val in from_cli:
+    #     key, val
+    #     if key in merged:
+    #         _val = merged.pop(key)
+    #     merged[key] = value
+    # return merged
 
 
 def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
@@ -511,6 +526,8 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     []
     >>> sbatch_args_from_dict({"n": True})
     ['-n']
+    >>> sbatch_args_from_dict({"f": "config"})
+    ['-f=config']
     """
     flags: list[str] = []
     for key, value in d.items():
@@ -521,7 +538,7 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
             flags.append(f"-{key}" if is_short_flag else f"--{key}")
         else:
             if is_short_flag:
-                flags.extend([f"-{key}", str(value)])
+                flags.append(f"-{key}={value}")
             else:
                 flags.append(f"--{key}={value}")
     return flags

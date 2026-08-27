@@ -211,6 +211,16 @@ def _get_cached_jobs_path() -> Path:
     return _get_cache_dir() / "jobs.jsonl"
 
 
+def get_submission_log_dir() -> Path:
+    """Directory where per-submission `sbatch` logs are written (see `cli/submit.py`), so a
+    failure buried in interleaved multi-cluster/multi-submission console output can still be
+    found on its own afterwards.
+    """
+    log_dir = _get_cache_dir() / "submission_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return log_dir
+
+
 def _get_cache_file() -> Path:
     """Get the path to a cache file on the remote cluster."""
     return _get_cache_dir() / "cluv_cache.yaml"

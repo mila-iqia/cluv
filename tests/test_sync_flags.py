@@ -53,12 +53,8 @@ async def test_no_sync_datasets_also_skips_the_push(
     monkeypatch.setattr(sync_module, get_cluv_config.__name__, lambda: config)
     remote = unittest.mock.MagicMock(hostname="tamia")
 
-    await sync_module.sync_task_function(
-        unittest.mock.MagicMock(), remote=remote, sync_datasets=False
-    )
+    await sync_module.sync_per_cluster_part(remote, sync_datasets=False)
     push_mock.assert_not_awaited()
 
-    await sync_module.sync_task_function(
-        unittest.mock.MagicMock(), remote=remote, sync_datasets=True
-    )
+    await sync_module.sync_per_cluster_part(remote, sync_datasets=True)
     push_mock.assert_awaited_once()

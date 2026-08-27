@@ -271,13 +271,12 @@ class TestGetSbatchCommand:
         sbatch_script = project_dir / "my_script.sh"
         sbatch_script.touch(0o755)
 
-        sbatch_command, _ = get_sbatch_command(
+        sbatch_command = get_sbatch_command(
             cluster="killarney",
             job_script=sbatch_script,
-            sbatch_args=[],
+            sbatch_args={},
             program_args=[],
             git_commit="abecdef",
-            chunking=False,
             results_path=PurePosixPath("/scratch/me/logs/my_project"),
         )
         assert "SBATCH_OUTPUT=/scratch/me/logs/my_project/killarney_%j/slurm-%j.out" in (
@@ -459,13 +458,12 @@ class TestGetSbatchCommand:
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
 
-        sbatch_command, _ = get_sbatch_command(
+        sbatch_command = get_sbatch_command(
             cluster="mila",
             job_script=job_script,
-            sbatch_args=[],
+            sbatch_args={},
             program_args=[],
             git_commit="abc123",
-            chunking=False,
         )
         export_flag = next(f for f in sbatch_command.split() if f.startswith("--export="))
         assert export_flag == (
@@ -487,13 +485,12 @@ class TestGetSbatchCommand:
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
 
-        sbatch_command, _ = get_sbatch_command(
+        sbatch_command = get_sbatch_command(
             cluster="mila",
             job_script=job_script,
-            sbatch_args=["--export=NONE"],
+            sbatch_args={"export": "NONE"},
             program_args=[],
             git_commit="abc123",
-            chunking=False,
         )
         assert sbatch_command.count("--export=") == 1
         assert "--export=NONE" in sbatch_command

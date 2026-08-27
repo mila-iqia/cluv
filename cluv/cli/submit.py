@@ -91,6 +91,13 @@ def _short_command(submission: Submission) -> str:
     return f"bash --login -c '(...) {sbatch_flags} -- {program_args_str}'"
 
 
+def _log_link(row: SubmissionProgress) -> rich.text.Text:
+    """A clickable link (in terminals that support it) to this submission's log file."""
+    if row.log_path is None:
+        return rich.text.Text("-")
+    return rich.text.Text(row.log_path.name, style=f"link file://{row.log_path}")
+
+
 def render_job_table(
     rows: list[SubmissionProgress], *, cancelling: bool = False
 ) -> rich.table.Table:
@@ -105,6 +112,7 @@ def render_job_table(
         "Job ID",
         "Status",
         "Command",
+        "Log",
         title=title,
         box=rich.box.ROUNDED,
         show_lines=True,
@@ -118,6 +126,7 @@ def render_job_table(
             str(row.job_id) if row.job_id is not None else "-",
             rich.text.Text(row.state, style=_state_style(row.state)),
             _short_command(row.submission),
+            _log_link(row),
         )
     return table
 
@@ -366,7 +375,7 @@ async def submit_to_cluster(
         elif isinstance(result, JobSubmissionFailed):
             row.error = str(result)
             row.state = "FAILED"
-            console.log(f"[red]{result}[/red] (see {row.log_path})")
+            console.log(f"[red]{result}[/red]")
         else:
             assert isinstance(result, BaseException)
             raise result

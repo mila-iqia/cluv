@@ -33,6 +33,11 @@ def apply_chunking(
     """
     if not chunking:
         return None, sbatch_args
+    if chunking >= 99:
+        raise ValueError(
+            "Chunking cannot be 99 hours or more! "
+            "(also, it makes little sense to use such large chunks! We recommend you try 3/6/12 hours.)"
+        )
     if "array" in sbatch_args:
         raise ValueError(
             "Cannot use the `--chunking` option if there is already an 'array' key in the job configuration."
@@ -59,7 +64,7 @@ def apply_chunking(
     logger.info(f"Chunking job into {n_chunks} smaller jobs of {chunking} hours each.")
 
     sbatch_args_from_config = {k: v for k, v in sbatch_args.items() if k not in ("time", "t")}
-    sbatch_args_from_config["time"] = f"{chunking}:00:00"
+    sbatch_args_from_config["time"] = f"{chunking:02d}:00:00"
     sbatch_args_from_config["array"] = f"0-{n_chunks - 1}%1"
     return n_chunks, sbatch_args_from_config
 

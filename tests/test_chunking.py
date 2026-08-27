@@ -18,7 +18,7 @@ class TestApplyChunking:
             {"abc": "123", time_key: "12:00:00"}, job_script=None, chunking=3
         )
         assert n_chunks == 4
-        assert result["time"] == "3:00:00"
+        assert result["time"] == "03:00:00"
         assert result["array"] == "0-3%1"
         assert "t" not in result
 
@@ -31,12 +31,12 @@ class TestApplyChunking:
             {"time": "12:00:00", "t": "6:00:00"}, job_script=None, chunking=3
         )
         assert n_chunks == 2
-        assert result["time"] == "3:00:00"
+        assert result["time"] == "03:00:00"
         n_chunks, result = apply_chunking(
             {"t": "6:00:00", "time": "12:00:00"}, job_script=None, chunking=3
         )
         assert n_chunks == 4
-        assert result["time"] == "3:00:00"
+        assert result["time"] == "03:00:00"
 
     def test_uses_time_from_job_script_header(self, tmp_path: Path) -> None:
         job_script = tmp_path / "my_script"
@@ -44,7 +44,7 @@ class TestApplyChunking:
 
         n_chunks, result = apply_chunking({"abc": "123"}, job_script=job_script, chunking=3)
         assert n_chunks == 4
-        assert result["time"] == "3:00:00"
+        assert result["time"] == "03:00:00"
 
     def test_uses_time_from_env_vars(self) -> None:
         n_chunks, result = apply_chunking(
@@ -54,7 +54,7 @@ class TestApplyChunking:
             env_vars={"SBATCH_TIMELIMIT": "12:00:00"},
         )
         assert n_chunks == 4
-        assert result["time"] == "3:00:00"
+        assert result["time"] == "03:00:00"
 
     def test_sbatch_args_take_precedence_over_env_vars_and_header(self, tmp_path: Path) -> None:
         job_script = tmp_path / "my_script"
@@ -75,7 +75,7 @@ class TestApplyChunking:
     def test_uses_custom_chunk_size(self) -> None:
         n_chunks, result = apply_chunking({"time": "12:00:00"}, job_script=None, chunking=6)
         assert n_chunks == 2
-        assert result["time"] == "6:00:00"
+        assert result["time"] == "06:00:00"
         assert result["array"] == "0-1%1"
 
     @pytest.mark.parametrize(
@@ -89,4 +89,4 @@ class TestApplyChunking:
     def test_number_of_chunks_rounds_up(self, time_value: str, expected_array: str) -> None:
         _, result = apply_chunking({"time": time_value}, job_script=None, chunking=3)
         assert result["array"] == expected_array
-        assert result["time"] == "3:00:00"
+        assert result["time"] == "03:00:00"

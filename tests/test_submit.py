@@ -125,22 +125,20 @@ def test_bug_with_t_flag_and_time_in_config(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.parametrize("chunking", [None, 5])
 def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
-    chunking: int | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    chunking: int | None, monkeypatch: pytest.MonkeyPatch
 ):
     """Test that if we pass some unknown args as sbatch args, their order is preserved in the final sbatch command.
 
     This shields us from having to support every single sbatch flag in the code.
     """
-    job_script = tmp_path / Path("my_script.sh")
-    job_script.write_text("#!/bin/bash\n")
-    job_script.chmod(0o755)
+    time_hours = 12
     sbatch_args_in_config: SbatchArgs = {
         "time": "3:00:00",
         "cpus-per-task": 4,
         "f": "config",
     }
     sbatch_args_from_cli = [
-        "-t=00:00:30",
+        f"-t={time_hours:02d}:00:00",
         "--exclusive",
         "-N",
         "2",
@@ -148,7 +146,7 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
         "-f=second-in-cli",
     ]
     expected_sbatch_args_in_command = [
-        "--time=00:00:30",
+        *([f"--time={time_hours:02d}:00:00"] if not chunking else []),
         "--cpus-per-task=4",
         # "-f=config", # removed, since it is in the sbatch args from the CLI.
         # "-t=00:00:30",
@@ -156,6 +154,11 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
         "--exclusive",
         "--foo=first-in-cli",  # secretly --foo and -f are the same argument to sbatch (dest=`foo`)
         "-f=second-in-cli",  # the ordering is preserved.
+        *(
+            [f"--time={chunking:02d}:00:00", f"--array=0-{time_hours // chunking}%1"]
+            if chunking
+            else []
+        ),
     ]
     cluster = "bar"
     monkeypatch.setattr(
@@ -172,9 +175,9 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
     submissions = get_submissions(
         cluster=cluster,
         remote=unittest.mock.AsyncMock(Remote, hostname=cluster),
-        chunking=None,
+        chunking=chunking,
         sbatch_args=sbatch_args_from_cli,
-        job_script=job_script,
+        job_script=Path("scripts/job.sh"),
         program_args=["python", "main.py", "--help"],
         git_commit="foo",
     )
@@ -373,7 +376,7 @@ class TestGetSbatchCommand:
         )
 
         assert f"{results_path}/mila_%A/slurm-%A_%a.out" in sbatch_command
-        assert "--time=3:00:00 --array=0-3%1" in sbatch_command
+        assert "--time=03:00:00 --array=0-3%1" in sbatch_command
 
 
 class TestSubmitCliParsing:

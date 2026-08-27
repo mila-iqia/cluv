@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.cli.sync import expandvars, fetch_results, sync
 from cluv.config import LocalConfig, get_cluv_config
 from cluv.job import get_datasets_path
-from cluv.remote import Remote
 from cluv.utils import current_cluster
 
 from .test_integration import IN_GITHUB_CLOUD_CI
@@ -41,7 +41,10 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
     """
     assert not current_cluster(), "test needs to run locally for now."
     other_cluster = "tamia"
-    other_cluster_remote = await Remote.connect(other_cluster)
+    other_cluster_remote = await get_remote_without_2fa_prompt(other_cluster)
+    assert other_cluster_remote, (
+        f"No connection to {other_cluster} cluster, which is needed for this test."
+    )
 
     monkeypatch.chdir("examples/pytorch-example")
     # We need to change the "tool.cluv.local.env.SCRATCH" to point to the fake scratch path.

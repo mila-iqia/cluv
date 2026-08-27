@@ -497,13 +497,6 @@ def merge_sbatch_args(from_config: SbatchArgs, from_cli: list[str]) -> SbatchArg
     """
     sbatch_args_from_config = sbatch_args_from_dict(from_config)
     return sbatch_args_from_args_list(sbatch_args_from_config + from_cli)
-    # merged: SbatchArgs = from_config.copy()
-    # for val in from_cli:
-    #     key, val
-    #     if key in merged:
-    #         _val = merged.pop(key)
-    #     merged[key] = value
-    # return merged
 
 
 def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:

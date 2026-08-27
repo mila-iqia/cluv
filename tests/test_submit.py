@@ -125,12 +125,15 @@ def test_bug_with_t_flag_and_time_in_config(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.parametrize("chunking", [None, 5])
 def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
-    chunking: int | None, monkeypatch: pytest.MonkeyPatch
+    chunking: int | None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
     """Test that if we pass some unknown args as sbatch args, their order is preserved in the final sbatch command.
 
     This shields us from having to support every single sbatch flag in the code.
     """
+    job_script = tmp_path / Path("my_script.sh")
+    job_script.write_text("#!/bin/bash\n")
+    job_script.chmod(0o755)
     sbatch_args_in_config: SbatchArgs = {
         "time": "3:00:00",
         "cpus-per-task": 4,
@@ -171,7 +174,7 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
         remote=unittest.mock.AsyncMock(Remote, hostname=cluster),
         chunking=None,
         sbatch_args=sbatch_args_from_cli,
-        job_script=Path("my_script.sh"),
+        job_script=job_script,
         program_args=["python", "main.py", "--help"],
         git_commit="foo",
     )

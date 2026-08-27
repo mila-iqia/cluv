@@ -2,83 +2,91 @@ from pathlib import Path
 
 import pytest
 
-from cluv.cli.submit_utils.chunking import (
-    chunking_update_sbatch_args,
-    get_n_chunks,
-    get_time_from_sbatch_args,
-)
+from cluv.cli.submit_utils.chunking import apply_chunking
 
 
-class TestGetTimeFromSbatchArgs:
-    @pytest.mark.parametrize(
-        ("sbatch_args", "expected"),
-        [
-            (["--abc=123", "--time=01:00:00", "--def=456"], "01:00:00"),
-            (["--abc=123", "-t=01:00:00", "--def=456"], "01:00:00"),
-            (["--abc=123", "--time=01:00:00", "-t=1-03:00:00", "--def=456"], "1-03:00:00"),
-        ],
-    )
-    def test_should_use_time_arg(self, sbatch_args: list[str], expected: str) -> None:
-        assert get_time_from_sbatch_args(sbatch_args) == expected
+class TestApplyChunking:
+    def test_chunking_disabled_is_a_passthrough(self) -> None:
+        sbatch_args = {"time": "12:00:00"}
+        n_chunks, result = apply_chunking(sbatch_args, job_script=None, chunking=None)
+        assert n_chunks is None
+        assert result == sbatch_args
 
+    @pytest.mark.parametrize("time_key", ["time", "t"])
+    def test_uses_time_from_sbatch_args(self, time_key: str) -> None:
+        n_chunks, result = apply_chunking(
+            {"abc": "123", time_key: "12:00:00"}, job_script=None, chunking=3
+        )
+        assert n_chunks == 4
+        assert result["time"] == "03:00:00"
+        assert result["array"] == "0-3%1"
+        assert "t" not in result
 
-class TestGetNumberOfChunks:
-    @pytest.mark.parametrize("time_arg", ["--time=12:00:00", "-t=12:00:00"])
-    def test_should_get_correct_number_of_chunks_with_sbatch_args(self, time_arg: str) -> None:
-        sbatch_args = ["--abc=123", time_arg, "--def=456"]
-        env_vars = {}
-        job_script = Path("my_script.sh")
-        assert get_n_chunks(sbatch_args, env_vars, job_script) == 4
+    def test_last_time_key_in_dict_is_used(self) -> None:
+        """`merge_sbatch_args` normalizes `-t` to `time` before it ever reaches here, so in
+        practice `sbatch_args` shouldn't carry both keys at once -- but `apply_chunking` is a
+        public function, so its own tie-break (documented in its docstring: `time` before `t`)
+        stays covered directly, independent of that upstream normalization."""
+        n_chunks, result = apply_chunking(
+            {"time": "12:00:00", "t": "6:00:00"}, job_script=None, chunking=3
+        )
+        assert n_chunks == 2
+        assert result["time"] == "03:00:00"
+        n_chunks, result = apply_chunking(
+            {"t": "6:00:00", "time": "12:00:00"}, job_script=None, chunking=3
+        )
+        assert n_chunks == 4
+        assert result["time"] == "03:00:00"
 
-    @pytest.mark.parametrize("time_arg", ["--time=12:00:00", "-t=12:00:00"])
-    def test_should_get_correct_number_of_chunks_with_script_header(
-        self, tmp_path: Path, time_arg: str
-    ) -> None:
-        sbatch_args = ["--abc=123", "--def=456"]
-        env_vars = {}
+    def test_uses_time_from_job_script_header(self, tmp_path: Path) -> None:
         job_script = tmp_path / "my_script"
-        job_script.write_text(f"#SBATCH {time_arg}")
+        job_script.write_text("#SBATCH --time=12:00:00")
 
-        assert get_n_chunks(sbatch_args, env_vars, job_script) == 4
+        n_chunks, result = apply_chunking({"abc": "123"}, job_script=job_script, chunking=3)
+        assert n_chunks == 4
+        assert result["time"] == "03:00:00"
 
-    def test_should_get_correct_number_of_chunks_with_env_vars(self) -> None:
-        sbatch_args = ["--abc=123", "--def=456"]
-        env_vars = {"SBATCH_TIMELIMIT": "12:00:00"}
-        job_script = Path("my_script.sh")
-        assert get_n_chunks(sbatch_args, env_vars, job_script) == 4
+    def test_uses_time_from_env_vars(self) -> None:
+        n_chunks, result = apply_chunking(
+            {"abc": "123"},
+            job_script=None,
+            chunking=3,
+            env_vars={"SBATCH_TIMELIMIT": "12:00:00"},
+        )
+        assert n_chunks == 4
+        assert result["time"] == "03:00:00"
 
-    def test_should_use_custom_chunk_size(self) -> None:
-        sbatch_args = ["--time=12:00:00"]
-        env_vars = {}
-        job_script = Path("my_script.sh")
-        assert get_n_chunks(sbatch_args, env_vars, job_script, chunk_size=6) == 2
+    def test_sbatch_args_take_precedence_over_env_vars_and_header(self, tmp_path: Path) -> None:
+        job_script = tmp_path / "my_script"
+        job_script.write_text("#SBATCH --time=99:00:00")
 
+        n_chunks, _ = apply_chunking(
+            {"time": "12:00:00"},
+            job_script=job_script,
+            chunking=3,
+            env_vars={"SBATCH_TIMELIMIT": "50:00:00"},
+        )
+        assert n_chunks == 4
 
-class TestChunkingUpdateSbatchArgs:
+    def test_raises_when_no_time_value_found(self) -> None:
+        with pytest.raises(ValueError, match="Could not find a time value"):
+            apply_chunking({}, job_script=None, chunking=3)
+
+    def test_uses_custom_chunk_size(self) -> None:
+        n_chunks, result = apply_chunking({"time": "12:00:00"}, job_script=None, chunking=6)
+        assert n_chunks == 2
+        assert result["time"] == "06:00:00"
+        assert result["array"] == "0-1%1"
+
     @pytest.mark.parametrize(
-        ("sbatch_args", "expected_sbatch_args"),
+        ("time_value", "expected_array"),
         [
-            (
-                ["--abc=123", "--time=01:00:00", "-t=20:30:00", "--def=456"],
-                ["--abc=123", "--def=456", "--time=3:00:00", "--array=0-6%1"],
-            ),
-            (
-                ["--abc=123", "-t=02:00:00", "--def=456"],
-                ["--abc=123", "--def=456", "--time=3:00:00", "--array=0-0%1"],
-            ),
-            (
-                ["--abc=123", "--time=00:00:00", "--def=456"],
-                ["--abc=123", "--def=456", "--time=3:00:00", "--array=0-0%1"],
-            ),
+            ("20:30:00", "0-6%1"),  # 20.5h / 3h -> 7 chunks
+            ("02:00:00", "0-0%1"),  # under one chunk -> still 1 chunk
+            ("00:00:00", "0-0%1"),  # zero -> still at least 1 chunk
         ],
     )
-    def test_update_sbatch_args(self, sbatch_args: list[str], expected_sbatch_args: str) -> None:
-        n_chunks = get_n_chunks(sbatch_args, {}, Path("script.sh"))
-        assert chunking_update_sbatch_args(n_chunks, sbatch_args) == expected_sbatch_args
-
-    def test_update_sbatch_args_with_custom_chunk_size(self) -> None:
-        sbatch_args = ["--time=12:00:00"]
-        chunk_size = 6
-        n_chunks = get_n_chunks(sbatch_args, {}, Path("script.sh"), chunk_size=chunk_size)
-        result = chunking_update_sbatch_args(n_chunks, sbatch_args, chunk_size=chunk_size)
-        assert result == ["--time=6:00:00", "--array=0-1%1"]
+    def test_number_of_chunks_rounds_up(self, time_value: str, expected_array: str) -> None:
+        _, result = apply_chunking({"time": time_value}, job_script=None, chunking=3)
+        assert result["array"] == expected_array
+        assert result["time"] == "03:00:00"

@@ -86,7 +86,7 @@ class CluvLauncher(Launcher):
         job_script: str | Path | None = None,
         autocommit: bool = False,
         vram_gb: int | None = None,  # Enables job packing!
-        chunking: bool = False,  # Enables job chunking (via job arrays!)
+        chunking: int | None = None,  # Enables job chunking (via job arrays!)
         ## Submitit arguments:
         account: str | None = None,
         array_parallelism: int = 256,
@@ -476,7 +476,7 @@ async def run_sweep(
     job_script: PurePosixPath | None,
     sbatch_args: dict[str, str | None],
     autocommit: bool,
-    chunking: bool,
+    chunking: int | None,
     packing: bool,
 ) -> list[JobInfo]:
 
@@ -519,7 +519,7 @@ async def run_sweep(
             # TODO: unsure about this one:
             array_job_id=job_id if chunking else None,
             doing_job_packing=packing,
-            doing_job_chunking=chunking,
+            doing_job_chunking=bool(chunking),
         )
 
         # The path where the remote results will be synced locally.

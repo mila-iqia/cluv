@@ -1,3 +1,12 @@
+"""Runtime information about the current job, such as its unique run id and results path.
+
+Allows user code to determine where to save checkpoints or results for this job, and to have a unique
+identifier for this job that can be used in Weights & Biases or elsewhere.
+
+This for example prevents having to use some if statements to fetch things in different places based on which cluster
+the job is running on.
+"""
+
 from __future__ import annotations
 
 import dataclasses

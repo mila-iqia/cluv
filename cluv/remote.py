@@ -21,7 +21,7 @@ Hide = Literal[True, False, "out", "stdout", "err", "stderr"]
 C = TypeVar("C", bound=Callable)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, unsafe_hash=True)
 class Remote:
     """Used to run commands over SSH asynchronously in subprocesses while sharing an SSH connection.
 

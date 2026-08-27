@@ -142,7 +142,7 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
     should_cancel_job = True
     try:
         # The job script that cluv picked should be the one configured for this cluster.
-        assert job.job_script == f"scripts/job_{remote.hostname}.sh"
+        assert job.job_script == Path(f"scripts/job_{remote.hostname}.sh")
 
         state = await wait_for_job_to_finish(remote, job.job_id)
         should_cancel_job = False  # it reached a terminal state, so there is nothing to cancel.

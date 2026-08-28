@@ -18,13 +18,15 @@ uv run cluv -v status
 Run tests with `uv run pytest`.
 
 Tests that need a live SSH connection to a cluster are marked `slow`, and only run with `--slow`.
-Of those, the ones that submit a real job and wait for it to finish are *also* marked `end_to_end`:
+Of those, the ones that run a *full example* on a cluster (a real GPU job, trained to completion)
+are also marked `end_to_end`:
 
-- `uv run pytest --slow -m "not end_to_end"` is what CI runs on PRs (`cluster-checks.yaml`). It
-  includes the per-cluster `sbatch --test-only` check, which validates a job script against every
-  configured cluster without queueing anything.
-- `uv run pytest --slow -m end_to_end` submits real jobs and costs real compute; CI only runs it
-  weekly or on demand (`examples-end-to-end.yaml`).
+- `uv run pytest --slow -m "not end_to_end"` is what CI runs on PRs (`cluster-checks.yaml`): the
+  per-cluster `sbatch --test-only` check (validates a job script against every configured cluster
+  without queueing anything), `cluv login` / `status` / `sync` / `clean` against real clusters, and
+  `test_submit`, which does submit one short job.
+- `uv run pytest --slow -m end_to_end` runs the imagenet and hydra examples for real, which costs a
+  GPU job per cluster; CI only runs it weekly or on demand (`examples-end-to-end.yaml`).
 
 ## Architecture
 

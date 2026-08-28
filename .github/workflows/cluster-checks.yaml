@@ -67,9 +67,20 @@ jobs:
       - name: Run every test except the end-to-end ones
         # -ra: list the skips at the end, so "which clusters did we actually check?" is answerable
         # from the log without reading the whole thing.
-        run: uv run pytest -v -ra --slow -m "not end_to_end"
+        run: uv run pytest -v -ra --slow -m "not end_to_end" --cov=cluv --cov-report=xml
+      - name: Upload coverage reports to Codecov
+        # Uploaded straight from here rather than through build.yaml's `upload-coverage-codecov`
+        # job: that job can only see artifacts from its own workflow run. Codecov merges uploads
+        # for the same commit, so the cluster-touching code paths still count towards coverage.
+        if: always()
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: cluster-checks
+          fail_ci_if_error: false
       - name: Cancel any jobs left behind on the clusters
-        # Nothing here should submit a job, but a `-m` selection mistake shouldn't be able to
-        # leave a GPU node allocated for hours.
+        # `test_submit` does submit one short job, and a cancelled workflow can't clean up after
+        # itself, so sweep by name here rather than leaving a GPU node allocated for hours.
         if: always()
         run: uv run python .github/scripts/cancel_ci_jobs.py

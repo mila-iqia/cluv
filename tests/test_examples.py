@@ -1,4 +1,6 @@
 import asyncio
+import datetime
+import json
 import os
 import re
 import subprocess
@@ -108,8 +110,13 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
     to the cluster, and doesn't pass a job script, so that the per-cluster `job_script_path` from
     the example's `[tool.cluv.clusters.<cluster>]` config is the thing being exercised.
 
+    Set `CLUV_CI_REAL_DATA=1` to exercise the real dataset path instead (staging the archives and
+    training on them). That's the only mode that needs `datasets_path` populated on the cluster,
+    and the only one that can move ~150GB around, so it's opt-in and manual by design.
+
     Requires an active SSH connection to the cluster and a clean git tree.
     """
+    use_real_data = os.environ.get("CLUV_CI_REAL_DATA", "0") == "1"
     repo_root = Path(__file__).parent.parent
     monkeypatch.chdir(repo_root / "examples/imagenet")
 
@@ -141,7 +148,7 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
         program_args=[
             "python",
             "main.py",
-            "--use_fake_data",
+            *([] if use_real_data else ["--use_fake_data"]),
             "--epochs=1",
             # Same --batch_size as a real training run (see "The real thing" in the README), and
             # enough --limit_train_samples at that batch size for at least 5 `train/*` logs in
@@ -155,11 +162,10 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
             "--model_name=vit_b_32",
             "--no_wandb",
         ],
-        # This test runs with `--use_fake_data`, so it needs none of the ImageNet archives - and
-        # the example's `data_source` is on another cluster, so letting the dataset sync run would
-        # rsync ~150GB from mila through this machine (the CI runner!) and on to the target
-        # cluster, on every single run.
-        sync_datasets=False,
+        # With `--use_fake_data` there are no archives to stage, and the example's `data_source`
+        # is on another cluster, so letting the dataset sync run would rsync ~150GB from mila
+        # through this machine (the CI runner!) and on to the target cluster, every single run.
+        sync_datasets=use_real_data,
     )
     assert job is not None
 
@@ -170,6 +176,7 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
 
         state = await wait_for_job_to_finish(remote, job.job_id)
         should_cancel_job = False  # it reached a terminal state, so there is nothing to cancel.
+        await record_run(remote, job.job_id, state, real_data=use_real_data)
         assert state.startswith("COMPLETED"), state
     finally:
         if should_cancel_job:
@@ -246,6 +253,34 @@ async def test_imagenet_job_script_is_accepted_by_slurm(
         # A successful dry run says when the job would start; anything else means `--test-only`
         # didn't do what we think it does on this cluster, and this test would be vacuous.
         assert "to start at" in output, f"Unexpected `sbatch --test-only` output:\n{output}"
+
+
+async def record_run(remote: Remote, job_id: int, state: str, real_data: bool) -> None:
+    """Write one line of "this example ran here, and here is the job to prove it" to disk.
+
+    Only does anything when `$CLUV_CI_RESULTS_DIR` is set, which the end-to-end workflow does.
+    `.github/scripts/summarize_example_runs.py` turns the files into the per-cluster table that
+    gets published, so that the "verified on" list in the example's README stops being something
+    a human has to remember to update.
+    """
+    results_dir = os.environ.get("CLUV_CI_RESULTS_DIR")
+    if not results_dir:
+        return
+    elapsed = str(
+        await run_sacct(remote, job_id, format="Elapsed", additional_args="--noconvert")
+    ).strip()
+    record = {
+        "cluster": remote.hostname,
+        "job_id": job_id,
+        "state": state,
+        "elapsed": elapsed.splitlines()[0] if elapsed else "?",
+        "real_data": real_data,
+        "commit": subprocess.getoutput("git rev-parse --short HEAD").strip(),
+        "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d"),
+    }
+    path = Path(results_dir) / f"imagenet-{remote.hostname}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=2))
 
 
 async def cancel_stale_jobs(remote: Remote, job_name: str) -> None:

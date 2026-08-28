@@ -1,0 +1,66 @@
+# Cheap per-cluster checks: everything that needs a live SSH connection to a cluster but does
+# *not* submit a job that has to run to completion.
+#
+# The expensive counterpart (real jobs, run to completion) lives in examples-end-to-end.yaml and
+# is deliberately not on the PR path: see the `end_to_end` pytest marker.
+name: Cluster checks
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "cluv/**"
+      - "examples/**"
+      - "tests/**"
+      - ".github/scripts/**"
+      - ".github/workflows/cluster-checks.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
+  pull_request:
+    # Doc-only changes can't break a job script, and every run here costs SSH round-trips to
+    # every cluster. (Duplicated instead of using a YAML anchor: the Actions parser rejects those.)
+    paths:
+      - "cluv/**"
+      - "examples/**"
+      - "tests/**"
+      - ".github/scripts/**"
+      - ".github/workflows/cluster-checks.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cluster_checks:
+    runs-on: self-hosted
+    # A run that hangs waiting on a cluster shouldn't hold the runner all day.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Check out the branch (not just a commit) so the `git push` that `cluv sync` does can
+          # work on the self-hosted runner.
+          fetch-tags: true
+          fetch-depth: 0
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Run every test except the end-to-end ones
+        run: uv run pytest -v --slow -m "not end_to_end"
+      - name: Cancel any jobs left behind on the clusters
+        # Nothing here should submit a job, but a `-m` selection mistake shouldn't be able to
+        # leave a GPU node allocated for hours.
+        if: always()
+        run: uv run python .github/scripts/cancel_ci_jobs.py

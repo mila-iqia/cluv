@@ -181,6 +181,7 @@ TEST_SUBMIT_TIMEOUT_SECONDS = 180
     indirect=True,
 )
 @pytest.mark.slow
+@pytest.mark.end_to_end
 @pytest.mark.timeout(TEST_SUBMIT_TIMEOUT_SECONDS)
 async def test_submit(remote: Remote):
     """End-to-end: actually submit scripts/job.sh to a slurm cluster via sbatch.

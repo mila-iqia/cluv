@@ -24,7 +24,7 @@ from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
 from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
-from cluv.remote import Remote
+from cluv.remote import Remote, control_socket_is_running
 from cluv.slurm import run_sacct
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +57,27 @@ SUBMIT_SUPPORTED_CLUSTERS = {"mila", "rorqual"}
 # Mark all the tests here as 'slow', so they are only run when the --slow flag is passed to pytest,
 # specifically in the integration-tests CI step, which happens on a self-hosted runner that has
 # reusable SSH connections to those clusters.
+
+
+async def skip_if_cluster_is_not_testable(cluster: str) -> None:
+    """Skip (or fail) unless `cluster` is one we should be running tests against right now.
+
+    In self-hosted CI, only the `REQUIRED_CLUSTERS` are ever tested, and a missing connection to
+    one of them is a failure rather than a skip. On a dev machine, tests run against whichever
+    clusters happen to have an active SSH connection.
+
+    Used by the `cluster` fixture in `conftest.py`, and directly by tests that parametrize cluster
+    names themselves instead of going through that fixture - without this, a stray SSH connection
+    on the runner would let CI opportunistically (and expensively) submit jobs to any cluster.
+    """
+    if IN_SELF_HOSTED_GITHUB_CI:
+        if cluster not in REQUIRED_CLUSTERS:
+            pytest.skip(f"{cluster} is not a required cluster; skipping it in CI.")
+        if not await control_socket_is_running(cluster):
+            pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
+        return
+    if not await control_socket_is_running(cluster):
+        pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
 
 
 @pytest.fixture(autouse=True)

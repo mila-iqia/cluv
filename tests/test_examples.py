@@ -18,7 +18,11 @@ from cluv.cli.sync import (
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
-from tests.test_integration import IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
+from tests.test_integration import (
+    IN_SELF_HOSTED_GITHUB_CI,
+    REQUIRED_CLUSTERS,
+    skip_if_cluster_is_not_testable,
+)
 
 # TODO: Also run this test on the Mila cluster using the same self-hosted runner setup as in
 # mila-docs.
@@ -56,8 +60,11 @@ async def test_hydra_example(
     Requires an active SSH connection to the cluster and a clean git tree.
     Also actually performs a `cluv sync` to that cluster.
     """
-    if cluster != "first" and not (await control_socket_is_running(cluster)):
-        pytest.xfail(f"Need an active connection to {cluster} for this test to run.")
+    if cluster != "first":
+        # Same gate as the `cluster` fixture the imagenet test below uses: in CI, only the
+        # REQUIRED_CLUSTERS are tested, so a stray SSH connection on the runner can't make CI
+        # opportunistically submit jobs to some other (possibly very slow) cluster.
+        await skip_if_cluster_is_not_testable(cluster)
 
     if cluster == "first" and not (await get_active_remotes()):
         pytest.fail(

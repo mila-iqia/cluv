@@ -261,7 +261,7 @@ async def wait_for_first_running_job(
         # failed).
         if all_tasks_done and n_pending_jobs == 1:
             console.log("Only one job pending. Skipping wait for a running job.")
-            return submitted[0]
+            return next(row for row in submitted if row.state.startswith("PENDING"))
 
         all_failed = bool(submitted) and all(
             row.state.startswith(tuple(FAILED_JOB_STATES)) for row in submitted

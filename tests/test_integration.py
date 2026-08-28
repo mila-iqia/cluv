@@ -80,6 +80,20 @@ async def skip_if_cluster_is_not_testable(cluster: str) -> None:
         pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
 
 
+async def skip_unless_connected(cluster: str) -> None:
+    """Skip unless `cluster` has a live SSH connection, failing for the `REQUIRED_CLUSTERS` in CI.
+
+    Unlike `skip_if_cluster_is_not_testable`, this does *not* restrict CI to the required
+    clusters: it's for checks cheap enough to run against every configured cluster (currently
+    the `sbatch --test-only` one), where the only reason to skip is a missing connection.
+    """
+    if await control_socket_is_running(cluster):
+        return
+    if IN_SELF_HOSTED_GITHUB_CI and cluster in REQUIRED_CLUSTERS:
+        pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
+    pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
+
+
 @pytest.fixture(autouse=True)
 def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
     """Mock the $HOME directory in a self-hosted runner, so that it is able to sync the project

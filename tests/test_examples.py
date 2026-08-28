@@ -16,19 +16,16 @@ from cluv.cli.sync import (
     sync_per_cluster_part,
 )
 from cluv.config import get_cluv_config, load_cluv_config
-from cluv.remote import Remote, control_socket_is_running
+from cluv.remote import Remote
 from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
-from tests.test_integration import (
-    IN_SELF_HOSTED_GITHUB_CI,
-    REQUIRED_CLUSTERS,
-    skip_if_cluster_is_not_testable,
-)
+from tests.test_integration import skip_if_cluster_is_not_testable, skip_unless_connected
 
 # TODO: Also run this test on the Mila cluster using the same self-hosted runner setup as in
 # mila-docs.
 
 
 @pytest.mark.slow
+@pytest.mark.end_to_end
 @pytest.mark.parametrize(
     "cluster",
     [
@@ -98,6 +95,7 @@ WHOLE_NODE_CLUSTERS = {"tamia"}
 
 
 @pytest.mark.slow
+@pytest.mark.end_to_end
 @pytest.mark.parametrize(
     "cluster",
     ["mila", "tamia", "rorqual", "fir", "nibi"],
@@ -194,22 +192,18 @@ IMAGENET_EXAMPLE_CLUSTERS = load_cluv_config(
 async def test_imagenet_job_script_is_accepted_by_slurm(
     cluster: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`sbatch --test-only` the example's job script on every cluster we're connected to.
+    """`sbatch --test-only` the imagenet example's job script on every configured cluster.
 
     Slurm validates the whole request - partition, account, QoS, and whether the resources asked
-    for could ever be satisfied - and reports when the job *would* start, without queueing anything
-    or consuming any compute. Cheap enough to do for every cluster the example claims to support,
-    unlike `test_imagenet_example` above, which needs a real GPU job per cluster.
+    for could ever be satisfied - and reports when the job *would* start, without queueing
+    anything or consuming any compute. That makes this cheap enough to run for *all* the clusters
+    the example claims to support on every PR, which the end-to-end tests (a real job, run to
+    completion, marked `end_to_end`) are far too expensive to do.
 
-    So: this catches "this cluster would reject this job script", which is the failure mode a
-    per-cluster job script actually has. Opportunistic: clusters without an active SSH connection
-    are skipped - except the `REQUIRED_CLUSTERS` in CI, where a missing connection is a failure,
-    same as for the `cluster` fixture the other integration tests use.
+    So: this catches "this cluster would reject this job script"; the `end_to_end` tests catch
+    "the job actually runs and trains". Skipped for clusters this machine isn't connected to.
     """
-    if not await control_socket_is_running(cluster):
-        if IN_SELF_HOSTED_GITHUB_CI and cluster in REQUIRED_CLUSTERS:
-            pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
-        pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
+    await skip_unless_connected(cluster)
     remote = await get_remote_without_2fa_prompt(cluster)
     assert remote is not None
 
@@ -239,8 +233,9 @@ async def test_imagenet_job_script_is_accepted_by_slurm(
     assert submissions
 
     for submission in submissions:
-        # `--parsable` prints the job id of a submitted job, which is meaningless for a dry run;
-        # `sbatch` is otherwise given the exact command line a real submission would use.
+        # `--parsable` prints the job id of a submitted job, which is meaningless here; `sbatch`
+        # is otherwise given the exact command line a real submission would use. Issue #193 tracks
+        # doing this through a `--test-only` flag on `cluv submit` itself instead.
         assert "sbatch --parsable " in submission.sbatch_command
         test_only_command = submission.sbatch_command.replace(
             "sbatch --parsable ", "sbatch --test-only ", 1

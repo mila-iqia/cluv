@@ -206,9 +206,12 @@ async def submit(
         raise
 
     console.print(
-        f"Job {first_running_row.job_id} on cluster {first_running_row.cluster} is running.",
+        f"Successfully submitted job {first_running_row.job_id} on cluster {first_running_row.cluster}.\n"
+        f"Use `[bold]`ssh {first_running_row.cluster} sacct -j {first_running_row.job_id}` to view its "
+        f"status, and `[bold]`cluv sync {first_running_row.cluster}` to fetch results once it is complete.",
         style="green",
     )
+
     job = first_running_row.job
     assert job is not None
     save_job(job)

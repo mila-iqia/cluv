@@ -18,7 +18,10 @@ set -e # exit on error.
 # The command to run, as passed after the `--` of `cluv submit`.
 job_command=("$@")
 if [ ${#job_command[@]} -eq 0 ]; then
-    job_command=(python main.py)
+    echo "ERROR: no command to run was passed to this job script. Pass it after the '--' of" >&2
+    echo "'cluv submit', for example:" >&2
+    echo "  cluv submit <cluster> -- python main.py --use_fake_data" >&2
+    exit 1
 fi
 
 echo "Date:       $(date)"

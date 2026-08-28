@@ -110,15 +110,15 @@ current cluster. Two clusters already have a shared copy, so `datasets_path` jus
 | fir | `$HOME/projects/rrg-bengioy-ad/data/curated/imagenet` |
 | anywhere else | `$SCRATCH/datasets/imagenet` (you have to put the archives there) |
 
-Note that this example deliberately does **not** set `data_source`: `cluv sync` copies datasets
-_through the machine you submit from_, which is fine for CIFAR-10 (see the hydra example) but not for
-150GB of ImageNet. Add a `datasets_path` override for your cluster instead, pointing at wherever the
-archives already live.
+Note that `cluv sync` copies datasets _through the machine you submit from_, which is fine for
+CIFAR-10 (see the hydra example) but means the example's `data_source`
+(`mila:/network/datasets/imagenet`) would route 150GB through it. Several clusters already have a
+shared copy: point `datasets_path` at it for that cluster and run `cluv sync --no-sync-datasets`.
 
-Then submit as usual:
+Then submit as usual (the job script needs the command to run after `--`):
 
 ```bash
-cluv submit mila                          # uses scripts/job_mila.sh
+cluv submit mila -- python main.py        # uses scripts/job_mila.sh
 cluv submit first -- python main.py       # submit everywhere, keep the first job to start
 ```
 

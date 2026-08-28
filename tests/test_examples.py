@@ -136,6 +136,11 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
             "--model_name=vit_b_32",
             "--no_wandb",
         ],
+        # This test runs with `--use_fake_data`, so it needs none of the ImageNet archives - and
+        # the example's `data_source` is on another cluster, so letting the dataset sync run would
+        # rsync ~150GB from mila through this machine (the CI runner!) and on to the target
+        # cluster, on every single run.
+        sync_datasets=False,
     )
     assert job is not None
 

@@ -30,16 +30,6 @@ echo "Attempt #${SLURM_RESTART_COUNT:-0}"
 echo "Git commit: ${GIT_COMMIT:-<not set - submit this job with 'cluv submit'>}"
 echo "Command:    uv run ${job_command[*]}"
 
-# `srun` refuses to launch a step when more than one of these is set:
-#   srun: fatal: SLURM_MEM_PER_CPU, SLURM_MEM_PER_GPU, and SLURM_MEM_PER_NODE are mutually exclusive
-# That happens on clusters where a site-wide default memory setting ends up in the job environment
-# alongside the one this job actually asked for. Keep the most specific one.
-if [ -n "${SLURM_MEM_PER_GPU:-}" ]; then
-    unset SLURM_MEM_PER_CPU SLURM_MEM_PER_NODE
-elif [ -n "${SLURM_MEM_PER_CPU:-}" ]; then
-    unset SLURM_MEM_PER_NODE
-fi
-
 ## Code checkpointing with git, to avoid unexpected bugs ##
 # Clones the project at $GIT_COMMIT onto every node and creates the virtualenv there. What comes back
 # is the directory to give to `uv run --directory`, and it still contains a literal, unexpanded

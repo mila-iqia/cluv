@@ -26,9 +26,8 @@ line-length = 100
 ###  --------------   CLUV CONFIG   --------------  ###
 
 [tool.cluv]
-# Job script used when none is passed to `cluv submit`. Overridden per cluster below, because
-# each cluster has a different node layout (GPUs per node, local disk, whole-node policies, ...).
-job_script_path = "scripts/job.sh"
+# NOTE: there is no global `job_script_path` here: each cluster has a different node layout (GPUs
+# per node, local disk, whole-node policies, ...), so every cluster below points at its own script.
 # Where to store job results by default.
 results_path = "$SCRATCH/logs/imagenet"
 # On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.

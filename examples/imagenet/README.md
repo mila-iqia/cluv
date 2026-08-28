@@ -29,17 +29,16 @@ cd examples/imagenet
 | `scripts/code_checkpointing.sh` | Clones the project at `$GIT_COMMIT` onto each node's `$SLURM_TMPDIR` and creates the virtualenv there. Prints the directory for `uv run --directory`. |
 | `scripts/train.sh` | Shared job body: code checkpointing, stage the data, set up the `torch.distributed` env, `srun` the training script. |
 | `scripts/job_<cluster>.sh` | Thin per-cluster wrappers: only `#SBATCH` directives, then `exec scripts/train.sh`. |
-| `scripts/job.sh` | Generic 1-node/1-GPU fallback for clusters without a wrapper of their own. |
 | `scripts/sync_wandb.sh` | Uploads offline W&B runs pulled back by `cluv sync` to wandb.ai. |
 
 The mapping from cluster to job script lives in the `pyproject.toml`:
 
 ```toml
-[tool.cluv]
-job_script_path = "scripts/job.sh"          # default for all clusters
-
 [tool.cluv.clusters.tamia]
 job_script_path = "scripts/job_tamia.sh"    # used only on tamia
+
+[tool.cluv.clusters.rorqual]
+job_script_path = "scripts/job_rorqual.sh"  # used only on rorqual
 ```
 
 so you never need to pass a job script on the command line - `cluv submit <cluster>` picks the right

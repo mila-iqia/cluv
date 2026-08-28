@@ -238,12 +238,9 @@ async def wait_for_first_running_job(
         all_tasks_done = all(task.done() for task in tasks)
         submitted = [row for row in job_submissions if row.job_id is not None]
 
-        # Skip the wait if only one job is submitted.
-        if all_tasks_done and len(submitted) == 1:
-            console.log("Only one job pending. Skipping wait for a running job.")
-            return submitted[0]
-
         by_cluster = group_by_cluster(submitted)
+
+        n_pending_jobs = 0
         if by_cluster:
             states_per_cluster = await asyncio.gather(
                 *(
@@ -257,6 +254,14 @@ async def wait_for_first_running_job(
                     if row.state.startswith(("RUNNING", "COMPLETED")):
                         found_running_job.set()
                         return row
+                    elif row.state.startswith(("PENDING")):
+                        n_pending_jobs += 1
+
+        # Skip the wait if only one job is pending (if only one job is submitted or all other jobs
+        # failed).
+        if all_tasks_done and n_pending_jobs == 1:
+            console.log("Only one job pending. Skipping wait for a running job.")
+            return submitted[0]
 
         all_failed = bool(submitted) and all(
             row.state.startswith(tuple(FAILED_JOB_STATES)) for row in submitted

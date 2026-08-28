@@ -50,15 +50,8 @@ else
     # One task per node, not one per GPU: see the note in scripts/code_checkpointing.sh about why
     # `--ntasks` has to be capped too. --overlap: see the note there about clusters using the
     # cons_tres select plugin (Killarney does).
-    srun --overlap --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} bash -c "\
-        if [ -z \"\${SLURM_TMPDIR:-}\" ]; then \
-            echo 'ERROR: \$SLURM_TMPDIR is not set in this job, so we do not know where this' >&2; \
-            echo 'cluster wants ~150GB of node-local scratch to be written. Refusing to guess.' >&2; \
-            echo 'Request local disk for the job (for example with --tmp), or pass' >&2; \
-            echo '--use_fake_data to run without the real dataset.' >&2; \
-            exit 1; \
-        fi; \
-        uv run --directory=$UV_DIR python prepare_data.py"
+    srun --overlap --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} \
+        bash -c "uv run --directory=$UV_DIR python prepare_data.py"
 fi
 
 # These environment variables are used by torch.distributed and should ideally be set

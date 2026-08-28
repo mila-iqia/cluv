@@ -205,6 +205,9 @@ async def submit(
         await run_scancel(submitted_rows)
         raise
 
+    job = first_running_row.job
+    assert job is not None
+
     console.print(
         f"Successfully submitted job {first_running_row.job_id} on cluster {first_running_row.cluster}.\n"
         f"Use `ssh {first_running_row.cluster} sacct -j {first_running_row.job_id}` to view its "
@@ -212,8 +215,6 @@ async def submit(
         style="green",
     )
 
-    job = first_running_row.job
-    assert job is not None
     save_job(job)
     return job
 

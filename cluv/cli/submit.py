@@ -232,7 +232,14 @@ async def wait_for_first_running_job(
     """
     delay = 1
     while True:
+        all_tasks_done = all(task.done() for task in tasks)
         submitted = [row for row in job_submissions if row.job_id is not None]
+
+        # Skip the wait if only one job is submitted.
+        if all_tasks_done and len(submitted) == 1:
+            console.log("Only one job pending. Skipping wait for a running job.")
+            return submitted[0]
+
         by_cluster = group_by_cluster(submitted)
         if by_cluster:
             states_per_cluster = await asyncio.gather(
@@ -244,14 +251,14 @@ async def wait_for_first_running_job(
             for cluster_rows, states in zip(by_cluster.values(), states_per_cluster):
                 for row, state in zip(cluster_rows, states):
                     row.state = state
-                    if state.startswith(("RUNNING", "COMPLETED")):
+                    if row.state.startswith(("RUNNING", "COMPLETED")):
                         found_running_job.set()
                         return row
 
         all_failed = bool(submitted) and all(
             row.state.startswith(tuple(FAILED_JOB_STATES)) for row in submitted
         )
-        if all(task.done() for task in tasks) and (not submitted or all_failed):
+        if all_tasks_done and (not submitted or all_failed):
             return None
 
         await asyncio.sleep(delay)
@@ -296,7 +303,7 @@ async def wait_for_jobs_to_cancel(
             await asyncio.sleep(delay)
             delay = min(delay * 2, max_wait_time_seconds)
 
-    console.log(f"Cancelled {len(job_submissions)} other job submission(s).")
+    console.log(f"Cancelled {len(job_submissions)} job submission(s).")
 
 
 async def run_scancel(rows: list[SubmissionProgress]) -> None:
@@ -447,7 +454,6 @@ def sbatch_args_from_args_list(sbatch_args_list: list[str]) -> SbatchArgs:
     {'array': '0-3%2', 'a': '0-1%1'}
     """
     # Maybe use argparse, and keep it simple! No need to recreate every single sbatch flag,
-    #
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("-c", "--cpus-per-task", dest="cpus-per-task", default=argparse.SUPPRESS)
     parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)

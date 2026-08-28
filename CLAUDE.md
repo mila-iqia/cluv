@@ -17,6 +17,15 @@ uv run cluv -v status
 
 Run tests with `uv run pytest`.
 
+Tests that need a live SSH connection to a cluster are marked `slow`, and only run with `--slow`.
+Of those, the ones that submit a real job and wait for it to finish are *also* marked `end_to_end`:
+
+- `uv run pytest --slow -m "not end_to_end"` is what CI runs on PRs (`cluster-checks.yaml`). It
+  includes the per-cluster `sbatch --test-only` check, which validates a job script against every
+  configured cluster without queueing anything.
+- `uv run pytest --slow -m end_to_end` submits real jobs and costs real compute; CI only runs it
+  weekly or on demand (`examples-end-to-end.yaml`).
+
 ## Architecture
 
 `cluv` is a CLI tool for managing UV-based Python projects across multiple HPC clusters (Mila, DRAC/Narval, etc.).

@@ -40,6 +40,13 @@ concurrency:
 jobs:
   cluster_checks:
     runs-on: self-hosted
+    # Advisory for now, like the integration step this replaces: these checks need the runner to
+    # have live SSH connections to the clusters (`cluv login`), and a connection that has expired
+    # would otherwise turn every PR red for a reason that has nothing to do with the code.
+    # Drop this line to make the checks blocking once that side is dependable - a missing
+    # connection to a required cluster already *fails* rather than skips (see
+    # `skip_unless_connected`), so the signal is there either way; it just isn't enforced yet.
+    continue-on-error: true
     # A run that hangs waiting on a cluster shouldn't hold the runner all day.
     timeout-minutes: 30
     steps:
@@ -58,7 +65,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
       - name: Run every test except the end-to-end ones
-        run: uv run pytest -v --slow -m "not end_to_end"
+        # -ra: list the skips at the end, so "which clusters did we actually check?" is answerable
+        # from the log without reading the whole thing.
+        run: uv run pytest -v -ra --slow -m "not end_to_end"
       - name: Cancel any jobs left behind on the clusters
         # Nothing here should submit a job, but a `-m` selection mistake shouldn't be able to
         # leave a GPU node allocated for hours.

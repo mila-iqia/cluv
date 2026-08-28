@@ -126,7 +126,13 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
     job_name = f"cluv-ci-imagenet-example-{remote.hostname}"
     await cancel_stale_jobs(remote, job_name=job_name)
 
-    sbatch_args = [f"--job-name={job_name}", "--time=0:20:00"]
+    # --time: 10min is plenty for this smoke test (the longest verified run in the README is
+    # under 9min with the real dataset, and this one uses fake data), and short jobs get
+    # backfilled sooner, so the test spends less time waiting in the queue.
+    # --no-requeue: the example's config sets `requeue = true` so that real training runs survive
+    # preemption. For a CI job that's the wrong tradeoff - a preempted job we've stopped watching
+    # would come back and ask for a GPU node all over again.
+    sbatch_args = [f"--job-name={job_name}", "--time=0:10:00", "--no-requeue"]
     if remote.hostname not in WHOLE_NODE_CLUSTERS:
         sbatch_args += ["--gpus-per-node=1", "--ntasks-per-node=1"]
 

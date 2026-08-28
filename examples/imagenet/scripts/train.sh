@@ -48,9 +48,8 @@ if [[ "${job_command[*]}" == *--use_fake_data* ]]; then
     echo "Skipping the dataset staging step, since --use_fake_data was passed."
 else
     # One task per node, not one per GPU: see the note in scripts/code_checkpointing.sh about why
-    # `--ntasks` has to be capped too. --overlap: see the note there about clusters using the
-    # cons_tres select plugin (Killarney does).
-    srun --overlap --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} \
+    # `--ntasks` has to be capped too.
+    srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} \
         bash -c "uv run --directory=$UV_DIR python prepare_data.py"
 fi
 
@@ -77,6 +76,4 @@ export WORLD_SIZE=$SLURM_NTASKS
 #
 # A per-cluster wrapper can `export SRUN_EXTRA_ARGS=...` to add flags here.
 # `"\$@"` keeps the job command's own quoting intact, while $UV_DIR is expanded by each task.
-# --overlap: see the note in scripts/code_checkpointing.sh about clusters using the cons_tres
-# select plugin (Killarney does) - without it this step can block until the job hits its time limit.
-srun --overlap ${SRUN_EXTRA_ARGS-} bash -c "uv run --directory=$UV_DIR \"\$@\"" _ "${job_command[@]}"
+srun ${SRUN_EXTRA_ARGS-} bash -c "uv run --directory=$UV_DIR \"\$@\"" _ "${job_command[@]}"

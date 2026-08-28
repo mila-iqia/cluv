@@ -210,8 +210,8 @@ Both clusters accept and run the job, but hit issues unrelated to this example's
   are busy`, retried until the job is killed by its own time limit without ever running any Python.
   Adding `--overlap` to every `srun` in this example - the standard fix for clusters using Slurm's
   `cons_tres` select plugin, which killarney does (`SelectTypeParameters=CR_CORE_MEMORY`) - didn't
-  resolve it either. Needs deeper investigation into killarney's Slurm/GRES configuration than fits
-  this PR.
+  resolve it either, so it isn't kept in the scripts. Needs deeper investigation into killarney's
+  Slurm/GRES configuration than fits this PR.
 - **vulcan**: `uv sync` inside the job intermittently fails within 1-2 seconds with "Network
   connectivity is disabled, but the requested data wasn't found in the cache" for a package that
   `cluv sync` had just warmed into the shared uv cache seconds earlier from the login node -

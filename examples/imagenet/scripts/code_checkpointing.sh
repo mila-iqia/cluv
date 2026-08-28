@@ -53,13 +53,7 @@ if [[ -n "$GIT_COMMIT" ]]; then
     #   srun: warning: can't honor --ntasks-per-node set to 1 which doesn't match the requested
     #   tasks 4 with the maximum number of requested nodes 1. Ignoring --ntasks-per-node.
     # The clone would then run once per GPU, concurrently, into the same directory.
-    # --overlap: on clusters using the cons_tres select plugin (Killarney does), the batch step
-    # (this very script) already reserves the job's whole allocation, so a plain nested `srun` step
-    # blocks waiting for resources that will never free up until the script exits ("step creation
-    # temporarily disabled ... Requested nodes are busy", retrying until the job hits its time
-    # limit). --overlap tells Slurm this step is allowed to share the allocation with the batch
-    # step; harmless on clusters that don't need it.
-    srun --overlap --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} bash -c "\
+    srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} bash -c "\
         git clone --quiet $project_root \$SLURM_TMPDIR/$project_dirname && \
         cd \$SLURM_TMPDIR/$project_dirname && \
         git checkout --quiet --detach $GIT_COMMIT && \

@@ -710,6 +710,7 @@ async def test_can_submit_on_current_cluster(
     monkeypatch: pytest.MonkeyPatch,
     mock_current_cluster: str,
     cluv_project_dir: Path,
+    no_active_remotes,
 ) -> None:
     dummy_commit = "dummy_git_commit"
     monkeypatch.setattr(

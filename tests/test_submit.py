@@ -79,7 +79,7 @@ class TestSbatchArgsFromDict:
         assert sbatch_args_from_dict({"time": "2:00:00"}) == ["--time=2:00:00"]
 
     def test_short_key_string_value(self) -> None:
-        assert sbatch_args_from_dict({"N": "2"}) == ["-N 2"]
+        assert sbatch_args_from_dict({"N": "2"}) == ["-N", "2"]
 
     def test_true_long_key_is_bare_flag(self) -> None:
         assert sbatch_args_from_dict({"exclusive": True}) == ["--exclusive"]

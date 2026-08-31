@@ -544,7 +544,7 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
             flags.append(f"-{key}" if is_short_flag else f"--{key}")
         else:
             if is_short_flag:
-                flags.append(f"-{key} {value}")
+                flags.extend([f"-{key}", str(value)])
             else:
                 flags.append(f"--{key}={value}")
     return flags

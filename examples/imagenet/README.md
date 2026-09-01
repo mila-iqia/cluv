@@ -182,6 +182,11 @@ srun --ntasks=4 --nodes=1 uv run python main.py
 
 ## Verified on
 
+The live version of this list is generated from CI runs: see
+[ImageNet, verified clusters](../../docs/examples/imagenet-verified.md), which the weekly
+`examples-end-to-end` workflow updates (it submits this example on every connected cluster with
+`cluv submit` and records what happened). The table below is the original, hand-checked run set.
+
 Every row below is a real job submitted with `cluv submit` from this branch (no job script named on
 the command line - the per-cluster `job_script_path` picks it), with W&B logging **enabled** end to
 end: `cluv sync` pulled the run back and, for the offline-mode clusters, `scripts/sync_wandb.sh`

@@ -8,8 +8,11 @@ import cluv.cli.submit
 import cluv.config
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars
-from cluv.remote import control_socket_is_running
-from tests.test_integration import ALL_CLUSTERS, IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
+from tests.test_integration import (
+    ALL_CLUSTERS,
+    IN_SELF_HOSTED_GITHUB_CI,
+    skip_if_cluster_is_not_testable,
+)
 
 
 @pytest.fixture
@@ -105,19 +108,8 @@ async def cluster(request: pytest.FixtureRequest) -> str:
         )
     assert isinstance(cluster, str)
 
-    if IN_SELF_HOSTED_GITHUB_CI:
-        # Only ever test the required clusters in CI: don't opportunistically pick up
-        # whatever else happens to have a live SSH connection on the runner.
-        if cluster not in REQUIRED_CLUSTERS:
-            pytest.skip(f"{cluster} is not a required cluster; skipping it in CI.")
-        if not await control_socket_is_running(cluster):
-            pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
-        return cluster
-
-    # On a dev machine: opportunistically test against whatever we're connected to.
-    if await control_socket_is_running(cluster):
-        return cluster
-    pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
+    await skip_if_cluster_is_not_testable(cluster)
+    return cluster
 
 
 @pytest_asyncio.fixture(scope="session")

@@ -1,0 +1,88 @@
+# The expensive tier: actually submit the examples' jobs to the clusters and wait for them to
+# finish. One run costs a GPU job on every connected cluster, so this is weekly and on-demand
+# only - never on the PR path. The cheap per-cluster checks (`sbatch --test-only`) run on PRs, in
+# cluster-checks.yaml.
+name: Examples end-to-end
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC: a fresh result waiting at the start of the week.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      real_data:
+        description: "Train on the real ImageNet archives instead of fake data (moves ~150GB if a cluster doesn't have them yet)"
+        type: boolean
+        default: false
+      pytest_filter:
+        description: "Optional `pytest -k` filter, e.g. a single cluster name"
+        type: string
+        default: ""
+
+permissions:
+  # To commit the generated per-cluster results page.
+  contents: write
+
+concurrency:
+  # Never cancel a run in progress: it has real jobs queued on real clusters, and a cancelled
+  # workflow can't clean them up as tidily as it can finish.
+  group: examples-end-to-end
+  cancel-in-progress: false
+
+jobs:
+  end_to_end:
+    runs-on: self-hosted
+    timeout-minutes: 180
+    env:
+      CLUV_CI_RESULTS_DIR: ${{ github.workspace }}/ci-results
+      CLUV_CI_REAL_DATA: ${{ inputs.real_data && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-tags: true
+          fetch-depth: 0
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Submit the examples and wait for the jobs to finish
+        # One worker per cluster: these tests spend almost all their time waiting in a queue, so
+        # running them serially made the wall clock the *sum* of every cluster's queue wait.
+        # `--dist load` spreads individual test cases (i.e. clusters) across workers.
+        # continue-on-error: a cluster failing is a result to publish, not a reason to skip the
+        # publishing steps below. The job is still marked failed by the final step.
+        continue-on-error: true
+        id: pytest
+        run: >
+          uv run pytest -v --slow -m end_to_end -n 6 --dist load
+          ${{ inputs.pytest_filter && format('-k "{0}"', inputs.pytest_filter) || '' }}
+      - name: Publish the per-cluster results
+        if: always()
+        run: |
+          uv run python .github/scripts/summarize_example_runs.py "$CLUV_CI_RESULTS_DIR" \
+            >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit the results page
+        # Only from master, and only when something actually changed, so this can't loop.
+        if: always() && github.ref == 'refs/heads/master'
+        run: |
+          git add docs/examples/imagenet-verified.md docs/_data/badges
+          if git diff --cached --quiet; then
+            echo "No change to the results page."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "Update the ImageNet example's verified-clusters page [skip ci]"
+          git push
+      - name: Cancel any jobs left behind on the clusters
+        if: always()
+        run: uv run python .github/scripts/cancel_ci_jobs.py
+      - name: Fail if the end-to-end tests failed
+        if: steps.pytest.outcome == 'failure'
+        run: |
+          echo "The end-to-end tests failed - see the per-cluster table in the run summary."
+          exit 1

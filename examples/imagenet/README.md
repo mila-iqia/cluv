@@ -72,9 +72,10 @@ matches a real run (see "The real thing" below); `--limit_train_samples`/`--logg
 picked to get at least 5 `train/*` points in wandb (32 batches / `--logging_interval=5` = 7,
 verified locally) without needing anywhere near a real run's sample count just for that.
 
-Drop `--no_wandb` to also check the W&B integration. `[tool.cluv.env]` sets `WANDB_MODE=offline` by
-default (`online` on mila, fir and nibi, which have internet on their compute nodes), so the run's
-files land next to the checkpoints in `results_path` instead of streaming out live:
+Drop `--no_wandb` to also check the W&B integration. Each cluster's job script exports
+`WANDB_MODE=offline` by default (`online` on mila, fir and nibi, which have internet on their
+compute nodes), so the run's files land next to the checkpoints in `results_path` instead of
+streaming out live:
 
 ```bash
 cluv submit tamia --time=0:20:00 -- python main.py --use_fake_data --epochs=1 \
@@ -294,7 +295,7 @@ Both clusters accept and run the job, but hit issues unrelated to this example's
 | killarney, vulcan | `$SCRATCH` in a path handed to `sbatch` expands to *nothing*, because cluv's command is assembled so that paths are expanded by the non-login ssh shell (see below) | an `output` path relative to the job's working directory, via cluv's `logs` symlink |
 | trillium-gpu | Reports `CC_CLUSTER=trillium`, and Slurm's `ClusterName` is `grillium` | `cluv submit` exports `$CLUV_CLUSTER` |
 | killarney, vulcan | `$CC_CLUSTER` and `$SCRATCH` are only set in a *login* shell | same |
-| trillium-gpu | The login node shadows `sbatch` with a wrapper hardcoding `--export=NONE --get-user-env`, dropping the whole submitting environment (`GIT_COMMIT`, `CLUV_CLUSTER`, `WANDB_MODE`, ...) before the job starts | `cluv submit` also passes `--export=ALL,KEY=VALUE,...` explicitly; `sbatch` uses the last `--export` on its command line |
+| trillium-gpu | The login node shadows `sbatch` with a wrapper hardcoding `--export=NONE --get-user-env`, dropping the whole submitting environment (`GIT_COMMIT`, `CLUV_CLUSTER`, ...) before the job starts | `cluv submit` also passes `--export=ALL,KEY=VALUE,...` explicitly; `sbatch` uses the last `--export` on its command line |
 | trillium-gpu | `$HOME` isn't writable from compute nodes, so `uv`'s default cache dir (`$HOME/.cache/uv`) fails with "Permission denied" | `export UV_CACHE_DIR="$SLURM_TMPDIR/uv-cache"` in `scripts/job_trillium-gpu.sh` |
 
 About that `$SCRATCH` expansion: `cluv submit` runs

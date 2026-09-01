@@ -8,4 +8,9 @@
 
 # Specific to Nibi: Apparently the `MASTER_ADDR` has to be set to this specific pattern.
 export MASTER_ADDR="ic-${SLURMD_NODENAME}"
+
+# Nibi's compute nodes have internet access, unlike most other clusters here.
+export UV_OFFLINE=0
+export WANDB_MODE=online
+
 exec bash scripts/train.sh "$@"

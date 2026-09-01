@@ -571,12 +571,12 @@ def get_sbatch_command(
 
     `results_path` should be the cluster's `results_path` with its environment variables already
     resolved (see `sbatch`). It has to be resolved by the caller, because a value like
-    `$SCRATCH/logs/x` would otherwise be expanded by the wrong shell: it ends up inside the
-    `--export=...` flag, which `shlex.join` below quotes since it contains a `$`, and that quoting
-    closes the `bash --login -c '...'` string, so the *non-login* ssh shell ends up expanding it. On
-    clusters where $SCRATCH is only set in a login shell (Killarney, Vulcan) it expands to nothing,
-    and the job dies with its output going to an unwritable `/logs/...`. Falls back to the unresolved
-    config value when not given, which is fine for callers that only want the command for display.
+    `$SCRATCH/logs/x` would otherwise be expanded by the wrong shell: the `SBATCH_OUTPUT=...` pieces
+    below are `shlex.quote`d, and those single quotes close the `bash --login -c '...'` string, so
+    the *non-login* ssh shell ends up expanding them. On clusters where $SCRATCH is only set in a
+    login shell (Killarney, Vulcan) it expands to nothing, and the job dies with its output going to
+    an unwritable `/logs/...`. Falls back to the unresolved config value when not given, which is
+    fine for callers that only want the command for display.
     """
     local_project_dir = find_pyproject().parent
     local_job_script = job_script if job_script.is_absolute() else local_project_dir / job_script
@@ -624,37 +624,25 @@ def get_sbatch_command(
                 f"results instead.[/yellow]"
             )
 
+    env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     final_sbatch_args = sbatch_flags
-    if env_vars:
-        # `--export=ALL,KEY=VALUE,...` is how these variables reach the job: `ALL` (or the caller's
-        # own `--export` value, see below) keeps the submitting shell's environment flowing through,
-        # and the explicit `KEY=VALUE` pairs restate cluv's own variables so they survive even on
-        # clusters whose login nodes shadow `sbatch` with a wrapper that hardcodes `--export=NONE`
-        # (trillium-gpu does), which would otherwise discard the submitting shell's environment
-        # entirely - silently dropping GIT_COMMIT, CLUV_CLUSTER, WANDB_MODE, etc. Since our flag
-        # comes after any such wrapper's own `--export=NONE` on the final command line, it wins
-        # (the last `--export` on the command line takes effect).
-        kv_pairs = ",".join(f"{k}={v}" for k, v in env_vars.items())
-        export_flag_index = next(
-            (i for i, flag in enumerate(sbatch_flags) if flag.startswith("--export=")), None
-        )
-        if export_flag_index is None:
-            final_sbatch_args = [*sbatch_flags, f"--export=ALL,{kv_pairs}"]
-        else:
-            # A caller-supplied `--export` is kept as the base (so `--export=NONE` still suppresses
-            # the ambient environment as they intended) and cluv's variables are appended to it,
-            # instead of being dropped, so they still reach the job.
-            existing_value = sbatch_flags[export_flag_index].removeprefix("--export=")
-            final_sbatch_args = [
-                *sbatch_flags[:export_flag_index],
-                f"--export={existing_value},{kv_pairs}",
-                *sbatch_flags[export_flag_index + 1 :],
-            ]
+    if env_vars and not any("--export" in flag for flag in sbatch_flags):
+        # Belt and suspenders: `env_vars_prefix` above sets these as plain shell variables before
+        # `sbatch`, which is normally enough for them to reach the job (Slurm's default is to copy
+        # the submitting shell's environment). But some clusters' login nodes shadow `sbatch` with
+        # a wrapper that hardcodes `--export=NONE` (trillium-gpu does), which discards the
+        # submitting shell's environment entirely - silently dropping GIT_COMMIT, CLUV_CLUSTER,
+        # WANDB_MODE, etc. `--export=ALL,KEY=VALUE,...` restates the same variables as an explicit
+        # sbatch argument instead of relying on environment inheritance; since it comes after the
+        # wrapper's own `--export=NONE` on the final command line, it wins (last `--export` set on
+        # the command line takes effect). A harmless no-op on clusters without such a wrapper.
+        export_value = "ALL," + ",".join(f"{k}={v}" for k, v in env_vars.items())
+        final_sbatch_args = [*sbatch_flags, f"--export={export_value}"]
     sbatch_args_str = shlex.join(final_sbatch_args)
     program_args_str = shlex.join(program_args)
 
     return (
-        f"bash --login -c 'sbatch --parsable --chdir={remote_project_dir} "
+        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
         f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
 

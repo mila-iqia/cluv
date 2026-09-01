@@ -236,7 +236,11 @@ class TestGetSbatchCommand:
             f"SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out"
         )
         assert sbatch_command == (
-            "bash --login -c 'sbatch --parsable --chdir=$HOME/my_project --account=my_account "
+            "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz SBATCH_JOB_NAME=cluv-my_script "
+            # Ugly, quite hard-coded.
+            f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster} "
+            f"SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out "
+            "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
             f"--mem=8G --export={export_value} "
             f"$HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
@@ -317,7 +321,10 @@ class TestGetSbatchCommand:
             f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out"
         )
         assert sbatch_command == (
-            f"bash --login -c 'sbatch --parsable --chdir=$HOME/my_project --export={export_value} "
+            "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
+            "CLUV_CLUSTER=mila "
+            f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
+            f"sbatch --parsable --chdir=$HOME/my_project --export={export_value} "
             "$HOME/my_project/scripts/my_script.sh '"
         )
 
@@ -464,15 +471,8 @@ class TestGetSbatchCommand:
             "CLUV_CLUSTER=mila,SBATCH_OUTPUT=results/mila_%j/slurm-%j.out"
         )
 
-    def test_caller_supplied_export_flag_is_merged_with_cluvs_env_vars(
-        self, project_dir: Path
-    ) -> None:
-        """A user-supplied `--export=...` is kept as the base, with cluv's vars appended to it.
-
-        e.g. `--export=NONE` still suppresses the ambient environment as the caller intended, but
-        cluv's own variables (GIT_COMMIT, etc.) are appended to it rather than dropped, so there's
-        still only one `--export` flag on the command line and cluv's vars always reach the job.
-        """
+    def test_export_flag_not_added_if_already_set_by_caller(self, project_dir: Path) -> None:
+        """A user-supplied `--export=...` sbatch flag is left alone, not appended after."""
         (project_dir / "pyproject.toml").write_text(
             textwrap.dedent(
                 """\
@@ -493,10 +493,7 @@ class TestGetSbatchCommand:
             git_commit="abc123",
         )
         assert sbatch_command.count("--export=") == 1
-        assert (
-            "--export=NONE,SBATCH_JOB_NAME=cluv-job,GIT_COMMIT=abc123,CLUV_CLUSTER=mila,"
-            "SBATCH_OUTPUT=results/mila_%j/slurm-%j.out" in sbatch_command
-        )
+        assert "--export=NONE" in sbatch_command
 
 
 class TestSubmitCliParsing:

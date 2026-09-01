@@ -369,7 +369,7 @@ async def test_clean(
     assert not current_cluster(), "test needs to run locally for now."
     assert cluv.cache.read_cache() == CacheContent(), "Assuming a clean cache to begin with."
 
-    monkeypatch.chdir("examples/imagenet")
+    monkeypatch.chdir("examples/pytorch-example")
     config = get_cluv_config()
     try:
         cluster_config = config.get_cluster_config(cluster)
@@ -382,7 +382,7 @@ async def test_clean(
     # Unlike `cluv clean`, this test also runs `mkdir`/`ls`/`rm` on the cluster itself, so it has
     # to resolve `results_path` the same way cluv does. `Remote.run` uses a *non-login* shell, and
     # on some clusters (vulcan, killarney) `$SCRATCH` is only set in a login shell -- leaving it
-    # unexpanded would turn `$SCRATCH/logs/imagenet` into `/logs/imagenet`.
+    # unexpanded would turn `$SCRATCH/logs/pytorch_example` into `/logs/pytorch_example`.
     real_results_path_on_cluster = await expandvars(remote, cluster_config.results_path)
 
     # Local "logs" directory.

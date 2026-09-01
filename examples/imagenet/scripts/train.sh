@@ -70,6 +70,13 @@ export WORLD_SIZE=${WORLD_SIZE:-$SLURM_NTASKS}
 #
 # A per-cluster wrapper can `export SRUN_EXTRA_ARGS=...` to add flags here.
 # `"\$@"` keeps the job command's own quoting intact, while $UV_DIR is expanded by each task.
-srun "${SRUN_EXTRA_ARGS-}" bash -c \
+# srun ${SRUN_EXTRA_ARGS-} bash -c "uv run --directory=$UV_DIR \"\$@\"" _ "${job_command[@]}"
+
+set -x  # trace out the commands being executed below.
+echo "Trying first version"
+srun ${SRUN_EXTRA_ARGS-} bash -c \
     "RANK=\$SLURM_PROCID LOCAL_RANK=\$SLURM_LOCALID \
-    uv run --directory=$UV_DIR $*"
+    uv run --directory=$UV_DIR $@"
+
+echo "Trying second version"
+srun ${SRUN_EXTRA_ARGS-} bash -c "exec uv run --directory=${UV_DIR} ${@@Q}"

@@ -46,7 +46,10 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
         f"No connection to {other_cluster} cluster, which is needed for this test."
     )
 
-    monkeypatch.chdir("examples/pytorch-example")
+    # The hydra example syncs CIFAR-10, which is small enough to route through this machine.
+    # (The imagenet example does set a `data_source`, but its ~150GB of archives would go through
+    # the submitting machine, so tests that don't need them pass `sync_datasets=False`.)
+    monkeypatch.chdir("examples/hydra_example")
     # We need to change the "tool.cluv.local.env.SCRATCH" to point to the fake scratch path.
     config = get_cluv_config()
     monkeypatch.setattr(config, "local", LocalConfig(env={"SCRATCH": str(fake_scratch)}))

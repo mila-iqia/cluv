@@ -132,16 +132,21 @@ Regardless of your config, `cluv submit` always sets these variables before call
 |---|---|
 | `GIT_COMMIT` | SHA of the current local `HEAD` commit |
 | `SBATCH_JOB_NAME` | Your configured name (or the job script stem) prefixed with `cluv-` |
-| `SBATCH_OUTPUT` | `{results_path}/{cluster}_%j/slurm-%j.out` |
+
+It also always passes an explicit `--output={results_path}/{cluster}_%j/slurm-%j.out` sbatch flag
+(`%A`/`%a` instead of `%j` for chunked/array submissions).
 
 `GIT_COMMIT` is available inside your job script, so you can use it to tag results or check out
 the exact commit that was running.
 
-!!! note "`SBATCH_OUTPUT` overrides `#SBATCH --output` in your script"
+!!! note "cluv's `--output` overrides `#SBATCH --output` in your script"
     If your job script contains an `#SBATCH --output` directive, it will be silently overridden by
     the value cluv computes from `results_path`. This is intentional - it lets `cluv` change the
     output dir based on the cluster the job runs on. The cluster name would otherwise have to
     be hard-coded in the job script file. You will see a warning in the console if this happens.
+
+    If you pass your own `--output` (via `sbatch_args` or the CLI), it is placed *after* cluv's on
+    the command line, so it wins instead - `sbatch` uses the last `--output` it's given.
 
 
 ## CLI flags and program args
@@ -182,3 +187,12 @@ cluv submit narval new_job.sh   # uses new_job.sh, ignoring config
 If neither a CLI script nor a configured `job_script_path` exists for the target cluster, [`cluv
 submit`](../../commands.md) exits with an error. See the page ["Writing a job script"](job-scripts.md) for what the
 script should contain.
+
+Note that a per-cluster job script still has to exist **on your local machine**: [`cluv
+submit`](../../commands.md#cluv-submit) reads its header to detect an `#SBATCH --output` directive
+before submitting.
+
+!!! tip "Worked example"
+    [`examples/imagenet`](https://github.com/mila-iqia/cluv/tree/master/examples/imagenet) uses one
+    job script per cluster: each `scripts/job_<cluster>.sh` holds only the `#SBATCH` directives for
+    that cluster's node layout, then `exec`s a shared `scripts/train.sh`.

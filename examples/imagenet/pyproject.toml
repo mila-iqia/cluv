@@ -1,0 +1,114 @@
+[project]
+name = "imagenet-example"
+version = "0.1.0"
+description = "Multi-node, multi-GPU ImageNet training with cluv."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "cluster-uv",
+    "numpy",
+    "rich",
+    "scikit-learn",
+    "scipy",
+    "simple-parsing",
+    "torch",
+    "torchvision",
+    "tqdm",
+    "wandb",
+]
+
+[tool.uv.sources]
+cluster-uv = { workspace = true }
+
+[tool.ruff]
+line-length = 100
+
+###  --------------   CLUV CONFIG   --------------  ###
+
+[tool.cluv]
+# NOTE: there is no global `job_script_path` here: each cluster has a different node layout (GPUs
+# per node, local disk, whole-node policies, ...), so every cluster below points at its own script.
+# Where to store job results by default.
+results_path = "$SCRATCH/logs/imagenet"
+# On clusters, Cluv creates a symlink (a shortcut) in your project folder to the results_path dir.
+# This makes it easier to keep your project in $HOME and to see the results which are on $SCRATCH.
+results_symlink = "logs"
+# Where to read the ILSVRC2012 archives from when synchronizing data to all clusters.
+data_source = "mila:/network/datasets/imagenet"
+# Where the archives should be replicated on all clusters. `prepare_data.py` reads them from here
+# and extracts them into each node's $SLURM_TMPDIR.
+#
+# NOTE: `cluv sync` rsyncs *into* this path on every cluster, so it has to be somewhere you own -
+# don't point it at a read-only shared dataset folder. Several clusters do have a shared copy of
+# ImageNet (see the README); to read that instead of your own, override `datasets_path` for that
+# cluster and run `cluv sync --no-sync-datasets`.
+datasets_path = "$SCRATCH/datasets/imagenet"
+
+[tool.cluv.sbatch_args]
+# sbatch flags applied on all clusters. CLI-supplied flags take precedence.
+# 1h is enough for the runs shown in the README, and short jobs get scheduled sooner.
+# Pass `--time=...` to `cluv submit` for a longer training run.
+time = "1:00:00"
+requeue = true
+
+[tool.cluv.local]
+# Settings (environment variables) applied when using cluv on a local machine (not on a Slurm cluster).
+# Fake "$SCRATCH" directory to use when not on a Slurm cluster.
+# This makes the examples runnable either from a laptop or from a Slurm cluster.
+# NOTE: `cluv sync` stages the ~150GB of ImageNet archives through the local `datasets_path` on
+# their way to the clusters, so this needs to point at a filesystem with room for them.
+env = { SCRATCH = "$HOME/scratch" }
+
+
+###  --------------   Clusters Config   --------------  ###
+
+[tool.cluv.clusters.mila]
+# Overrides specific to the Mila cluster.
+job_script_path = "scripts/job_mila.sh"
+
+[tool.cluv.clusters.tamia]
+job_script_path = "scripts/job_tamia.sh"
+
+[tool.cluv.clusters.killarney]
+job_script_path = "scripts/job_killarney.sh"
+sbatch_args = { account = "aip-bengioy" }
+# Killarney refuses to run jobs whose submission directory is under /home
+# ("Submitting jobs from directories residing in /home is not permitted"), so the project lives on
+# $SCRATCH there instead of the default $HOME location.
+project_dir = "$SCRATCH/repos/cluv/examples/imagenet"
+
+[tool.cluv.clusters.vulcan]
+job_script_path = "scripts/job_vulcan.sh"
+sbatch_args = { account = "aip-bengioy" }
+
+[tool.cluv.clusters.rorqual]
+job_script_path = "scripts/job_rorqual.sh"
+sbatch_args = { account = "rrg-bengioy-ad" }
+
+[tool.cluv.clusters.fir]
+job_script_path = "scripts/job_fir.sh"
+sbatch_args = { account = "rrg-bengioy-ad" }
+
+[tool.cluv.clusters.nibi]
+job_script_path = "scripts/job_nibi.sh"
+sbatch_args = { account = "rrg-bengioy-ad" }
+
+# Trillium's compute nodes have no GPUs, so this example only targets its GPU login (trillium-gpu).
+[tool.cluv.clusters.trillium-gpu]
+job_script_path = "scripts/job_trillium-gpu.sh"
+sbatch_args = { account = "rrg-bengioy-ad" }
+# $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
+# location is rejected ("Job output requested to be written to a filesystem not available on
+# compute nodes"). Keep the project on $SCRATCH instead.
+project_dir = "$SCRATCH/repos/cluv/examples/imagenet"
+# $HOME isn't reachable from compute nodes either (see scripts/job_trillium-gpu.sh), and compute
+# nodes have no internet access, so uv's cache has to be both on $SCRATCH (reachable from both the
+# login node and compute nodes) *and* actually warmed - from the login node, the only place with
+# internet - before a job can use it. `cluv sync`'s own `uv sync` step honors this too (see
+# `run_uv_sync` in cluv/cli/sync.py), so it warms the same directory the job later reads from.
+env = { UV_CACHE_DIR = "$SCRATCH/.cache/uv" }
+
+[tool.cluv.clusters.narval]
+job_script_path = "scripts/job_narval.sh"
+# Mila doesn't have an allocation on Narval anymore.
+sbatch_args = { account = "def-bengioy" }

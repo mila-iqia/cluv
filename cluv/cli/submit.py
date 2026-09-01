@@ -529,13 +529,11 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     >>> sbatch_args_from_dict({"exclusive": True})
     ['--exclusive']
     >>> sbatch_args_from_dict({"N": "2"})
-    ['-N=2']
+    ['-N', '2']
     >>> sbatch_args_from_dict({"gpus": "", "requeue": False})
     []
     >>> sbatch_args_from_dict({"n": True})
     ['-n']
-    >>> sbatch_args_from_dict({"f": "config"})
-    ['-f=config']
     """
     flags: list[str] = []
     for key, value in d.items():
@@ -546,7 +544,7 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
             flags.append(f"-{key}" if is_short_flag else f"--{key}")
         else:
             if is_short_flag:
-                flags.append(f"-{key}={value}")
+                flags.extend([f"-{key}", str(value)])
             else:
                 flags.append(f"--{key}={value}")
     return flags

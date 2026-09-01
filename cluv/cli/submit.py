@@ -571,8 +571,8 @@ def get_sbatch_command(
 
     `results_path` should be the cluster's `results_path` with its environment variables already
     resolved (see `sbatch`). It has to be resolved by the caller, because a value like
-    `$SCRATCH/logs/x` would otherwise be expanded by the wrong shell: the `SBATCH_OUTPUT=...` pieces
-    below are `shlex.quote`d, and those single quotes close the `bash --login -c '...'` string, so
+    `$SCRATCH/logs/x` would otherwise be expanded by the wrong shell: the `--output=...` flag built
+    below is `shlex.quote`d, and those single quotes close the `bash --login -c '...'` string, so
     the *non-login* ssh shell ends up expanding them. On clusters where $SCRATCH is only set in a
     login shell (Killarney, Vulcan) it expands to nothing, and the job dies with its output going to
     an unwritable `/logs/...`. Falls back to the unresolved config value when not given, which is
@@ -600,14 +600,13 @@ def get_sbatch_command(
     env_vars["CLUV_CLUSTER"] = cluster
 
     sbatch_flags = sbatch_args_from_dict(sbatch_args)
-    if not any("--output" in flag for flag in sbatch_flags):
-        cluster_results_path = PurePosixPath(results_path or cluster_config.results_path)
-        # Chunked (job array) jobs need `%A`/`%a` (array job id / task id) instead of `%j`.
-        if "array" in sbatch_args:
-            env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
-        else:
-            env_vars["SBATCH_OUTPUT"] = f"{cluster_results_path}/{cluster}_%j/slurm-%j.out"
+    # Pull out any caller-supplied `--output` (from config or the CLI) so it can be placed *after*
+    # cluv's own below - sbatch takes the last `--output` on its command line, so the caller's
+    # choice still wins, but cluv's own default is always there as a fallback.
+    caller_output_flag = next((f for f in sbatch_flags if f.startswith("--output=")), None)
+    sbatch_flags = [f for f in sbatch_flags if f != caller_output_flag]
 
+    if caller_output_flag is None:
         header_output = next(
             (
                 line
@@ -619,10 +618,20 @@ def get_sbatch_command(
         if header_output is not None:
             logger.warning(
                 f"[yellow]The job script {job_script} sets {header_output.strip()!r}, which "
-                f"will be overridden by cluv's SBATCH_OUTPUT so that results can be synced "
+                f"will be overridden by cluv's --output so that results can be synced "
                 f"back. Consider using cluv in your Python script to decide where to store "
                 f"results instead.[/yellow]"
             )
+
+    cluster_results_path = PurePosixPath(results_path or cluster_config.results_path)
+    # Chunked (job array) jobs need `%A`/`%a` (array job id / task id) instead of `%j`.
+    if "array" in sbatch_args:
+        output_value = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
+    else:
+        output_value = f"{cluster_results_path}/{cluster}_%j/slurm-%j.out"
+    sbatch_flags = [*sbatch_flags, f"--output={output_value}"]
+    if caller_output_flag is not None:
+        sbatch_flags = [*sbatch_flags, caller_output_flag]
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     final_sbatch_args = sbatch_flags

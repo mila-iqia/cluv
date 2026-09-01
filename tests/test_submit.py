@@ -232,23 +232,21 @@ class TestGetSbatchCommand:
 
         export_value = (
             "ALL,MY_VAR=1,SPECIAL_MILA_VAR=xyz,SBATCH_JOB_NAME=cluv-my_script,"
-            f"GIT_COMMIT=abecdef,CLUV_CLUSTER={cluster},"
-            f"SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out"
+            f"GIT_COMMIT=abecdef,CLUV_CLUSTER={cluster}"
         )
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz SBATCH_JOB_NAME=cluv-my_script "
             # Ugly, quite hard-coded.
             f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster} "
-            f"SBATCH_OUTPUT={results_path}/{cluster}_%j/slurm-%j.out "
             "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
-            f"--mem=8G --export={export_value} "
+            f"--mem=8G --output={results_path}/{cluster}_%j/slurm-%j.out --export={export_value} "
             f"$HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
 
     def test_resolved_results_path_is_used_verbatim_in_sbatch_output(
         self, project_dir: Path
     ) -> None:
-        """A `results_path` holding env vars has to be resolved before it reaches SBATCH_OUTPUT.
+        """A `results_path` holding env vars has to be resolved before it reaches `--output`.
 
         `shlex.quote` wraps a value containing `$` in single quotes, and those close the
         `bash --login -c '...'` string, so the *non-login* ssh shell would expand it. On the clusters
@@ -279,12 +277,10 @@ class TestGetSbatchCommand:
             git_commit="abecdef",
             results_path=PurePosixPath("/scratch/me/logs/my_project"),
         )
-        assert "SBATCH_OUTPUT=/scratch/me/logs/my_project/killarney_%j/slurm-%j.out" in (
-            sbatch_command
-        )
+        assert "--output=/scratch/me/logs/my_project/killarney_%j/slurm-%j.out" in (sbatch_command)
         # The whole point: no unexpanded variable, and therefore no nested quoting, is left in the
-        # SBATCH_OUTPUT the remote shell will see.
-        assert "SBATCH_OUTPUT='" not in sbatch_command
+        # --output value the remote shell will see.
+        assert "--output='" not in sbatch_command
         assert "$SCRATCH" not in sbatch_command
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
@@ -317,14 +313,13 @@ class TestGetSbatchCommand:
         )
 
         export_value = (
-            "ALL,MY_VAR=2,SBATCH_JOB_NAME=cluv-my_script,GIT_COMMIT=abecdef,CLUV_CLUSTER=mila,"
-            f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out"
+            "ALL,MY_VAR=2,SBATCH_JOB_NAME=cluv-my_script,GIT_COMMIT=abecdef,CLUV_CLUSTER=mila"
         )
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=2 SBATCH_JOB_NAME=cluv-my_script GIT_COMMIT=abecdef "
             "CLUV_CLUSTER=mila "
-            f"SBATCH_OUTPUT={results_path}/mila_%j/slurm-%j.out "
-            f"sbatch --parsable --chdir=$HOME/my_project --export={export_value} "
+            f"sbatch --parsable --chdir=$HOME/my_project --output={results_path}/mila_%j/slurm-%j.out "
+            f"--export={export_value} "
             "$HOME/my_project/scripts/my_script.sh '"
         )
 
@@ -468,7 +463,7 @@ class TestGetSbatchCommand:
         export_flag = next(f for f in sbatch_command.split() if f.startswith("--export="))
         assert export_flag == (
             "--export=ALL,WANDB_MODE=offline,SBATCH_JOB_NAME=cluv-job,GIT_COMMIT=abc123,"
-            "CLUV_CLUSTER=mila,SBATCH_OUTPUT=results/mila_%j/slurm-%j.out"
+            "CLUV_CLUSTER=mila"
         )
 
     def test_export_flag_not_added_if_already_set_by_caller(self, project_dir: Path) -> None:
@@ -494,6 +489,35 @@ class TestGetSbatchCommand:
         )
         assert sbatch_command.count("--export=") == 1
         assert "--export=NONE" in sbatch_command
+
+    def test_caller_supplied_output_flag_is_placed_after_cluvs_own(
+        self, project_dir: Path
+    ) -> None:
+        """A user-supplied `--output=...` still wins, but cluv's own default stays on the command
+        line as a fallback, before it - `sbatch` takes the last `--output` on its command line."""
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        sbatch_command = get_sbatch_command(
+            cluster="mila",
+            job_script=job_script,
+            sbatch_args={"output": "custom/path/%j.out"},
+            program_args=[],
+            git_commit="abc123",
+        )
+        assert sbatch_command.count("--output=") == 2
+        assert sbatch_command.index("--output=results/mila_%j/slurm-%j.out") < (
+            sbatch_command.index("--output=custom/path/%j.out")
+        )
 
 
 class TestSubmitCliParsing:
@@ -1118,7 +1142,7 @@ async def test_submit_first_considers_current_cluster(
 
         print(f"Running command: {full_command}")
         # `sbatch` resolves env vars in the cluster's results_path through a login shell before
-        # putting it in SBATCH_OUTPUT (see `get_sbatch_command` for why it can't be left to the
+        # putting it in `--output` (see `get_sbatch_command` for why it can't be left to the
         # shell that runs sbatch).
         if "bash --login -c" in full_command and "echo " in full_command:
             return _result("/scratch/testuser/logs/my_project")

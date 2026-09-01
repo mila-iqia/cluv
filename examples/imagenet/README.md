@@ -279,7 +279,7 @@ Both clusters accept and run the job, but hit issues unrelated to this example's
   running, not just once it's done. A second call with `policy="now"` right before
   `wandb.run.finish()` closes most of the gap left by "live" not always catching up to the latest
   content before the run is torn down. Using a glob sidesteps having to know the exact filename
-  (chunked or job-packed submissions use a different `SBATCH_OUTPUT` pattern than a single job
+  (chunked or job-packed submissions use a different `--output` pattern than a single job
   does) - one that matches nothing is a silent no-op, not an error. Slurm keeps writing to that
   file for a moment after this process exits (it appends its own trailer), so the very last couple
   of lines are the one part that never makes it into the upload.

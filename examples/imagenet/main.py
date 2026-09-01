@@ -770,7 +770,7 @@ def watch_slurm_output(run, policy: str = "live"):
       so this second call closes that gap. It still can't capture whatever this process prints
       after that point, or Slurm's own trailer once the job fully exits.
 
-    Rather than figure out the exact filename (cluv's `SBATCH_OUTPUT` for this example always
+    Rather than figure out the exact filename (cluv's `--output` for this example always
     lands it directly in `RESULTS_DIR`, but a chunked or job-packed submission would use a
     different pattern), this just globs every `*.out` file already there - `save()` takes a Unix
     glob natively, and one that matches nothing is a silent no-op, not an error.

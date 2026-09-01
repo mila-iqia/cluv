@@ -683,7 +683,9 @@ async def expand_for_vram(
 
     logger.info("GPU types with at least %s of VRAM on %s: %s", vram, cluster, gpu_types)
     return [
-        sbatch_args_from_args_list(sbatch_args_for_gpu_type(sbatch_args_list, gpu_request, gpu_type))
+        sbatch_args_from_args_list(
+            sbatch_args_for_gpu_type(sbatch_args_list, gpu_request, gpu_type)
+        )
         for gpu_type in gpu_types
     ]
 

@@ -6,6 +6,6 @@
 #SBATCH --cpus-per-task=14
 #SBATCH --mem-per-gpu=64G
 
-# `cluv submit` runs `sbatch --chdir=<project dir>`, so the job starts in this project's
-# folder on the cluster, and the rest of the work is shared with the other clusters:
+# Specific to Nibi: Apparently the `MASTER_ADDR` has to be set to this specific pattern.
+export MASTER_ADDR="ic-${SLURMD_NODENAME}"
 exec bash scripts/train.sh "$@"

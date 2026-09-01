@@ -1,16 +1,7 @@
 #!/bin/bash
 # Shared body of every job script in this example.
 #
-# The per-cluster `scripts/job_<cluster>.sh` wrappers only contain #SBATCH directives, then
-# `exec` this script. Which wrapper is used for which cluster is set with `job_script_path` in the
-# `[tool.cluv.clusters.<cluster>]` sections of the pyproject.toml.
-#
-# `cluv submit` runs `sbatch --chdir=<project_dir>`, so the job (and therefore this script) starts in
-# this project's folder on the cluster.
-# (Note: $SLURM_SUBMIT_DIR is *not* that folder - it is the directory sbatch itself was run from,
-# which for `cluv submit` is the home directory of the SSH session.)
-#
-# `scripts/code_checkpointing.sh` then clones the project onto each node's local storage at the
+# `scripts/code_checkpointing.sh` clones the project onto each node's local storage at the
 # commit the job was submitted with, and every `uv run` below is pointed there with `--directory`.
 
 set -e # exit on error.
@@ -38,7 +29,7 @@ echo "Command:    uv run ${job_command[*]}"
 # is the directory to give to `uv run --directory`, and it still contains a literal, unexpanded
 # `$SLURM_TMPDIR`: that path is node-local and can differ between the nodes of one job, so each task
 # has to expand it itself. That is why every `uv run` below goes through a `bash -c "..."`.
-UV_DIR=$(bash scripts/code_checkpointing.sh)
+UV_DIR="$(bash scripts/code_checkpointing.sh)"
 echo "Running uv commands in directory: $UV_DIR"
 
 ## Stage the dataset into $SLURM_TMPDIR ##
@@ -53,17 +44,17 @@ else
     # One task per node, not one per GPU: see the note in scripts/code_checkpointing.sh about why
     # `--ntasks` has to be capped too.
     srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} \
-        bash -c "uv run --directory=$UV_DIR python prepare_data.py"
+        uv run --directory="$UV_DIR" python prepare_data.py
 fi
 
 # These environment variables are used by torch.distributed and should ideally be set
 # before running the python script, or at the very beginning of the python script.
 # (Some modules might inadvertently initialize cuda when imported, which is a problem.)
 # Master address is the hostname of the first node in the job.
-export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+export MASTER_ADDR=${MASTER_ADDR:-$(scontrol show hostnames | head -n 1)}
 # Get a unique port for this job based on the job ID
-export MASTER_PORT=$(expr 10000 + $(echo -n $SLURM_JOB_ID | tail -c 4))
-export WORLD_SIZE=$SLURM_NTASKS
+export MASTER_PORT=${MASTER_PORT:-$((10000 + $(echo -n $SLURM_JOB_ID | tail -c 4)))}
+export WORLD_SIZE=${WORLD_SIZE:-$SLURM_NTASKS}
 # main.py derives RANK / LOCAL_RANK from $SLURM_PROCID / $SLURM_LOCALID, which differ per task, so
 # they must not be set here.
 
@@ -79,4 +70,6 @@ export WORLD_SIZE=$SLURM_NTASKS
 #
 # A per-cluster wrapper can `export SRUN_EXTRA_ARGS=...` to add flags here.
 # `"\$@"` keeps the job command's own quoting intact, while $UV_DIR is expanded by each task.
-srun ${SRUN_EXTRA_ARGS-} bash -c "uv run --directory=$UV_DIR \"\$@\"" _ "${job_command[@]}"
+srun "${SRUN_EXTRA_ARGS-}" bash -c \
+    "RANK=\$SLURM_PROCID LOCAL_RANK=\$SLURM_LOCALID \
+    uv run --directory=$UV_DIR $*"

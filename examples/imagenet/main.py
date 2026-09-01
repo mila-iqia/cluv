@@ -47,8 +47,7 @@ import torchvision
 import tqdm
 import tqdm.rich
 import wandb
-from cluv.job import current_run_info, get_results_path
-from cluv.utils import current_cluster
+from cluv.job import current_run_info
 from torch import Tensor, nn
 from torch.distributed import ReduceOp
 from torch.nn import functional as F
@@ -58,30 +57,42 @@ from torch.utils.data.distributed import DistributedSampler
 from torchvision.datasets import ImageNet
 from torchvision.transforms import v2 as transforms
 
-JOB_ID = os.environ["SLURM_JOB_ID"]  # you absolutely need to be within a slurm job!
-SLURM_TMPDIR = Path(os.environ.get("SLURM_TMPDIR", "/tmp"))
-assert SLURM_TMPDIR.exists(), f"SLURM_TMPDIR (assumed {SLURM_TMPDIR}) should exist!"
+if "SLURM_JOB_ID" not in os.environ:
+    raise RuntimeError("SLURM_JOB_ID is not set! This script must be run within a Slurm job.")
+if "SLURM_PROCID" not in os.environ and "RANK" not in os.environ:
+    # If neither the SLURM nor the torch distributed env vars are set, raise an error.
+    raise RuntimeError(
+        "Both the SLURM and the torch distributed env vars are not set! "
+        "This indicates that you might be running this script in something like the "
+        "vscode terminal with `python main.py>`.\n"
+        f"Consider relaunching the same command with srun instead, like so: \n"
+        f"➡️    srun --pty python main.py {' '.join(sys.argv)}\n"
+        "See https://slurm.schedmd.com/srun.html for more info."
+    )
 
 # Cluv tells us which cluster we are on, gives this run a unique id (`{cluster}_{job_id}`, also
 # accounting for job arrays and job packing), and resolves the `results_path` of `[tool.cluv]` for
 # this cluster. Everything this job writes goes under `RESULTS_DIR`, which `cluv sync` then pulls
 # back to wherever you submitted from.
-# On an unrecognized cluster (or a laptop), cluv can't name the cluster, so we fall back to the
-# plain job id and the global `results_path`.
-RUN_INFO = current_run_info() if current_cluster() else None
-RUN_ID = RUN_INFO.run_id if RUN_INFO else JOB_ID
-RESULTS_DIR = RUN_INFO.results_path if RUN_INFO else get_results_path() / RUN_ID
+RUN = current_run_info()
+assert RUN is not None, "This example needs to be run inside a Slurm job."
+
+JOB_ID = os.environ["SLURM_JOB_ID"]
+SLURM_TMPDIR = Path(os.environ["SLURM_TMPDIR"])
+assert SLURM_TMPDIR.exists()
+
+RUN_ID = RUN.run_id
+RESULTS_DIR = RUN.results_path.absolute()
 # `scripts/train.sh` runs this from a clone of the repo in $SLURM_TMPDIR, which the cluster deletes
 # when the job ends. `results_path` is expanded with the job's environment, so an unset variable in
 # it (say $SCRATCH) would stay literal and leave RESULTS_DIR *relative*: every checkpoint, profiler
 # trace and wandb file would be written inside that clone and thrown away with it. Fail now rather
 # than lose the results at the end of the job.
-if not RESULTS_DIR.is_absolute():
+if RESULTS_DIR.is_relative_to(SLURM_TMPDIR):
     raise RuntimeError(
-        f"The results directory for this run is not an absolute path: {RESULTS_DIR}\n"
-        f"An environment variable in the `results_path` of the cluv config (usually $SCRATCH) is "
-        f"probably not set inside the job. Anything written there would end up in the copy of the "
-        f"repo in $SLURM_TMPDIR and be deleted when the job ends."
+        f"The results directory for this run is resolved to {RESULTS_DIR}, which is under "
+        f"$SLURM_TMDIR and will be lost at the end of the job!\n"
+        f"Make sure to use a directory in $SCRATCH for your results dir."
     )
 
 # Set any missing environment variables so that `torch.distributed.init_process_group`
@@ -99,27 +110,16 @@ if not RESULTS_DIR.is_absolute():
 # so you could in principle use this in a workflow based on srun + torchrun or
 # srun + 'accelerate launch'.
 
-if "SLURM_PROCID" not in os.environ and "RANK" not in os.environ:
-    # If neither the SLURM nor the torch distributed env vars are set, raise an error.
-    raise RuntimeError(
-        "Both the SLURM and the torch distributed env vars are not set! "
-        "This indicates that you might be running this script in something like the "
-        "vscode terminal with `python main.py>`.\n"
-        f"Consider relaunching the same command with srun instead, like so: \n"
-        f"➡️    srun --pty python main.py {' '.join(sys.argv)}\n"
-        "See https://slurm.schedmd.com/srun.html for more info."
-    )
-
 # This will raise an error if both are unset. This is expected (see above).
 RANK = int(os.environ.setdefault("RANK", os.environ.get("SLURM_PROCID", "")))
 LOCAL_RANK = int(os.environ.setdefault("LOCAL_RANK", os.environ.get("SLURM_LOCALID", "")))
 WORLD_SIZE = int(os.environ.setdefault("WORLD_SIZE", os.environ.get("SLURM_NTASKS", "")))
 MASTER_PORT = int(os.environ.setdefault("MASTER_PORT", str(10000 + int(JOB_ID) % 10000)))
-if "SLURM_JOB_NODELIST" in os.environ:
+if "MASTER_ADDR" not in os.environ and "SLURM_JOB_NODELIST" in os.environ:
     # Get the hostname of the first node, for example: "cn-l[084-085]" --> cn-l084
-    _first_node = subprocess.check_output(
-        f"scontrol show hostnames {os.environ['SLURM_JOB_NODELIST']}", text=True, shell=True
-    ).split()[0]
+    _first_node = subprocess.check_output("scontrol show hostnames", text=True, shell=True).split()[
+        0
+    ]
     MASTER_ADDR = os.environ.setdefault("MASTER_ADDR", _first_node)
 else:
     MASTER_ADDR = os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
@@ -594,7 +594,9 @@ def training_step(
     batch_index: int | None = None,
 ):
     with torch.autocast(
-        device_type="cuda", dtype=torch.bfloat16, enabled=scaler is not None and scaler.is_enabled()
+        device_type="cuda",
+        dtype=torch.bfloat16,
+        enabled=scaler is not None and scaler.is_enabled(),
     ):
         # Forward pass
         logits: Tensor = model(x)

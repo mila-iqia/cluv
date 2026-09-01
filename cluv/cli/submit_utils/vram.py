@@ -3,7 +3,7 @@
 Asking for an amount of VRAM instead of a GPU model lets the job run on any GPU that is big
 enough, in particular on the MIG slices of the DRAC clusters, which tend to be idle. One job
 is submitted per compatible GPU type and the first one to start is kept (see
-`submit_and_keep_first`).
+`cluv.cli.submit.expand_for_vram`).
 
 The GPU types are not hard-coded: they are read from `sinfo` on each cluster (and cached), so
 that new GPU models and MIG profiles are picked up automatically.

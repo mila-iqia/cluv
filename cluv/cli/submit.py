@@ -443,8 +443,6 @@ def get_submissions(
 def get_cluster_job_script_path(
     local_job_script_path: Path, cluster: str, cluster_config: ClusterConfig
 ) -> PurePosixPath:
-    # TODO: Need to make sure this job script is not the local absolute path
-    # to it (we need to use the path on the cluster).
     if cluster_config.job_script_path:
         return cluster_config.job_script_path
 
@@ -672,6 +670,11 @@ def add_cluv_sbatch_args(
     else:
         sbatch_args["output"] = str(cluster_config.results_path / f"{cluster}_%j/slurm-%j.out")
 
+    local_project_dir = Path(get_cluv_config().project_dir or find_pyproject().parent)
+    remote_project_dir = cluster_config.project_dir or (
+        PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
+    )
+    sbatch_args["chdir"] = str(remote_project_dir)
     # Some clusters (trillium, trillium-gpu) have a wrapper around `sbatch` that sets `--export=NONE` by default,
     # which would discard the environment variables.
     sbatch_args["export"] = "ALL"
@@ -689,6 +692,14 @@ def get_sbatch_command(
     sbatch_flags = sbatch_args_from_dict(sbatch_args)
     env_vars_prefix = " ".join(f"{k}={v}" for k, v in env_vars.items())
     assert not job_script.is_absolute()
+
+    # These three are interpolated unquoted, so the cluster's login shell expands any env vars in
+    # them (`$SCRATCH`, `$HOME`). `sbatch_args_str`/`program_args_str` are `shlex`-escaped instead,
+    # since nothing in them is meant to be expanded remotely.
+    check_path_is_safe_to_interpolate(job_script, "job_script")
+    if isinstance(output := sbatch_args.get("output"), str):
+        check_path_is_safe_to_interpolate(output, "output")
+
     return (
         f"bash --login -c '"
         f"{env_vars_prefix} sbatch --parsable {' '.join(sbatch_flags)} {job_script} "

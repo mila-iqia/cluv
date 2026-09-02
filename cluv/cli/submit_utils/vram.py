@@ -86,23 +86,22 @@ async def expand_for_vram(
     if not vram:
         return [sbatch_args]
 
-    gpu_request = find_gpu_request(sbatch_args, job_script)
-    if gpu_request and gpu_request.count > 1:
+    gpu_request = get_gpu_request(sbatch_args, job_script) or GpuRequest()
+    if gpu_request.count > 1:
         console.print(
-            f"[yellow]Ignoring --vram on {cluster}: the job asks for {gpu_request.count} GPUs, "
-            "and MIG slices can only be used one at a time.[/yellow]"
+            f"Ignoring --vram on {cluster}: the job asks for {gpu_request.count} GPUs, "
+            "and MIG slices can only be used one at a time.",
+            style="yellow",
         )
         return [sbatch_args]
 
-    gpu_request = gpu_request or GpuRequest()
-    gpu_types = compatible_gpu_types(
-        await get_gpu_types(cluster, remote), parse_vram(vram), gpu_request.model
-    )
+    gpu_types = compatible_gpu_types(await get_gpu_types(cluster, remote), vram, gpu_request.model)
     if not gpu_types:
         console.print(
-            f"[yellow]Ignoring --vram on {cluster}: no GPU type with at least {vram} of VRAM"
+            f"Ignoring --vram on {cluster}: no GPU type with at least {vram} of VRAM"
             + (f" for the {gpu_request.model} model" if gpu_request.model else "")
-            + ".[/yellow]"
+            + ".",
+            style="yellow",
         )
         return [sbatch_args]
 
@@ -196,7 +195,7 @@ async def get_gpu_types(cluster: str, remote: Remote | None) -> dict[str, float 
 
 
 def compatible_gpu_types(
-    gpu_types: dict[str, float | None], vram_gb: float, model: str | None = None
+    gpu_types: dict[str, float | None], vram: str, model: str | None = None
 ) -> list[str]:
     """Return the GPU types with at least `vram_gb` of VRAM, smallest (i.e. easiest to get) first.
 
@@ -210,6 +209,7 @@ def compatible_gpu_types(
     >>> compatible_gpu_types(gpu_types, vram_gb=48, model="h100")
     ['h100']
     """
+    vram_gb = parse_vram(vram)  # Accept "10G" or "10GB" as well as 10.0
     compatible = {
         gpu_type: vram
         for gpu_type, vram in gpu_types.items()
@@ -264,24 +264,26 @@ def _parse_gpu_flag(flag: str, value: str | int | float | bool) -> tuple[str | N
     return (model or None), int(count)
 
 
-def find_gpu_request(sbatch_args: SbatchArgs, job_script: Path | None = None) -> GpuRequest | None:
+def get_gpu_request(sbatch_args: SbatchArgs, job_script: Path | None = None) -> GpuRequest | None:
     """Find how many GPUs (and of which model) the job asks for.
 
     The sbatch args (from the command-line and from the cluv config) take precedence over the
     `#SBATCH` directives of the job script header, just like they do for `sbatch` itself.
 
-    >>> find_gpu_request({"time": "1:00:00", "gpus": "h100:1"})
+    >>> get_gpu_request({"time": "1:00:00", "gpus": "h100:1"})
     GpuRequest(flag='gpus', model='h100', count=1)
-    >>> find_gpu_request({"G": "2"})
+    >>> get_gpu_request({"G": "2"})
     GpuRequest(flag='G', model=None, count=2)
-    >>> find_gpu_request({"time": "1:00:00"}) is None
-    True
+    >>> get_gpu_request({"time": "1:00:00"})
+    None
     """
+    # First, look for a GPU request in the sbatch args.
     for flag, value in sbatch_args.items():
         if (parsed := _parse_gpu_flag(flag, value)) is not None:
             model, count = parsed
             return GpuRequest(flag=flag, model=model, count=count)
 
+    # Then, look for a GPU request in the job script header.
     if job_script is None:
         return None
 

@@ -14,7 +14,7 @@ from cluv.cli.submit import expand_for_vram
 from cluv.cli.submit_utils.vram import (
     GpuRequest,
     compatible_gpu_types,
-    find_gpu_request,
+    get_gpu_request,
     gpu_vram_gb,
     parse_gpu_types,
     parse_vram,
@@ -152,7 +152,7 @@ class TestCompatibleGpuTypes:
     def test_races_between_mig_slices_and_full_gpus(self):
         # The example from the issue: 10GB on Rorqual should race the 10G, 20G and 40G slices
         # against the full H100s, easiest (smallest) first.
-        assert compatible_gpu_types(parse_gpu_types(RORQUAL_SINFO), vram_gb=10) == [
+        assert compatible_gpu_types(parse_gpu_types(RORQUAL_SINFO), vram="10GB") == [
             "nvidia_h100_80gb_hbm3_1g.10gb",
             "nvidia_h100_80gb_hbm3_2g.20gb",
             "nvidia_h100_80gb_hbm3_3g.40gb",
@@ -160,14 +160,14 @@ class TestCompatibleGpuTypes:
         ]
 
     def test_slices_that_are_too_small_are_excluded(self):
-        assert compatible_gpu_types(parse_gpu_types(RORQUAL_SINFO), vram_gb=30) == [
+        assert compatible_gpu_types(parse_gpu_types(RORQUAL_SINFO), vram="10GB") == [
             "nvidia_h100_80gb_hbm3_3g.40gb",
             "h100",
         ]
 
     def test_requested_model_restricts_the_race(self):
         gpu_types = parse_gpu_types(MILA_SINFO)
-        assert compatible_gpu_types(gpu_types, vram_gb=10) == [
+        assert compatible_gpu_types(gpu_types, vram="10GB") == [
             "v100",
             "a100",
             "a6000",
@@ -176,12 +176,12 @@ class TestCompatibleGpuTypes:
             "a100l",
             "h100",
         ]
-        assert compatible_gpu_types(gpu_types, vram_gb=10, model="a100") == ["a100"]
-        assert compatible_gpu_types(gpu_types, vram_gb=10, model="a100l") == ["a100l"]
+        assert compatible_gpu_types(gpu_types, vram="10GB", model="a100") == ["a100"]
+        assert compatible_gpu_types(gpu_types, vram="10GB", model="a100l") == ["a100l"]
 
     def test_a_mig_slice_counts_as_its_base_model(self):
         gpu_types = parse_gpu_types(NARVAL_SINFO)
-        assert compatible_gpu_types(gpu_types, vram_gb=10, model="a100") == [
+        assert compatible_gpu_types(gpu_types, vram="10GB", model="a100") == [
             "a100_2g.10gb",
             "a100_3g.20gb",
             "a100_4g.20gb",
@@ -189,7 +189,7 @@ class TestCompatibleGpuTypes:
         ]
 
     def test_no_compatible_gpu_type(self):
-        assert compatible_gpu_types(parse_gpu_types(RORQUAL_SINFO), vram_gb=200) == []
+        assert compatible_gpu_types(parse_gpu_types(RORQUAL_SINFO), vram="200GB") == []
 
 
 class TestFindGpuRequest:
@@ -207,14 +207,14 @@ class TestFindGpuRequest:
         ],
     )
     def test_from_sbatch_args(self, sbatch_args: dict, expected: GpuRequest):
-        assert find_gpu_request(sbatch_args) == expected
+        assert get_gpu_request(sbatch_args) == expected
 
     @pytest.mark.parametrize(
         "sbatch_args",
         [{}, {"time": "1:00:00"}, {"gres": "tmpfs:10G"}, {"cpus-per-task": "4"}],
     )
     def test_no_gpu_request(self, sbatch_args: dict):
-        assert find_gpu_request(sbatch_args) is None
+        assert get_gpu_request(sbatch_args) is None
 
     def test_from_the_job_script_header(self, tmp_path: Path):
         job_script = tmp_path / "job.sh"
@@ -225,18 +225,18 @@ class TestFindGpuRequest:
             "\n"
             "echo --gpus=2\n"  # Not part of the header: must be ignored.
         )
-        assert find_gpu_request({}, job_script) == GpuRequest("gpus-per-node", "h100", 1)
+        assert get_gpu_request({}, job_script) == GpuRequest("gpus-per-node", "h100", 1)
 
     def test_sbatch_args_take_precedence_over_the_job_script(self, tmp_path: Path):
         job_script = tmp_path / "job.sh"
         job_script.write_text("#!/bin/bash\n#SBATCH --gpus=a100:1\n")
-        assert find_gpu_request({"gpus": "h100:1"}, job_script) == GpuRequest("gpus", "h100", 1)
+        assert get_gpu_request({"gpus": "h100:1"}, job_script) == GpuRequest("gpus", "h100", 1)
 
 
 class TestSbatchArgsForGpuType:
     def test_replaces_the_gpu_flag_in_place(self):
         sbatch_args: SbatchArgs = {"time": "1:00:00", "gpus": "h100:1", "cpus-per-task": "4"}
-        gpu_request = find_gpu_request(sbatch_args)
+        gpu_request = get_gpu_request(sbatch_args)
         assert gpu_request
         assert sbatch_args_for_gpu_type(sbatch_args, gpu_request, "h100_1g.10gb") == {
             "time": "1:00:00",
@@ -246,7 +246,7 @@ class TestSbatchArgsForGpuType:
 
     def test_keeps_the_short_flag_key(self):
         sbatch_args: SbatchArgs = {"G": "1", "time": "1:00:00"}
-        gpu_request = find_gpu_request(sbatch_args)
+        gpu_request = get_gpu_request(sbatch_args)
         assert gpu_request
         assert sbatch_args_for_gpu_type(sbatch_args, gpu_request, "a100_1g.5gb") == {
             "G": "a100_1g.5gb:1",
@@ -255,7 +255,7 @@ class TestSbatchArgsForGpuType:
 
     def test_keeps_the_gres_form(self):
         sbatch_args: SbatchArgs = {"gres": "gpu:1"}
-        gpu_request = find_gpu_request(sbatch_args)
+        gpu_request = get_gpu_request(sbatch_args)
         assert gpu_request
         assert sbatch_args_for_gpu_type(sbatch_args, gpu_request, "a100_1g.5gb") == {
             "gres": "gpu:a100_1g.5gb:1"

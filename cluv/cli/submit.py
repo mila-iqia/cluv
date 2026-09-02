@@ -1,4 +1,3 @@
-import argparse
 import asyncio
 import dataclasses
 import datetime
@@ -18,8 +17,9 @@ from rich.live import Live
 from cluv.cache import Job, Submission, save_job
 from cluv.cli.submit_utils.chunking import apply_chunking
 from cluv.cli.sync import get_cluster_to_remote, sync_common_part, sync_per_cluster_part
-from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
+from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
+from cluv.sbatch_args import SbatchArgs, sbatch_args_from_list, sbatch_args_to_list
 from cluv.slurm import FAILED_JOB_STATES, run_saccts
 from cluv.utils import console, group_by_cluster
 
@@ -84,7 +84,7 @@ def _short_command(submission: Submission) -> str:
     shown instead is exactly the two things that vary and actually matter: the sbatch flags
     (resources requested) and the program args (what's actually being run).
     """
-    sbatch_flags = shlex.join(sbatch_args_from_dict(submission.sbatch_args))
+    sbatch_flags = shlex.join(sbatch_args_to_list(submission.sbatch_args))
     program_args_str = shlex.join(submission.program_args)
     return f"bash --login -c '(...) {sbatch_flags} -- {program_args_str}'"
 
@@ -439,70 +439,6 @@ def get_submissions(
     return submissions
 
 
-def sbatch_args_from_args_list(sbatch_args_list: list[str]) -> SbatchArgs:
-    """Convert a list of sbatch flags (from the CLI) to a dict of sbatch options.
-
-    Behaves like argparse, where if the flags are passed multiple times, the last value is kept.
-    Aliases for common commands are also kept.
-
-    >>> sbatch_args_from_args_list(["--time=2:00:00", "-t=00:00:30"])
-    {'time': '00:00:30'}
-    >>> sbatch_args_from_args_list(["--time=2:00:00", "--gpus=1"])
-    {'time': '2:00:00', 'gpus': '1'}
-    >>> sbatch_args_from_args_list(["--exclusive"])
-    {'exclusive': True}
-    >>> sbatch_args_from_args_list(["-N", "2"])
-    {'nodes': '2'}
-    >>> sbatch_args_from_args_list(["-f", "2"])
-    {'f': '2'}
-    >>> sbatch_args_from_args_list(["--gpus", "--requeue=False"])
-    {'gpus': True, 'requeue': 'False'}
-    >>> sbatch_args_from_args_list(["-n"])
-    {'n': True}
-    >>> sbatch_args_from_args_list(["--array=0-3%2", "-a=0-1%1"])
-    {'array': '0-3%2', 'a': '0-1%1'}
-    """
-    # Maybe use argparse, and keep it simple! No need to recreate every single sbatch flag,
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    parser.add_argument("-c", "--cpus-per-task", dest="cpus-per-task", default=argparse.SUPPRESS)
-    parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
-    parser.add_argument("-N", "--nodes", dest="nodes", default=argparse.SUPPRESS)
-    parser.add_argument("-A", "--account", dest="account", default=argparse.SUPPRESS)
-    args, unknown = parser.parse_known_args(sbatch_args_list)
-    sbatch_args: SbatchArgs = vars(args)
-
-    # First, join any stragglers like ['-f', '2'] into ['-f=2'] so we can parse them consistently.
-    # Edge case: ['-f', '-g'] stays the same.
-    joined_unknown_args: list[str] = []
-    skip_next = False
-    for i, arg in enumerate(unknown):
-        if skip_next:
-            skip_next = False
-            continue
-        if arg.startswith("-") and i + 1 < len(unknown) and not unknown[i + 1].startswith("-"):
-            joined_unknown_args.append(f"{arg}={unknown[i + 1]}")
-            skip_next = True
-        else:
-            joined_unknown_args.append(arg)
-
-    for value in joined_unknown_args:
-        if value.startswith("--"):
-            key, _, val = value[2:].partition("=")
-        elif value.startswith("-"):
-            value = value.removeprefix("-")
-            key, _, val = value.partition("=")
-        else:
-            continue
-        if not val.strip():
-            val = True  # --exclusive --> {exclusive: True}
-        if val is not None:
-            if key in sbatch_args:
-                # remove the value so the ordering is preserved based on the positioning in `sbatch_args_list`.
-                sbatch_args.pop(key)
-            sbatch_args[key] = val
-    return sbatch_args
-
-
 def merge_sbatch_args(from_config: SbatchArgs, from_cli: list[str]) -> SbatchArgs:
     """Merge the sbatch args from the config and from the CLI, with CLI args taking precedence.
 
@@ -510,44 +446,8 @@ def merge_sbatch_args(from_config: SbatchArgs, from_cli: list[str]) -> SbatchArg
     -t=2:00:00` -- config or CLI, either order -- resolves to a single `time` value (the last
     one written) instead of leaving two separate keys for what's really the same sbatch option.
     """
-    sbatch_args_from_config = sbatch_args_from_dict(from_config)
-    return sbatch_args_from_args_list(sbatch_args_from_config + from_cli)
-
-
-def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
-    """Convert a dict of sbatch options to a list of command-line flags.
-
-    Key-to-flag conversion:
-
-    - multi-char key + non-empty string value → ``--key=value``
-    - single-char key + non-empty string value → ``-k value`` (two separate args)
-    - any key + ``True`` → bare flag (``--key`` or ``-k``)
-    - any key + ``""`` or ``False`` → omitted entirely
-
-    >>> sbatch_args_from_dict({"time": "2:00:00", "gpus": "1"})
-    ['--time=2:00:00', '--gpus=1']
-    >>> sbatch_args_from_dict({"exclusive": True})
-    ['--exclusive']
-    >>> sbatch_args_from_dict({"N": "2"})
-    ['-N', '2']
-    >>> sbatch_args_from_dict({"gpus": "", "requeue": False})
-    []
-    >>> sbatch_args_from_dict({"n": True})
-    ['-n']
-    """
-    flags: list[str] = []
-    for key, value in d.items():
-        if value == "" or value is False:
-            continue
-        is_short_flag = len(key) == 1
-        if value is True:
-            flags.append(f"-{key}" if is_short_flag else f"--{key}")
-        else:
-            if is_short_flag:
-                flags.extend([f"-{key}", str(value)])
-            else:
-                flags.append(f"--{key}={value}")
-    return flags
+    sbatch_args_from_config = sbatch_args_to_list(from_config)
+    return sbatch_args_from_list(sbatch_args_from_config + from_cli)
 
 
 def get_sbatch_command(
@@ -576,7 +476,7 @@ def get_sbatch_command(
     env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
     env_vars["GIT_COMMIT"] = git_commit
 
-    sbatch_flags = sbatch_args_from_dict(sbatch_args)
+    sbatch_flags = sbatch_args_to_list(sbatch_args)
     if not any("--output" in flag for flag in sbatch_flags):
         # Chunked (job array) jobs need `%A`/`%a` (array job id / task id) instead of `%j`.
         if "array" in sbatch_args:

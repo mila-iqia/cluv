@@ -291,17 +291,17 @@ Both clusters accept and run the job, but hit issues unrelated to this example's
 | killarney | Refuses jobs submitted from a directory under `/home` | `project_dir` on `$SCRATCH` |
 | trillium-gpu | `/home` isn't mounted on compute nodes | `project_dir` on `$SCRATCH` |
 | trillium-gpu | Rejects `--mem` entirely (186 GiB/GPU is implicit) | no `--mem` in the job script |
-| killarney, vulcan | Slurm doesn't create the parent directory of `--output`, so cluv's default `{results_path}/{cluster}_%j/slurm-%j.out` kills the job at launch | explicit `output` in `sbatch_args` |
-| killarney, vulcan | `$SCRATCH` in a path handed to `sbatch` expands to *nothing*, because cluv's command is assembled so that paths are expanded by the non-login ssh shell (see below) | an `output` path relative to the job's working directory, via cluv's `logs` symlink |
 | trillium-gpu | Reports `CC_CLUSTER=trillium`, and Slurm's `ClusterName` is `grillium` | `cluv submit` exports `$CLUV_CLUSTER` |
-| killarney, vulcan | `$CC_CLUSTER` and `$SCRATCH` are only set in a *login* shell | same |
+| killarney, vulcan | `$CC_CLUSTER` and `$SCRATCH` are only set in a *login* shell | `cluv submit` exports `$CLUV_CLUSTER`, and interpolates paths into its command unquoted so that the cluster's `bash --login` is what expands them (see below) |
 | trillium-gpu | The login node shadows `sbatch` with a wrapper hardcoding `--export=NONE --get-user-env`, dropping the whole submitting environment (`GIT_COMMIT`, `CLUV_CLUSTER`, ...) before the job starts | `cluv submit` also passes `--export=ALL,KEY=VALUE,...` explicitly; `sbatch` uses the last `--export` on its command line |
 | trillium-gpu | `$HOME` isn't writable from compute nodes, so `uv`'s default cache dir (`$HOME/.cache/uv`) fails with "Permission denied" | `export UV_CACHE_DIR="$SLURM_TMPDIR/uv-cache"` in `scripts/job_trillium-gpu.sh` |
 
 About that `$SCRATCH` expansion: `cluv submit` runs
-`bash --login -c '<env vars> sbatch ... <args>'`, but the arguments are `shlex`-quoted and then
-concatenated *into* that single-quoted string, which closes it. So `$SCRATCH` is expanded by the
-non-login shell that ssh starts, not by the login shell. On most clusters `$SCRATCH` is set in both,
-so this goes unnoticed; on Killarney and Vulcan it is login-shell-only, and Slurm ends up recording
-`StdOut=/logs/imagenet/<jobid>.out`. Anything else that relies on `$SCRATCH` in a cluv-computed path
-has the same problem on those clusters.
+`bash --login -c '<env vars> sbatch ... <args>'`. The paths that may contain environment variables
+(`--chdir`, `--output`, the job script) are interpolated into that string *unquoted*, so the login
+shell is the one that expands them - the only shell that has `$SCRATCH` on Killarney and Vulcan.
+`shlex`-quoting them instead would close the surrounding single quotes and hand the expansion to
+the non-login shell ssh starts, where `$SCRATCH` is empty; Slurm would then record
+`StdOut=/logs/imagenet/<jobid>.out` and the job would die with nowhere to write. The trade-off is
+that those paths can't contain whitespace or shell metacharacters - `cluv submit` raises an error
+if `results_path` or `project_dir` does.

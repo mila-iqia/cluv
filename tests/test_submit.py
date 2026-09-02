@@ -5,7 +5,7 @@ import subprocess
 import textwrap
 import unittest
 import unittest.mock
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -238,21 +238,22 @@ class TestGetSbatchCommand:
             "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz SBATCH_JOB_NAME=cluv-my_script "
             # Ugly, quite hard-coded.
             f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster} "
-            "sbatch --parsable --chdir=$HOME/my_project --account=my_account "
-            f"--mem=8G --output={results_path}/{cluster}_%j/slurm-%j.out --export={export_value} "
+            "sbatch --parsable --chdir=$HOME/my_project "
+            f"--output={results_path}/{cluster}_%j/slurm-%j.out "
+            f"--account=my_account --mem=8G --export={export_value} "
             f"$HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
 
-    def test_resolved_results_path_is_used_verbatim_in_sbatch_output(
+    def test_env_vars_in_results_path_are_left_for_the_login_shell_to_expand(
         self, project_dir: Path
     ) -> None:
-        """A `results_path` holding env vars has to be resolved before it reaches `--output`.
+        """A `results_path` holding env vars reaches the cluster's login shell unexpanded.
 
-        `shlex.quote` wraps a value containing `$` in single quotes, and those close the
-        `bash --login -c '...'` string, so the *non-login* ssh shell would expand it. On the clusters
-        where $SCRATCH is only set in a login shell (Killarney, Vulcan) it expands to nothing and the
-        job dies writing to an unwritable `/logs/...`. `sbatch` therefore resolves it on the remote
-        first and passes the result in.
+        `--output` is interpolated into the `bash --login -c '...'` command *unquoted*, so it is
+        that login shell which expands `$SCRATCH` - the only shell that has it on Killarney and
+        Vulcan. Were the value `shlex.quote`d, the quotes would close the surrounding single-quoted
+        string and the *non-login* ssh shell would expand it instead, to nothing, leaving the job
+        writing to an unwritable `/logs/...`. Same treatment as `--chdir`, just below.
         """
         (project_dir / "pyproject.toml").write_text(
             textwrap.dedent(
@@ -275,13 +276,47 @@ class TestGetSbatchCommand:
             sbatch_args={},
             program_args=[],
             git_commit="abecdef",
-            results_path=PurePosixPath("/scratch/me/logs/my_project"),
         )
-        assert "--output=/scratch/me/logs/my_project/killarney_%j/slurm-%j.out" in (sbatch_command)
-        # The whole point: no unexpanded variable, and therefore no nested quoting, is left in the
-        # --output value the remote shell will see.
+        assert "--output=$SCRATCH/logs/my_project/killarney_%j/slurm-%j.out" in sbatch_command
+        # The whole point: no quoting around the value, so the single-quoted `bash --login -c`
+        # string it sits in stays intact and that login shell is the one to expand `$SCRATCH`.
         assert "--output='" not in sbatch_command
-        assert "$SCRATCH" not in sbatch_command
+        assert sbatch_command.count("'") == 2
+
+    @pytest.mark.parametrize(
+        "bad_results_path",
+        ["$SCRATCH/my logs", "$SCRATCH/it's-logs", "$SCRATCH/logs;rm -rf /"],
+        ids=["space", "quote", "metacharacters"],
+    )
+    def test_results_path_that_would_break_the_command_is_rejected(
+        self, project_dir: Path, bad_results_path: str
+    ) -> None:
+        """`--output` isn't escaped (so `$SCRATCH` survives), so unsafe values must be refused.
+
+        A space would word-split the path into two `sbatch` arguments, and a quote or a `;` would
+        break the `bash --login -c '...'` command apart, rather than being passed through as part
+        of the path. Better a clear error than a job that dies on the cluster.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                f"""\
+            [tool.cluv]
+            results_path = "{bad_results_path}"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        with pytest.raises(ValueError, match="results_path"):
+            get_sbatch_command(
+                cluster="mila",
+                job_script=job_script,
+                sbatch_args={},
+                program_args=[],
+                git_commit="abc123",
+            )
 
     def test_only_override_slurm_vars_with_selected_cluster_vars(self, project_dir: Path) -> None:
         p = project_dir / "pyproject.toml"

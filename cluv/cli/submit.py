@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -18,7 +19,6 @@ from rich.live import Live
 from cluv.cache import Job, Submission, save_job
 from cluv.cli.submit_utils.chunking import apply_chunking
 from cluv.cli.sync import (
-    expandvars,
     get_cluster_to_remote,
     sync_common_part,
     sync_per_cluster_part,
@@ -146,16 +146,6 @@ async def submit(
     git_commit = ensure_clean_git_state(autocommit=autocommit, submit_command=submit_command)
     cluster_to_remote = await get_cluster_to_remote(cluster)
 
-    results_paths: dict[str, PurePosixPath] = {}
-    for cluster_name, remote in cluster_to_remote.items():
-        cluster_config = get_cluv_config().get_cluster_config(cluster_name)
-        if remote is not None:
-            results_paths[cluster_name] = await expandvars(remote, cluster_config.results_path)
-        else:
-            results_paths[cluster_name] = PurePosixPath(
-                os.path.expandvars(str(cluster_config.results_path))
-            )
-
     job_submissions = [
         SubmissionProgress(submission=submission)
         for cluster_name, remote in cluster_to_remote.items()
@@ -167,7 +157,6 @@ async def submit(
             program_args=program_args,
             chunking=chunking,
             git_commit=git_commit,
-            results_path=results_paths[cluster_name],
         )
     ]
 
@@ -391,7 +380,6 @@ def get_submissions(
     program_args: list[str],
     chunking: int | None,
     git_commit: str,
-    results_path: PurePosixPath | None = None,
 ) -> list[Submission]:
     """Expand the possible job configurations for a cluster. Returns a list of `Submission` objects.
 
@@ -427,7 +415,6 @@ def get_submissions(
             sbatch_args=job_resources,
             program_args=program_args,
             git_commit=git_commit,
-            results_path=results_path,
         )
         submissions.append(
             Submission(
@@ -558,25 +545,53 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     return flags
 
 
+# Characters that would break out of, or be interpreted inside, the `bash --login -c '...'` command
+# that `get_sbatch_command` builds. `$` is deliberately *not* in here: `$SCRATCH/logs/x` has to
+# reach the cluster's login shell intact, so that it is the one to expand it.
+_UNSAFE_PATH_CHARS = re.compile(r"""[\s'"`;&|<>()\\]""")
+
+
+def check_path_is_safe_to_interpolate(path: PurePosixPath | str, setting: str) -> None:
+    """Raise a `ValueError` if `path` can't be interpolated into the sbatch command as-is.
+
+    Paths that may contain environment variables are interpolated *unquoted* into the
+    `bash --login -c '...'` command (see `get_sbatch_command`), so that the cluster's login shell is
+    the one that expands them. They therefore can't be escaped with `shlex.quote` first: quoting a
+    value containing `$` would both stop that expansion and close the surrounding single-quoted
+    string. So anything the shell treats specially has to be rejected up front instead - a space
+    would split the path into two `sbatch` arguments, and a quote would break the command apart.
+
+    >>> check_path_is_safe_to_interpolate("$SCRATCH/logs/imagenet", "results_path")
+    >>> check_path_is_safe_to_interpolate("/home/me/my logs", "results_path")
+    ... # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+        ...
+    ValueError: The results_path '/home/me/my logs' contains a ' ', ...
+    """
+    if match := _UNSAFE_PATH_CHARS.search(str(path)):
+        raise ValueError(
+            f"The {setting} {str(path)!r} contains a {match.group()!r}, which cluv can't pass to "
+            f"sbatch safely: it goes into a `bash --login -c '...'` command unquoted, so that the "
+            f"cluster's login shell expands variables like $SCRATCH in it. Please use a path "
+            f"without whitespace or shell metacharacters."
+        )
+
+
 def get_sbatch_command(
     cluster: str,
     job_script: Path,
     sbatch_args: SbatchArgs,
     program_args: list[str],
     git_commit: str,
-    results_path: PurePosixPath | None = None,
 ) -> str:
     """Generate the command to submit the job via `sbatch` on `cluster`, with the appropriate
     sbatch arguments, environment variables and paths set.
 
-    `results_path` should be the cluster's `results_path` with its environment variables already
-    resolved (see `sbatch`). It has to be resolved by the caller, because a value like
-    `$SCRATCH/logs/x` would otherwise be expanded by the wrong shell: the `--output=...` flag built
-    below is `shlex.quote`d, and those single quotes close the `bash --login -c '...'` string, so
-    the *non-login* ssh shell ends up expanding them. On clusters where $SCRATCH is only set in a
-    login shell (Killarney, Vulcan) it expands to nothing, and the job dies with its output going to
-    an unwritable `/logs/...`. Falls back to the unresolved config value when not given, which is
-    fine for callers that only want the command for display.
+    Paths that may contain environment variables (`project_dir`, `results_path`) are interpolated
+    into the command *unquoted*, so that the cluster's `bash --login` shell is the one that expands
+    them - that's the only shell that has `$SCRATCH` on some clusters (Killarney, Vulcan set it only
+    in a login shell). `check_path_is_safe_to_interpolate` guards the values that get this
+    treatment; see its docstring.
     """
     local_project_dir = find_pyproject().parent
     local_job_script = job_script if job_script.is_absolute() else local_project_dir / job_script
@@ -600,13 +615,7 @@ def get_sbatch_command(
     env_vars["CLUV_CLUSTER"] = cluster
 
     sbatch_flags = sbatch_args_from_dict(sbatch_args)
-    # Pull out any caller-supplied `--output` (from config or the CLI) so it can be placed *after*
-    # cluv's own below - sbatch takes the last `--output` on its command line, so the caller's
-    # choice still wins, but cluv's own default is always there as a fallback.
-    caller_output_flag = next((f for f in sbatch_flags if f.startswith("--output=")), None)
-    sbatch_flags = [f for f in sbatch_flags if f != caller_output_flag]
-
-    if caller_output_flag is None:
+    if not any(flag.startswith("--output=") for flag in sbatch_flags):
         header_output = next(
             (
                 line
@@ -623,15 +632,11 @@ def get_sbatch_command(
                 f"results instead.[/yellow]"
             )
 
-    cluster_results_path = PurePosixPath(results_path or cluster_config.results_path)
     # Chunked (job array) jobs need `%A`/`%a` (array job id / task id) instead of `%j`.
     if "array" in sbatch_args:
-        output_value = f"{cluster_results_path}/{cluster}_%A/slurm-%A_%a.out"
+        output_value = f"{cluster_config.results_path}/{cluster}_%A/slurm-%A_%a.out"
     else:
-        output_value = f"{cluster_results_path}/{cluster}_%j/slurm-%j.out"
-    sbatch_flags = [*sbatch_flags, f"--output={output_value}"]
-    if caller_output_flag is not None:
-        sbatch_flags = [*sbatch_flags, caller_output_flag]
+        output_value = f"{cluster_config.results_path}/{cluster}_%j/slurm-%j.out"
 
     env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
     final_sbatch_args = sbatch_flags
@@ -650,9 +655,17 @@ def get_sbatch_command(
     sbatch_args_str = shlex.join(final_sbatch_args)
     program_args_str = shlex.join(program_args)
 
+    # These three are interpolated unquoted, so the cluster's login shell expands any env vars in
+    # them (`$SCRATCH`, `$HOME`). `sbatch_args_str`/`program_args_str` are `shlex`-escaped instead,
+    # since nothing in them is meant to be expanded remotely.
+    check_path_is_safe_to_interpolate(remote_project_dir, "project_dir")
+    check_path_is_safe_to_interpolate(output_value, "results_path")
+    check_path_is_safe_to_interpolate(remote_job_script, "job script path")
+    # cluv's `--output` comes *before* `sbatch_args_str`, so a caller's own `--output` (from the
+    # config or the CLI) lands after it and wins: sbatch uses the last `--output` on its line.
     return (
         f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
-        f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
+        f"--output={output_value} {sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
 
 

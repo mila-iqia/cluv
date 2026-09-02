@@ -15,6 +15,14 @@ This guide explains which config fields are used, how global and per-cluster val
 
 Per-cluster values are set under `[tool.cluv.clusters.<name>]`.
 
+!!! note "`project_dir` and `results_path` may use env vars, but not whitespace"
+    Both may contain environment variables (`$SCRATCH/logs/x`), which are expanded by the
+    cluster's *login* shell - on some clusters (Killarney, Vulcan) that's the only shell where
+    `$SCRATCH` is set. To make that work, `cluv submit` interpolates them into its `sbatch` command
+    without shell-quoting them, so they must not contain whitespace or shell metacharacters
+    (`'`, `"`, `` ` ``, `;`, `&`, `|`, `<`, `>`, `(`, `)`, `\`). `cluv submit` fails with an
+    explanatory error rather than building a command that would break on the cluster.
+
 ## How global and per-cluster settings merge
 
 For both `env` and `sbatch_args`, per-cluster values are merged on top of the global defaults.

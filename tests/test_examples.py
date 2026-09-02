@@ -10,12 +10,11 @@ import pytest
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.cli.submit import ensure_clean_git_state, get_submissions, submit
 from cluv.cli.sync import (
-    expandvars,
     get_active_remotes,
     sync_common_part,
     sync_per_cluster_part,
 )
-from cluv.config import get_cluv_config, load_cluv_config
+from cluv.config import load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
 from tests.test_integration import IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
@@ -219,9 +218,6 @@ async def test_imagenet_job_script_is_accepted_by_slurm(
         program_args=["python", "main.py", "--use_fake_data"],
         chunking=None,
         git_commit=git_commit,
-        results_path=await expandvars(
-            remote, get_cluv_config().get_cluster_config(cluster).results_path
-        ),
     )
     assert submissions
 

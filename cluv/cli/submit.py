@@ -449,7 +449,6 @@ def get_cluster_job_script_path(
     local_project_dir = find_pyproject().parent
     cluster_project_dir = cluster_config.project_dir
     if cluster_project_dir is None:
-        local_project_dir = find_pyproject().parent
         if not local_project_dir.is_relative_to(Path.home()):
             raise RuntimeError(
                 f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
@@ -638,11 +637,13 @@ def add_cluv_sbatch_args(
     - Add the --job-name flag (So that we can identify the cluv jobs later)
     - Add the --export=ALL flag (since trillium and trillium-gpu apparently have `--export=None` as default).
     - Add the --chdir flag to move to the project folder when running the command.
+
+    Returns a new dict; the one passed in is left alone.
     """
+    sbatch_args = dict(sbatch_args)
 
     base_name = sbatch_args.get("job-name") or Path(job_script).stem
     sbatch_args["job-name"] = f"cluv-{base_name}"
-    # TODO: Remove the weird arg manipulation stuff in get_sbatch_command and do it cleanly here.
 
     if "output" not in sbatch_args and (
         _header_output := next(
@@ -667,7 +668,9 @@ def add_cluv_sbatch_args(
     else:
         sbatch_args["output"] = str(cluster_config.results_path / f"{cluster}_%j/slurm-%j.out")
 
-    local_project_dir = Path(get_cluv_config().project_dir or find_pyproject().parent)
+    # NOTE: `cluster_config.project_dir` already falls back to the global `project_dir`, so the
+    # `$HOME/<project>` default below is only used when neither is set.
+    local_project_dir = find_pyproject().parent
     remote_project_dir = cluster_config.project_dir or (
         PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
     )
@@ -686,13 +689,20 @@ def get_sbatch_command(
     env_vars: dict[str, str],
 ) -> str:
     """Generate the command to submit the job via `sbatch` on the cluster."""
+    if job_script.is_absolute():
+        raise RuntimeError(
+            f"The job script path {str(job_script)!r} is an absolute path on this machine, but it "
+            f"has to be the path of the script *on the cluster* (relative to the project there, or "
+            f"starting with a variable like $HOME that the cluster's shell expands). This is what "
+            f"`get_cluster_job_script_path` returns."
+        )
+
     sbatch_flags = sbatch_args_from_dict(sbatch_args)
     env_vars_prefix = " ".join(f"{k}={v}" for k, v in env_vars.items())
-    assert not job_script.is_absolute()
 
-    # These three are interpolated unquoted, so the cluster's login shell expands any env vars in
-    # them (`$SCRATCH`, `$HOME`). `sbatch_args_str`/`program_args_str` are `shlex`-escaped instead,
-    # since nothing in them is meant to be expanded remotely.
+    # These are interpolated unquoted, so the cluster's login shell expands any env vars in them
+    # (`$SCRATCH`, `$HOME`); they can't be `shlex`-escaped first, since quoting would both stop
+    # that expansion and close the surrounding single-quoted string.
     check_path_is_safe_to_interpolate(job_script, "job_script")
     if isinstance(output := sbatch_args.get("output"), str):
         check_path_is_safe_to_interpolate(output, "output")
@@ -702,71 +712,6 @@ def get_sbatch_command(
         f"{env_vars_prefix} sbatch --parsable {' '.join(sbatch_flags)} {job_script} "
         f"{' '.join(program_args)}"
         "'"
-    )
-
-    local_project_dir = find_pyproject().parent
-    local_job_script = job_script if job_script.is_absolute() else local_project_dir / job_script
-    job_script_relative_path = local_job_script.relative_to(local_project_dir)
-
-    config = get_cluv_config()
-    cluster_config = config.get_cluster_config(cluster)
-    remote_project_dir = cluster_config.project_dir or (
-        PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
-    )
-    remote_job_script = PurePosixPath(remote_project_dir) / job_script_relative_path
-
-    sbatch_flags = sbatch_args_from_dict(sbatch_args)
-    if not any(flag.startswith("--output=") for flag in sbatch_flags):
-        header_output = next(
-            (
-                line
-                for line in local_job_script.read_text().splitlines()
-                if line.strip().startswith("#SBATCH") and "--output" in line
-            ),
-            None,
-        )
-        if header_output is not None:
-            logger.warning(
-                f"[yellow]The job script {job_script} sets {header_output.strip()!r}, which "
-                f"will be overridden by cluv's --output so that results can be synced "
-                f"back. Consider using cluv in your Python script to decide where to store "
-                f"results instead.[/yellow]"
-            )
-
-    # Chunked (job array) jobs need `%A`/`%a` (array job id / task id) instead of `%j`.
-    if "array" in sbatch_args:
-        output_value = f"{cluster_config.results_path}/{cluster}_%A/slurm-%A_%a.out"
-    else:
-        output_value = f"{cluster_config.results_path}/{cluster}_%j/slurm-%j.out"
-
-    env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    final_sbatch_args = sbatch_flags
-    if env_vars and not any("--export" in flag for flag in sbatch_flags):
-        # Belt and suspenders: `env_vars_prefix` above sets these as plain shell variables before
-        # `sbatch`, which is normally enough for them to reach the job (Slurm's default is to copy
-        # the submitting shell's environment). But some clusters' login nodes shadow `sbatch` with
-        # a wrapper that hardcodes `--export=NONE` (trillium-gpu does), which discards the
-        # submitting shell's environment entirely - silently dropping GIT_COMMIT, CLUV_CLUSTER,
-        # WANDB_MODE, etc. `--export=ALL,KEY=VALUE,...` restates the same variables as an explicit
-        # sbatch argument instead of relying on environment inheritance; since it comes after the
-        # wrapper's own `--export=NONE` on the final command line, it wins (last `--export` set on
-        # the command line takes effect). A harmless no-op on clusters without such a wrapper.
-        export_value = "ALL," + ",".join(f"{k}={v}" for k, v in env_vars.items())
-        final_sbatch_args.append(f"--export={export_value}")
-    sbatch_args_str = shlex.join(final_sbatch_args)
-    program_args_str = shlex.join(program_args)
-
-    # These three are interpolated unquoted, so the cluster's login shell expands any env vars in
-    # them (`$SCRATCH`, `$HOME`). `sbatch_args_str`/`program_args_str` are `shlex`-escaped instead,
-    # since nothing in them is meant to be expanded remotely.
-    check_path_is_safe_to_interpolate(remote_project_dir, "project_dir")
-    check_path_is_safe_to_interpolate(output_value, "results_path")
-    check_path_is_safe_to_interpolate(remote_job_script, "job script path")
-    # cluv's `--output` comes *before* `sbatch_args_str`, so a caller's own `--output` (from the
-    # config or the CLI) lands after it and wins: sbatch uses the last `--output` on its line.
-    return (
-        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
-        f"--output={output_value} {sbatch_args_str} {remote_job_script} {program_args_str}'"
     )
 
 

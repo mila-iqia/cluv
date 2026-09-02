@@ -23,10 +23,6 @@
 # itself correctly.
 export UV_CACHE_DIR="$SCRATCH/.cache/uv"
 
-# Trillium-gpu's compute nodes have no internet access.
-export UV_OFFLINE=1
-export WANDB_MODE=offline
-
 # `cluv submit` runs `sbatch --chdir=<project dir>`, so the job starts in this project's
 # folder on the cluster, and the rest of the work is shared with the other clusters:
 exec bash scripts/train.sh "$@"

@@ -9,8 +9,8 @@ import platformdirs
 import pydantic
 import yaml
 
-from cluv.config import SbatchArgs
 from cluv.remote import Remote
+from cluv.sbatch_args import SbatchArgs
 from cluv.utils import find_pyproject
 
 logger = logging.getLogger(__name__)

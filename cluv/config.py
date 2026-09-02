@@ -15,12 +15,10 @@ from pydantic import BaseModel, ConfigDict
 from pydantic.dataclasses import dataclass
 from typing_extensions import TypeVar
 
+from cluv.sbatch_args import SbatchArgs
 from cluv.utils import current_cluster, find_pyproject
 
 logger = logging.getLogger(__name__)
-
-SbatchArgs = dict[str, str | int | float | bool]
-"""A set of sbatch flags, as a mapping from flag name to value."""
 
 
 @dataclass(frozen=True)

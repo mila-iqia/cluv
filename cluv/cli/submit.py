@@ -581,21 +581,20 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     return flags
 
 
-# Characters that would break out of, or be interpreted inside, the `bash --login -c '...'` command
-# that `get_sbatch_command` builds. `$` is deliberately *not* in here: `$SCRATCH/logs/x` has to
-# reach the cluster's login shell intact, so that it is the one to expand it.
+# Characters the cluster's login shell would act on in a value that reaches it unquoted. `$` is
+# deliberately *not* in here: `$SCRATCH/logs/x` has to reach that shell intact, so that it is the
+# one to expand it.
 _UNSAFE_PATH_CHARS = re.compile(r"""[\s'"`;&|<>()\\]""")
 
 
 def check_path_is_safe_to_interpolate(path: PurePosixPath | str, setting: str) -> None:
     """Raise a `ValueError` if `path` can't be interpolated into the sbatch command as-is.
 
-    Paths that may contain environment variables are interpolated *unquoted* into the
-    `bash --login -c '...'` command (see `get_sbatch_command`), so that the cluster's login shell is
-    the one that expands them. They therefore can't be escaped with `shlex.quote` first: quoting a
-    value containing `$` would both stop that expansion and close the surrounding single-quoted
-    string. So anything the shell treats specially has to be rejected up front instead - a space
-    would split the path into two `sbatch` arguments, and a quote would break the command apart.
+    Values that may contain environment variables are written into the command *unquoted*, so that
+    the cluster's login shell is the one that expands them (see `get_sbatch_command`). Escaping them
+    with `shlex.quote` first would stop exactly that, so anything else that shell treats specially
+    has to be rejected up front instead: a space would split the value into two `sbatch` arguments,
+    and a `;` would end the command and start another one.
 
     >>> check_path_is_safe_to_interpolate("$SCRATCH/logs/imagenet", "results_path")
     >>> check_path_is_safe_to_interpolate("/home/me/my logs", "results_path")
@@ -607,8 +606,8 @@ def check_path_is_safe_to_interpolate(path: PurePosixPath | str, setting: str) -
     if match := _UNSAFE_PATH_CHARS.search(str(path)):
         raise ValueError(
             f"The {setting} {str(path)!r} contains a {match.group()!r}, which cluv can't pass to "
-            f"sbatch safely: it goes into a `bash --login -c '...'` command unquoted, so that the "
-            f"cluster's login shell expands variables like $SCRATCH in it. Please use a path "
+            f"sbatch safely: it goes into a `bash --login -c ...` command unquoted, so that the "
+            f"cluster's login shell expands variables like $SCRATCH in it. Please use a value "
             f"without whitespace or shell metacharacters."
         )
 
@@ -708,13 +707,22 @@ def get_sbatch_command(
         check_path_is_safe_to_interpolate(chdir, "chdir")
     if isinstance(output := sbatch_args.get("output"), str):
         check_path_is_safe_to_interpolate(output, "output")
+    for name, value in env_vars.items():
+        # Same deal: `UV_CACHE_DIR=$SCRATCH/.cache/uv` has to stay unquoted to be expanded on the
+        # cluster, so a value with a space in it would make the login shell read the second word
+        # as the command to run, and `sbatch` would never be reached.
+        check_path_is_safe_to_interpolate(value, f"{name} environment variable")
 
-    return (
-        f"bash --login -c '"
+    # `program_args` is the one part that is *not* meant to be expanded here: it is whatever the
+    # user wrote after `--`, so it gets escaped, and a `$SLURM_TMPDIR` in it survives for the job
+    # itself to expand. That only holds together because the whole inner command is quoted in one
+    # go below - `shlex.join`'s quotes would otherwise close a hand-written `'...'` around it, and
+    # an argument containing a space would break apart (POSIX single quotes don't nest).
+    inner_command = (
         f"{env_vars_prefix} sbatch --parsable {' '.join(sbatch_flags)} {job_script} "
-        f"{' '.join(program_args)}"
-        "'"
+        f"{shlex.join(program_args)}"
     )
+    return f"bash --login -c {shlex.quote(inner_command)}"
 
 
 async def submit_job(submission: Submission) -> Job:

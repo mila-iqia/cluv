@@ -263,7 +263,8 @@ class TestGetSbatchCommand:
             # Ugly, quite hard-coded.
             f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster} "
             "sbatch --parsable --account=my_account --mem=8G --job-name=cluv-my_script "
-            f"--output={results_path}/{cluster}_%j/slurm-%j.out --export=ALL "
+            f"--output={results_path}/{cluster}_%j/slurm-%j.out --chdir=$HOME/my_project "
+            "--export=ALL "
             f"$HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
 
@@ -305,11 +306,6 @@ class TestGetSbatchCommand:
         assert "--output='" not in sbatch_command
         assert sbatch_command.count("'") == 2
 
-    @pytest.mark.xfail(
-        reason="`check_path_is_safe_to_interpolate` is currently only called after the early "
-        "`return` in `get_sbatch_command`, so it never runs. Remove this mark once it is called "
-        "again from wherever the `--output` value is built (`add_cluv_sbatch_args`).",
-    )
     @pytest.mark.parametrize(
         "bad_results_path",
         ["$SCRATCH/my logs", "$SCRATCH/it's-logs", "$SCRATCH/logs;rm -rf /"],
@@ -336,7 +332,8 @@ class TestGetSbatchCommand:
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
 
-        with pytest.raises(ValueError, match="results_path"):
+        # The error names the flag the bad value ends up in, rather than `results_path` itself.
+        with pytest.raises(ValueError, match="output"):
             build_sbatch_command(
                 cluster="mila",
                 job_script=job_script,
@@ -375,7 +372,7 @@ class TestGetSbatchCommand:
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=2 GIT_COMMIT=abecdef CLUV_CLUSTER=mila "
             "sbatch --parsable --job-name=cluv-my_script "
-            f"--output={results_path}/mila_%j/slurm-%j.out --export=ALL "
+            f"--output={results_path}/mila_%j/slurm-%j.out --chdir=$HOME/my_project --export=ALL "
             "$HOME/my_project/scripts/my_script.sh '"
         )
 
@@ -1137,6 +1134,7 @@ async def test_submit_races_the_allocations_of_a_cluster(
         "account": "def-bengioy",
         "job-name": "cluv-job",
         "output": "results/narval_%j/slurm-%j.out",
+        "chdir": "$HOME/my_project",
         "export": "ALL",
     }
     assert cancelled == [rrg_job_id]

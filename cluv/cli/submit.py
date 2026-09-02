@@ -19,7 +19,7 @@ from cluv.cli.submit_utils.chunking import apply_chunking
 from cluv.cli.sync import get_cluster_to_remote, sync_common_part, sync_per_cluster_part
 from cluv.config import find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
-from cluv.sbatch_args import SbatchArgs, sbatch_args_from_args_list, sbatch_args_to_list
+from cluv.sbatch_args import SbatchArgs, sbatch_args_from_list, sbatch_args_to_list
 from cluv.slurm import FAILED_JOB_STATES, run_saccts
 from cluv.utils import console, group_by_cluster
 
@@ -447,7 +447,7 @@ def merge_sbatch_args(from_config: SbatchArgs, from_cli: list[str]) -> SbatchArg
     one written) instead of leaving two separate keys for what's really the same sbatch option.
     """
     sbatch_args_from_config = sbatch_args_to_list(from_config)
-    return sbatch_args_from_args_list(sbatch_args_from_config + from_cli)
+    return sbatch_args_from_list(sbatch_args_from_config + from_cli)
 
 
 def get_sbatch_command(

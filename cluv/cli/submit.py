@@ -636,10 +636,7 @@ def add_cluv_sbatch_args(
     """
     - Add the --output flag (So that outputs are created in the `results_path` for the run prescribed by Cluv)
     - Add the --job-name flag (So that we can identify the cluv jobs later)
-    - Add the --export flag
-        - This is done so that we can identity which cluster we are on inside the job
-        - On some clusters, like killarney and vulcan, there is apparently an `--export=None` default, so setting
-          the env vars in the context is not sufficient.
+    - Add the --export=ALL flag (since trillium and trillium-gpu apparently have `--export=None` as default).
     - Add the --chdir flag to move to the project folder when running the command.
     """
 

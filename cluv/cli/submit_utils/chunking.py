@@ -2,7 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from cluv.config import SbatchArgs
+from cluv.sbatch_args import SbatchArgs
 from cluv.slurm import parse_slurm_time
 
 logger = logging.getLogger(__name__)

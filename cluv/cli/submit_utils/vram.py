@@ -17,8 +17,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cluv.cache import get_cached_gpu_types, save_gpu_types
+from cluv.config import SbatchArgs
 from cluv.remote import Remote, run
+from cluv.sbatch_args import sbatch_args_from_list, sbatch_args_to_list
 from cluv.slurm import GRES_RE, gpu_base_model
+from cluv.utils import console
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +64,55 @@ _MEMORY_RE = re.compile(r"(\d+)\s*gb", re.IGNORECASE)
 _VRAM_RE = re.compile(r"^\s*([\d.]+)\s*(?:([kmgt])(?:i?b)?)?\s*$", re.IGNORECASE)
 
 _UNIT_TO_GB: dict[str, float] = {"k": 1 / 1024**2, "m": 1 / 1024, "g": 1.0, "t": 1024.0}
+
+
+async def expand_for_vram(
+    cluster: str,
+    remote: Remote | None,
+    sbatch_args: SbatchArgs,
+    *,
+    job_script: Path,
+    vram: str | None,
+) -> list[SbatchArgs]:
+    """Turn one set of sbatch args into one per GPU type of `cluster` that has enough VRAM.
+
+    Racing between the GPU types that are big enough (in particular the MIG slices of the DRAC
+    clusters, which are under-used) makes the job start sooner. When a GPU model is already
+    requested (e.g. `--gpus=h100:1`), only that model and its MIG slices are considered.
+
+    Returns `[sbatch_args]` unchanged when `vram` isn't set, when the job asks for more than one
+    GPU (MIG slices can't be used for multi-GPU jobs), or when no GPU type on `cluster` has
+    enough VRAM.
+    """
+    if not vram:
+        return [sbatch_args]
+
+    sbatch_args_list = sbatch_args_to_list(sbatch_args)
+    gpu_request = find_gpu_request(sbatch_args_list, job_script)
+    if gpu_request and gpu_request.count > 1:
+        console.print(
+            f"[yellow]Ignoring --vram on {cluster}: the job asks for {gpu_request.count} GPUs, "
+            "and MIG slices can only be used one at a time.[/yellow]"
+        )
+        return [sbatch_args]
+
+    gpu_request = gpu_request or GpuRequest()
+    gpu_types = compatible_gpu_types(
+        await get_gpu_types(cluster, remote), parse_vram(vram), gpu_request.model
+    )
+    if not gpu_types:
+        console.print(
+            f"[yellow]Ignoring --vram on {cluster}: no GPU type with at least {vram} of VRAM"
+            + (f" for the {gpu_request.model} model" if gpu_request.model else "")
+            + ".[/yellow]"
+        )
+        return [sbatch_args]
+
+    logger.info("GPU types with at least %s of VRAM on %s: %s", vram, cluster, gpu_types)
+    return [
+        sbatch_args_from_list(sbatch_args_for_gpu_type(sbatch_args_list, gpu_request, gpu_type))
+        for gpu_type in gpu_types
+    ]
 
 
 def parse_vram(value: str) -> float:

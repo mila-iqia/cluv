@@ -212,12 +212,16 @@ async def submit(
         await run_scancel(submitted_rows)
         raise
 
-    console.print(
-        f"Job {first_running_row.job_id} on cluster {first_running_row.cluster} is running.",
-        style="green",
-    )
     job = first_running_row.job
     assert job is not None
+
+    console.print(
+        f"Successfully submitted job {first_running_row.job_id} on cluster {first_running_row.cluster}.\n"
+        f"Use `ssh {first_running_row.cluster} sacct -j {first_running_row.job_id}` to view its "
+        f"status, and `cluv sync {first_running_row.cluster}` to fetch results once it is complete.",
+        style="green",
+    )
+
     save_job(job)
     return job
 
@@ -239,8 +243,12 @@ async def wait_for_first_running_job(
     """
     delay = 1
     while True:
+        all_tasks_done = all(task.done() for task in tasks)
         submitted = [row for row in job_submissions if row.job_id is not None]
+
         by_cluster = group_by_cluster(submitted)
+
+        n_pending_jobs = 0
         if by_cluster:
             states_per_cluster = await asyncio.gather(
                 *(
@@ -251,14 +259,22 @@ async def wait_for_first_running_job(
             for cluster_rows, states in zip(by_cluster.values(), states_per_cluster):
                 for row, state in zip(cluster_rows, states):
                     row.state = state
-                    if state.startswith(("RUNNING", "COMPLETED")):
+                    if row.state.startswith(("RUNNING", "COMPLETED")):
                         found_running_job.set()
                         return row
+                    elif row.state.startswith(("PENDING")):
+                        n_pending_jobs += 1
+
+        # Skip the wait if only one job is pending (if only one job is submitted or all other jobs
+        # failed).
+        if all_tasks_done and n_pending_jobs == 1:
+            console.log("Only one job pending. Skipping wait for a running job.")
+            return next(row for row in submitted if row.state.startswith("PENDING"))
 
         all_failed = bool(submitted) and all(
             row.state.startswith(tuple(FAILED_JOB_STATES)) for row in submitted
         )
-        if all(task.done() for task in tasks) and (not submitted or all_failed):
+        if all_tasks_done and (not submitted or all_failed):
             return None
 
         await asyncio.sleep(delay)
@@ -303,7 +319,7 @@ async def wait_for_jobs_to_cancel(
             await asyncio.sleep(delay)
             delay = min(delay * 2, max_wait_time_seconds)
 
-    console.log(f"Cancelled {len(job_submissions)} other job submission(s).")
+    console.log(f"Cancelled {len(job_submissions)} job submission(s).")
 
 
 async def run_scancel(rows: list[SubmissionProgress]) -> None:
@@ -491,7 +507,6 @@ def sbatch_args_from_args_list(sbatch_args_list: list[str]) -> SbatchArgs:
     {'array': '0-3%2', 'a': '0-1%1'}
     """
     # Maybe use argparse, and keep it simple! No need to recreate every single sbatch flag,
-    #
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("-c", "--cpus-per-task", dest="cpus-per-task", default=argparse.SUPPRESS)
     parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
@@ -558,13 +573,11 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     >>> sbatch_args_from_dict({"exclusive": True})
     ['--exclusive']
     >>> sbatch_args_from_dict({"N": "2"})
-    ['-N=2']
+    ['-N', '2']
     >>> sbatch_args_from_dict({"gpus": "", "requeue": False})
     []
     >>> sbatch_args_from_dict({"n": True})
     ['-n']
-    >>> sbatch_args_from_dict({"f": "config"})
-    ['-f=config']
     """
     flags: list[str] = []
     for key, value in d.items():
@@ -575,7 +588,7 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
             flags.append(f"-{key}" if is_short_flag else f"--{key}")
         else:
             if is_short_flag:
-                flags.append(f"-{key}={value}")
+                flags.extend([f"-{key}", str(value)])
             else:
                 flags.append(f"--{key}={value}")
     return flags

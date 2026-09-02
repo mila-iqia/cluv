@@ -108,7 +108,7 @@ class TestSbatchArgsFromDict:
         assert sbatch_args_from_dict({"time": "2:00:00"}) == ["--time=2:00:00"]
 
     def test_short_key_string_value(self) -> None:
-        assert sbatch_args_from_dict({"N": "2"}) == ["-N=2"]
+        assert sbatch_args_from_dict({"N": "2"}) == ["-N", "2"]
 
     def test_true_long_key_is_bare_flag(self) -> None:
         assert sbatch_args_from_dict({"exclusive": True}) == ["--exclusive"]
@@ -145,7 +145,7 @@ class TestMergeSbatchArgs:
         assert merge_sbatch_args({"t": "1:00:00"}, []) == {"time": "1:00:00"}
 
 
-def test_bug_with_t_flag_and_time_in_config(monkeypatch: pytest.MonkeyPatch):
+def test_bug_with_t_flag_and_time_in_config():
     """Passing -t=00:00:30 while there is a `time: "3:00:00` in the config produces a sbatch command that looks like
     sbatch --time=3:00:00 --t=00:00:30, and this --t is incorrect!.
     """
@@ -172,7 +172,8 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
         "-N",
         "2",
         "--foo=first-in-cli",
-        "-f=second-in-cli",
+        "-f",
+        "second-in-cli",
     ]
     expected_sbatch_args_in_command = [
         *([f"--time={time_hours:02d}:00:00"] if not chunking else []),
@@ -182,7 +183,7 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
         "--nodes=2",
         "--exclusive",
         "--foo=first-in-cli",  # secretly --foo and -f are the same argument to sbatch (dest=`foo`)
-        "-f=second-in-cli",  # the ordering is preserved.
+        "-f second-in-cli",  # the ordering is preserved.
         *(
             [f"--time={chunking:02d}:00:00", f"--array=0-{time_hours // chunking}%1"]
             if chunking
@@ -249,7 +250,7 @@ class TestGetSbatchCommand:
         sbatch_script = project_dir / "my_script.sh"
         sbatch_script.touch(0o755)
         cluster = "mila"
-        sbatch_args = {"account": "my_account", "mem": "8G"}
+        sbatch_args: SbatchArgs = {"account": "my_account", "mem": "8G"}
         sbatch_command = build_sbatch_command(
             cluster=cluster,
             job_script=sbatch_script,

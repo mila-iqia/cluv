@@ -464,7 +464,12 @@ async def clone_project(
     # We want to use git with ssh -o StrictHostKeyChecking=accept-new to facilitate first
     # communication with GitHub (notably on clusters that default to StrictHostKeyChecking=yes
     # rather than ask), which can be configured with the GIT_SSH_COMMAND environment variable.
-    gitenv = {"GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new"}
+    # GIT_TERMINAL_PROMPT=0 prevents git from hanging on a credential prompt when SSH keys are
+    # not set up on the cluster; git will fail immediately with a clear error instead.
+    gitenv = {
+        "GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
 
     # If the project isn't cloned yet, clone it.
     if not await remote_test("-d", cluster_repo_dir, remote):

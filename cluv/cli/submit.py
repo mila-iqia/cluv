@@ -704,6 +704,8 @@ def get_sbatch_command(
     # (`$SCRATCH`, `$HOME`); they can't be `shlex`-escaped first, since quoting would both stop
     # that expansion and close the surrounding single-quoted string.
     check_path_is_safe_to_interpolate(job_script, "job_script")
+    if isinstance(chdir := sbatch_args.get("chdir"), str):
+        check_path_is_safe_to_interpolate(chdir, "chdir")
     if isinstance(output := sbatch_args.get("output"), str):
         check_path_is_safe_to_interpolate(output, "output")
 

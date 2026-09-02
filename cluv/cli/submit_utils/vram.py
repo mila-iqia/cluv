@@ -17,9 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from cluv.cache import get_cached_gpu_types, save_gpu_types
-from cluv.config import SbatchArgs
 from cluv.remote import Remote, run
-from cluv.sbatch_args import sbatch_args_from_list, sbatch_args_to_list
+from cluv.sbatch_args import SbatchArgs
 from cluv.slurm import GRES_RE, gpu_base_model
 from cluv.utils import console
 
@@ -51,10 +50,10 @@ VRAM_GB_BY_MODEL: dict[str, float] = {
     "v100l": 32,
 }
 
-# GPU count flags, in the "--gpus"-like family (value is "[<type>:]<count>").
-_GPU_COUNT_FLAGS = ("--gpus", "--gpus-per-node", "--gpus-per-task", "--gpus-per-socket", "-G")
-# The --gres flag, whose value is "gpu[:<type>]:<count>" (possibly among other resources).
-_GRES_FLAG = "--gres"
+# SbatchArgs keys in the "gpus"-like family (value is "[<type>:]<count>").
+_GPU_COUNT_FLAGS = ("gpus", "gpus-per-node", "gpus-per-task", "gpus-per-socket", "G")
+# The "gres" key, whose value is "gpu[:<type>]:<count>" (possibly among other resources).
+_GRES_FLAG = "gres"
 
 # A MIG profile, like "3g.40gb" in "nvidia_h100_80gb_hbm3_3g.40gb": the VRAM is the second number.
 _MIG_PROFILE_RE = re.compile(r"(\d+)g\.(\d+)gb", re.IGNORECASE)
@@ -87,8 +86,7 @@ async def expand_for_vram(
     if not vram:
         return [sbatch_args]
 
-    sbatch_args_list = sbatch_args_to_list(sbatch_args)
-    gpu_request = find_gpu_request(sbatch_args_list, job_script)
+    gpu_request = find_gpu_request(sbatch_args, job_script)
     if gpu_request and gpu_request.count > 1:
         console.print(
             f"[yellow]Ignoring --vram on {cluster}: the job asks for {gpu_request.count} GPUs, "
@@ -109,10 +107,7 @@ async def expand_for_vram(
         return [sbatch_args]
 
     logger.info("GPU types with at least %s of VRAM on %s: %s", vram, cluster, gpu_types)
-    return [
-        sbatch_args_from_list(sbatch_args_for_gpu_type(sbatch_args_list, gpu_request, gpu_type))
-        for gpu_type in gpu_types
-    ]
+    return [sbatch_args_for_gpu_type(sbatch_args, gpu_request, gpu_type) for gpu_type in gpu_types]
 
 
 def parse_vram(value: str) -> float:
@@ -171,7 +166,7 @@ def parse_gpu_types(output: str) -> dict[str, float | None]:
     gpu_types: dict[str, float | None] = {}
     for line in output.splitlines():
         node_features, _, gres_field = line.rpartition("|")
-        for gpu_type, _count in GRES_RE.findall(gres_field):
+        for gpu_type, _ in GRES_RE.findall(gres_field):
             vram = gpu_vram_gb(gpu_type, node_features)
             previous = gpu_types.get(gpu_type)
             if gpu_type not in gpu_types or vram is None or previous is None:
@@ -229,43 +224,32 @@ def compatible_gpu_types(
 class GpuRequest:
     """The GPUs requested by a job, as found in the sbatch args or the job script header."""
 
-    flag: str = "--gpus"
-    """The flag used to request the GPUs, e.g. "--gpus", "--gpus-per-node" or "--gres"."""
+    flag: str = "gpus"
+    """The SbatchArgs key used to request the GPUs, e.g. "gpus", "gpus-per-node" or "gres"."""
 
     model: str | None = None
-    """The requested GPU model, if any, e.g. "h100" in `--gpus=h100:1`."""
+    """The requested GPU model, if any, e.g. "h100" in `gpus="h100:1"`."""
 
     count: int = 1
     """The number of GPUs requested."""
 
-    at: int | None = None
-    """Index of the flag in the sbatch args, or None when it comes from the job script header."""
+    def value_for_gpu_type(self, gpu_type: str) -> str:
+        """Return the sbatch args value that requests `count` GPUs of the given type.
 
-    n_tokens: int = 1
-    """Number of sbatch args tokens taken up by the flag ("--gpus=1" vs "-G 1")."""
-
-    def with_gpu_type(self, gpu_type: str) -> list[str]:
-        """Return the sbatch flag that requests `count` GPUs of the given type.
-
-        >>> GpuRequest().with_gpu_type("h100_1g.10gb")
-        ['--gpus=h100_1g.10gb:1']
-        >>> GpuRequest(flag="--gres", count=2).with_gpu_type("h100")
-        ['--gres=gpu:h100:2']
-        >>> GpuRequest(flag="-G").with_gpu_type("h100")
-        ['-G', 'h100:1']
+        >>> GpuRequest().value_for_gpu_type("h100_1g.10gb")
+        'h100_1g.10gb:1'
+        >>> GpuRequest(flag="gres", count=2).value_for_gpu_type("h100")
+        'gpu:h100:2'
         """
         value = f"{gpu_type}:{self.count}"
         if self.flag == _GRES_FLAG:
             value = f"gpu:{value}"
-        if not self.flag.startswith("--"):
-            # `sbatch` doesn't accept "-G=<value>", the value has to be a separate argument.
-            return [self.flag, value]
-        return [f"{self.flag}={value}"]
+        return value
 
 
-def _parse_gpu_flag(flag: str, value: str) -> tuple[str | None, int] | None:
+def _parse_gpu_flag(flag: str, value: str | int | float | bool) -> tuple[str | None, int] | None:
     """Return the (model, count) requested by a GPU flag, or None if it isn't a GPU request."""
-    if flag not in (*_GPU_COUNT_FLAGS, _GRES_FLAG):
+    if flag not in (*_GPU_COUNT_FLAGS, _GRES_FLAG) or not isinstance(value, str):
         return None
     if flag == _GRES_FLAG:
         # Can be a comma-separated list of resources, e.g. "gpu:h100:1,tmpfs:10G".
@@ -280,29 +264,23 @@ def _parse_gpu_flag(flag: str, value: str) -> tuple[str | None, int] | None:
     return (model or None), int(count)
 
 
-def find_gpu_request(sbatch_args: list[str], job_script: Path | None = None) -> GpuRequest | None:
+def find_gpu_request(sbatch_args: SbatchArgs, job_script: Path | None = None) -> GpuRequest | None:
     """Find how many GPUs (and of which model) the job asks for.
 
     The sbatch args (from the command-line and from the cluv config) take precedence over the
     `#SBATCH` directives of the job script header, just like they do for `sbatch` itself.
 
-    >>> find_gpu_request(["--time=1:00:00", "--gpus=h100:1"])
-    GpuRequest(flag='--gpus', model='h100', count=1, at=1, n_tokens=1)
-    >>> find_gpu_request(["-G", "2"])
-    GpuRequest(flag='-G', model=None, count=2, at=0, n_tokens=2)
-    >>> find_gpu_request(["--time=1:00:00"]) is None
+    >>> find_gpu_request({"time": "1:00:00", "gpus": "h100:1"})
+    GpuRequest(flag='gpus', model='h100', count=1)
+    >>> find_gpu_request({"G": "2"})
+    GpuRequest(flag='G', model=None, count=2)
+    >>> find_gpu_request({"time": "1:00:00"}) is None
     True
     """
-    for index, arg in enumerate(sbatch_args):
-        flag, sep, value = arg.partition("=")
-        n_tokens = 1
-        if not sep and index + 1 < len(sbatch_args):
-            # A flag whose value is a separate token, e.g. ["-G", "1"].
-            value = sbatch_args[index + 1]
-            n_tokens = 2
+    for flag, value in sbatch_args.items():
         if (parsed := _parse_gpu_flag(flag, value)) is not None:
             model, count = parsed
-            return GpuRequest(flag=flag, model=model, count=count, at=index, n_tokens=n_tokens)
+            return GpuRequest(flag=flag, model=model, count=count)
 
     if job_script is None:
         return None
@@ -314,30 +292,25 @@ def find_gpu_request(sbatch_args: list[str], job_script: Path | None = None) -> 
             continue
         for token in line.removeprefix("#SBATCH").split():
             flag, _, value = token.partition("=")
-            if (parsed := _parse_gpu_flag(flag, value)) is not None:
+            if (parsed := _parse_gpu_flag(flag.lstrip("-"), value)) is not None:
                 model, count = parsed
-                return GpuRequest(flag=flag, model=model, count=count)
+                return GpuRequest(flag=flag.lstrip("-"), model=model, count=count)
 
     return None
 
 
 def sbatch_args_for_gpu_type(
-    sbatch_args: list[str], gpu_request: GpuRequest, gpu_type: str
-) -> list[str]:
+    sbatch_args: SbatchArgs, gpu_request: GpuRequest, gpu_type: str
+) -> SbatchArgs:
     """Return `sbatch_args` with the GPU request replaced by one for the given GPU type.
 
-    >>> sbatch_args_for_gpu_type(["--gpus=1", "--time=1:00:00"], GpuRequest(at=0), "h100")
-    ['--gpus=h100:1', '--time=1:00:00']
-    >>> sbatch_args_for_gpu_type(["--time=1:00:00"], GpuRequest(), "h100")
-    ['--time=1:00:00', '--gpus=h100:1']
+    Setting `gpu_request.flag` on a dict replaces its value in place when the key was already
+    present (from the sbatch args), or appends it otherwise (no GPU request, or one coming from
+    the job script header, which the appended flag then overrides on the command-line).
+
+    >>> sbatch_args_for_gpu_type({"gpus": "1", "time": "1:00:00"}, GpuRequest(), "h100")
+    {'gpus': 'h100:1', 'time': '1:00:00'}
+    >>> sbatch_args_for_gpu_type({"time": "1:00:00"}, GpuRequest(), "h100")
+    {'time': '1:00:00', 'gpus': 'h100:1'}
     """
-    new_flag = gpu_request.with_gpu_type(gpu_type)
-    if gpu_request.at is None:
-        # The request comes from the job script header (or there is no GPU request at all):
-        # passing the flag on the command-line overrides the `#SBATCH` directive.
-        return [*sbatch_args, *new_flag]
-    return [
-        *sbatch_args[: gpu_request.at],
-        *new_flag,
-        *sbatch_args[gpu_request.at + gpu_request.n_tokens :],
-    ]
+    return {**sbatch_args, gpu_request.flag: gpu_request.value_for_gpu_type(gpu_type)}

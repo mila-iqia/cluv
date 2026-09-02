@@ -22,7 +22,6 @@ from cluv.cli.submit import (
     get_sbatch_command,
     get_submissions,
     merge_sbatch_args,
-    sbatch_args_from_dict,
     submit,
 )
 from cluv.cli.submit_utils.chunking import CHUNK_SIZE, apply_chunking
@@ -72,30 +71,6 @@ def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
     cluv.cli.init()
     return project_dir
-
-
-class TestSbatchArgsFromDict:
-    def test_long_key_string_value(self) -> None:
-        assert sbatch_args_from_dict({"time": "2:00:00"}) == ["--time=2:00:00"]
-
-    def test_short_key_string_value(self) -> None:
-        assert sbatch_args_from_dict({"N": "2"}) == ["-N", "2"]
-
-    def test_true_long_key_is_bare_flag(self) -> None:
-        assert sbatch_args_from_dict({"exclusive": True}) == ["--exclusive"]
-
-    def test_true_short_key_is_bare_flag(self) -> None:
-        assert sbatch_args_from_dict({"n": True}) == ["-n"]
-
-    def test_empty_string_omitted(self) -> None:
-        assert sbatch_args_from_dict({"gpus": ""}) == []
-
-    def test_false_omitted(self) -> None:
-        assert sbatch_args_from_dict({"requeue": False}) == []
-
-    def test_multiple_flags_in_order(self) -> None:
-        result = sbatch_args_from_dict({"time": "2:00:00", "gpus": "1", "exclusive": True})
-        assert result == ["--time=2:00:00", "--gpus=1", "--exclusive"]
 
 
 class TestMergeSbatchArgs:

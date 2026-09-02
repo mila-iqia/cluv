@@ -9,7 +9,7 @@ from unittest import mock
 
 import pytest
 
-import cluv.cli.submit
+import cluv.cli.submit_utils.vram
 from cluv.cli.submit import expand_for_vram
 from cluv.cli.submit_utils.vram import (
     GpuRequest,
@@ -20,6 +20,7 @@ from cluv.cli.submit_utils.vram import (
     parse_vram,
     sbatch_args_for_gpu_type,
 )
+from cluv.sbatch_args import SbatchArgs
 
 pytestmark = pytest.mark.timeout(10)
 
@@ -195,24 +196,24 @@ class TestFindGpuRequest:
     @pytest.mark.parametrize(
         ("sbatch_args", "expected"),
         [
-            (["--gpus=1"], GpuRequest("--gpus", None, 1, at=0)),
-            (["--gpus=h100:1"], GpuRequest("--gpus", "h100", 1, at=0)),
-            (["--time=1:00:00", "--gpus=h100:2"], GpuRequest("--gpus", "h100", 2, at=1)),
-            (["--gres=gpu:1"], GpuRequest("--gres", None, 1, at=0)),
-            (["--gres=gpu:a100:4"], GpuRequest("--gres", "a100", 4, at=0)),
-            (["--gres=tmpfs:10G,gpu:a100:1"], GpuRequest("--gres", "a100", 1, at=0)),
-            (["--gpus-per-node=h100:1"], GpuRequest("--gpus-per-node", "h100", 1, at=0)),
-            (["-G", "2"], GpuRequest("-G", None, 2, at=0, n_tokens=2)),
-            (["--gpus", "h100:1"], GpuRequest("--gpus", "h100", 1, at=0, n_tokens=2)),
+            ({"gpus": "1"}, GpuRequest("gpus", None, 1)),
+            ({"gpus": "h100:1"}, GpuRequest("gpus", "h100", 1)),
+            ({"time": "1:00:00", "gpus": "h100:2"}, GpuRequest("gpus", "h100", 2)),
+            ({"gres": "gpu:1"}, GpuRequest("gres", None, 1)),
+            ({"gres": "gpu:a100:4"}, GpuRequest("gres", "a100", 4)),
+            ({"gres": "tmpfs:10G,gpu:a100:1"}, GpuRequest("gres", "a100", 1)),
+            ({"gpus-per-node": "h100:1"}, GpuRequest("gpus-per-node", "h100", 1)),
+            ({"G": "2"}, GpuRequest("G", None, 2)),
         ],
     )
-    def test_from_sbatch_args(self, sbatch_args: list[str], expected: GpuRequest):
+    def test_from_sbatch_args(self, sbatch_args: dict, expected: GpuRequest):
         assert find_gpu_request(sbatch_args) == expected
 
     @pytest.mark.parametrize(
-        "sbatch_args", [[], ["--time=1:00:00"], ["--gres=tmpfs:10G"], ["--cpus-per-task=4"]]
+        "sbatch_args",
+        [{}, {"time": "1:00:00"}, {"gres": "tmpfs:10G"}, {"cpus-per-task": "4"}],
     )
-    def test_no_gpu_request(self, sbatch_args: list[str]):
+    def test_no_gpu_request(self, sbatch_args: dict):
         assert find_gpu_request(sbatch_args) is None
 
     def test_from_the_job_script_header(self, tmp_path: Path):
@@ -224,59 +225,55 @@ class TestFindGpuRequest:
             "\n"
             "echo --gpus=2\n"  # Not part of the header: must be ignored.
         )
-        assert find_gpu_request([], job_script) == GpuRequest("--gpus-per-node", "h100", 1)
+        assert find_gpu_request({}, job_script) == GpuRequest("gpus-per-node", "h100", 1)
 
     def test_sbatch_args_take_precedence_over_the_job_script(self, tmp_path: Path):
         job_script = tmp_path / "job.sh"
         job_script.write_text("#!/bin/bash\n#SBATCH --gpus=a100:1\n")
-        assert find_gpu_request(["--gpus=h100:1"], job_script) == GpuRequest(
-            "--gpus", "h100", 1, at=0
-        )
+        assert find_gpu_request({"gpus": "h100:1"}, job_script) == GpuRequest("gpus", "h100", 1)
 
 
 class TestSbatchArgsForGpuType:
     def test_replaces_the_gpu_flag_in_place(self):
-        sbatch_args = ["--time=1:00:00", "--gpus=h100:1", "--cpus-per-task=4"]
+        sbatch_args: SbatchArgs = {"time": "1:00:00", "gpus": "h100:1", "cpus-per-task": "4"}
         gpu_request = find_gpu_request(sbatch_args)
         assert gpu_request
-        assert sbatch_args_for_gpu_type(sbatch_args, gpu_request, "h100_1g.10gb") == [
-            "--time=1:00:00",
-            "--gpus=h100_1g.10gb:1",
-            "--cpus-per-task=4",
-        ]
+        assert sbatch_args_for_gpu_type(sbatch_args, gpu_request, "h100_1g.10gb") == {
+            "time": "1:00:00",
+            "gpus": "h100_1g.10gb:1",
+            "cpus-per-task": "4",
+        }
 
-    def test_replaces_a_two_token_flag(self):
-        sbatch_args = ["-G", "1", "--time=1:00:00"]
+    def test_keeps_the_short_flag_key(self):
+        sbatch_args: SbatchArgs = {"G": "1", "time": "1:00:00"}
         gpu_request = find_gpu_request(sbatch_args)
         assert gpu_request
-        # `sbatch` doesn't accept "-G=<value>": the value has to stay a separate argument.
-        assert sbatch_args_for_gpu_type(sbatch_args, gpu_request, "a100_1g.5gb") == [
-            "-G",
-            "a100_1g.5gb:1",
-            "--time=1:00:00",
-        ]
+        assert sbatch_args_for_gpu_type(sbatch_args, gpu_request, "a100_1g.5gb") == {
+            "G": "a100_1g.5gb:1",
+            "time": "1:00:00",
+        }
 
     def test_keeps_the_gres_form(self):
-        sbatch_args = ["--gres=gpu:1"]
+        sbatch_args: SbatchArgs = {"gres": "gpu:1"}
         gpu_request = find_gpu_request(sbatch_args)
         assert gpu_request
-        assert sbatch_args_for_gpu_type(sbatch_args, gpu_request, "a100_1g.5gb") == [
-            "--gres=gpu:a100_1g.5gb:1"
-        ]
+        assert sbatch_args_for_gpu_type(sbatch_args, gpu_request, "a100_1g.5gb") == {
+            "gres": "gpu:a100_1g.5gb:1"
+        }
 
     def test_appends_the_flag_when_the_request_is_in_the_job_script(self):
         # sbatch flags override the `#SBATCH` directives of the job script.
-        gpu_request = GpuRequest("--gpus-per-node", "h100", 1)
-        assert sbatch_args_for_gpu_type(["--time=1:00:00"], gpu_request, "h100_3g.40gb") == [
-            "--time=1:00:00",
-            "--gpus-per-node=h100_3g.40gb:1",
-        ]
+        gpu_request = GpuRequest("gpus-per-node", "h100", 1)
+        assert sbatch_args_for_gpu_type({"time": "1:00:00"}, gpu_request, "h100_3g.40gb") == {
+            "time": "1:00:00",
+            "gpus-per-node": "h100_3g.40gb:1",
+        }
 
     def test_appends_the_flag_when_no_gpu_was_requested(self):
-        assert sbatch_args_for_gpu_type(["--time=1:00:00"], GpuRequest(), "h100_3g.40gb") == [
-            "--time=1:00:00",
-            "--gpus=h100_3g.40gb:1",
-        ]
+        assert sbatch_args_for_gpu_type({"time": "1:00:00"}, GpuRequest(), "h100_3g.40gb") == {
+            "time": "1:00:00",
+            "gpus": "h100_3g.40gb:1",
+        }
 
 
 class TestExpandForVram:
@@ -291,12 +288,12 @@ class TestExpandForVram:
         """Don't reach out to the cluster: use the GPU types of Rorqual."""
         gpu_types = parse_gpu_types(RORQUAL_SINFO)
         monkeypatch.setattr(
-            cluv.cli.submit, "get_gpu_types", mock.AsyncMock(return_value=gpu_types)
+            cluv.cli.submit_utils.vram, "get_gpu_types", mock.AsyncMock(return_value=gpu_types)
         )
         return gpu_types
 
     async def test_one_expansion_per_compatible_gpu_type(self, job_script: Path):
-        sbatch_args = {"account": "rrg-bengioy-ad", "gpus": "1"}
+        sbatch_args: SbatchArgs = {"account": "rrg-bengioy-ad", "gpus": "1"}
         expanded = await expand_for_vram(
             "rorqual",
             mock.Mock(hostname="rorqual"),
@@ -315,7 +312,7 @@ class TestExpandForVram:
         ]
 
     async def test_gpu_type_is_added_when_the_job_doesnt_ask_for_a_gpu(self, job_script: Path):
-        sbatch_args = {"account": "rrg-bengioy-ad"}
+        sbatch_args: SbatchArgs = {"account": "rrg-bengioy-ad"}
         expanded = await expand_for_vram(
             "rorqual",
             mock.Mock(hostname="rorqual"),
@@ -329,7 +326,7 @@ class TestExpandForVram:
         ]
 
     async def test_multi_gpu_jobs_are_left_alone(self, job_script: Path):
-        sbatch_args = {"gpus": "2"}
+        sbatch_args: SbatchArgs = {"gpus": "2"}
         assert await expand_for_vram(
             "rorqual",
             mock.Mock(hostname="rorqual"),
@@ -339,7 +336,7 @@ class TestExpandForVram:
         ) == [sbatch_args]
 
     async def test_left_alone_when_no_gpu_type_is_big_enough(self, job_script: Path):
-        sbatch_args = {"account": "rrg-bengioy-ad", "gpus": "1"}
+        sbatch_args: SbatchArgs = {"account": "rrg-bengioy-ad", "gpus": "1"}
         assert await expand_for_vram(
             "rorqual",
             mock.Mock(hostname="rorqual"),
@@ -349,7 +346,7 @@ class TestExpandForVram:
         ) == [sbatch_args]
 
     async def test_left_alone_when_vram_not_set(self, job_script: Path):
-        sbatch_args = {"account": "rrg-bengioy-ad", "gpus": "1"}
+        sbatch_args: SbatchArgs = {"account": "rrg-bengioy-ad", "gpus": "1"}
         assert await expand_for_vram(
             "rorqual",
             mock.Mock(hostname="rorqual"),

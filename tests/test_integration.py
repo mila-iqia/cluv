@@ -23,11 +23,12 @@ from cluv.cache import Job
 from cluv.cli.init import init
 from cluv.cli.login import login
 from cluv.cli.status import ClusterStatus, get_cluster_status
-from cluv.cli.submit import expand_for_vram, sbatch_args_from_dict, submit
+from cluv.cli.submit import expand_for_vram, submit
 from cluv.cli.submit_utils.vram import find_gpu_request, get_gpu_types
 from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote
+from cluv.sbatch_args import sbatch_args_to_list
 from cluv.slurm import run_sacct
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -281,7 +282,7 @@ async def test_vram_sbatch_args_are_valid(remote: Remote, dont_cache_gpu_types: 
     gpu_types_asked_for = [
         gpu_request.model
         for sbatch_args in expanded
-        if (gpu_request := find_gpu_request(sbatch_args_from_dict(sbatch_args))) is not None
+        if (gpu_request := find_gpu_request(sbatch_args)) is not None
     ]
     assert len(gpu_types_asked_for) == len(expanded), (
         f"Every submission should ask for a specific GPU type: {expanded}"
@@ -290,7 +291,7 @@ async def test_vram_sbatch_args_are_valid(remote: Remote, dont_cache_gpu_types: 
 
     separator = "---CLUV-TEST-SEP---"
     script = " ".join(
-        f"sbatch --test-only {shlex.join(sbatch_args_from_dict(sbatch_args))} --wrap=hostname "
+        f"sbatch --test-only {shlex.join(sbatch_args_to_list(sbatch_args))} --wrap=hostname "
         f"2>&1; echo {separator};"
         for sbatch_args in expanded
     )
@@ -302,7 +303,7 @@ async def test_vram_sbatch_args_are_valid(remote: Remote, dont_cache_gpu_types: 
         # Slurm rejects a malformed GPU request (e.g. "-G=h100:1") with this error, whereas a
         # cluster that simply won't schedule the job says so in its own words.
         assert "Invalid Trackable RESource" not in sbatch_output, (
-            f"`sbatch {shlex.join(sbatch_args_from_dict(sbatch_args))}` on {cluster} was "
+            f"`sbatch {shlex.join(sbatch_args_to_list(sbatch_args))}` on {cluster} was "
             f"rejected:\n{sbatch_output}"
         )
 

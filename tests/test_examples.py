@@ -174,6 +174,12 @@ IMAGENET_EXAMPLE_CLUSTERS = load_cluv_config(
     Path(__file__).resolve().parents[1] / "examples/imagenet/pyproject.toml"
 ).clusters_names
 
+# Trillium's login nodes wrap `sbatch` in a site submission filter that only accepts a whitelist of
+# options, and `--test-only` is not on it: it answers "ERROR:   option --test-only not recognized"
+# with a usage message that isn't Slurm's own (the `sbatch` behind it reports slurm 25.11.7, which
+# does support the flag). Nothing to work around here - a dry run just isn't available there.
+CLUSTERS_WITHOUT_SBATCH_TEST_ONLY = {"trillium-gpu"}
+
 
 @pytest.mark.slow
 @pytest.mark.parametrize("cluster", IMAGENET_EXAMPLE_CLUSTERS)
@@ -192,6 +198,8 @@ async def test_imagenet_job_script_is_accepted_by_slurm(
     are skipped - except the `REQUIRED_CLUSTERS` in CI, where a missing connection is a failure,
     same as for the `cluster` fixture the other integration tests use.
     """
+    if cluster in CLUSTERS_WITHOUT_SBATCH_TEST_ONLY:
+        pytest.skip(f"`sbatch --test-only` is not available on {cluster}.")
     if not await control_socket_is_running(cluster):
         if IN_SELF_HOSTED_GITHUB_CI and cluster in REQUIRED_CLUSTERS:
             pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")

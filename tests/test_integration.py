@@ -24,7 +24,7 @@ from cluv.cli.init import init
 from cluv.cli.login import login
 from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import expand_for_vram, submit
-from cluv.cli.submit_utils.vram import find_gpu_request, get_gpu_types
+from cluv.cli.submit_utils.vram import get_gpu_request, get_gpu_types
 from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote
@@ -282,7 +282,7 @@ async def test_vram_sbatch_args_are_valid(remote: Remote, dont_cache_gpu_types: 
     gpu_types_asked_for = [
         gpu_request.model
         for sbatch_args in expanded
-        if (gpu_request := find_gpu_request(sbatch_args)) is not None
+        if (gpu_request := get_gpu_request(sbatch_args)) is not None
     ]
     assert len(gpu_types_asked_for) == len(expanded), (
         f"Every submission should ask for a specific GPU type: {expanded}"

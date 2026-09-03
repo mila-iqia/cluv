@@ -652,7 +652,7 @@ def add_cluv_sbatch_args(
 
     Returns a new dict; the one passed in is left alone.
     """
-    sbatch_args = dict(sbatch_args)
+    sbatch_args = sbatch_args.copy()
 
     base_name = sbatch_args.get("job-name") or Path(job_script).stem
     sbatch_args["job-name"] = f"cluv-{base_name}"

@@ -652,6 +652,7 @@ def add_cluv_sbatch_args(
 
     Returns a new dict; the one passed in is left alone.
     """
+    # A copy, not a cast: the flags below are added without touching the caller's dict.
     sbatch_args = dict(sbatch_args)
 
     base_name = sbatch_args.get("job-name") or Path(job_script).stem

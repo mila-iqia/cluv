@@ -2,7 +2,7 @@ import argparse
 import logging
 from pathlib import Path
 
-from cluv.config import SbatchArgs
+from cluv.sbatch_args import SbatchArgs
 from cluv.slurm import parse_slurm_time
 
 logger = logging.getLogger(__name__)
@@ -71,19 +71,11 @@ def apply_chunking(
 
 def get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
     """Return the SLURM time limit from the sbatch args if it exists."""
-    # Last occurrence of --time or -t takes precedence, so we iterate in reverse.
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
     args, _ = parser.parse_known_args(sbatch_args)
+
     return getattr(args, "time", None)
-    # for i, arg in reversed(list(enumerate(sbatch_args))):
-    #     if arg.startswith(("--time=", "-t=")):
-    #         # Like "--time=00:10:00" or "-t=1-02:00:00"
-    #         return arg.split("=")[1]
-    #     if arg.strip() in ("--time", "-t"):
-    #         # Like ["--time", "00:10:00"] or ["-t", "1-02:00:00"]
-    #         return sbatch_args[i + 1] if i + 1 < len(sbatch_args) else None
-    return None
 
 
 def get_time_from_job_script_header(job_script: Path) -> str | None:

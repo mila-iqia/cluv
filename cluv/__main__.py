@@ -206,6 +206,16 @@ def add_submit_args(subparsers: Subparsers):
         ),
     )
     submit_parser.add_argument(
+        "--vram",
+        metavar="<amount>",
+        default=None,
+        help=(
+            "Amount of GPU memory needed by the job, e.g. '--vram=10GB'. One job is submitted "
+            "for each GPU type of the cluster that has at least that much VRAM (including the "
+            "MIG slices, which are often idle), and only the first one to start is kept."
+        ),
+    )
+    submit_parser.add_argument(
         "sbatch_args",
         nargs=argparse.REMAINDER,
         metavar="...",

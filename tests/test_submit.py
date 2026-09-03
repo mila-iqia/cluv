@@ -22,7 +22,6 @@ from cluv.cli.submit import (
     get_sbatch_command,
     get_submissions,
     merge_sbatch_args,
-    sbatch_args_from_dict,
     submit,
 )
 from cluv.cli.submit_utils.chunking import CHUNK_SIZE, apply_chunking
@@ -74,30 +73,6 @@ def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     return project_dir
 
 
-class TestSbatchArgsFromDict:
-    def test_long_key_string_value(self) -> None:
-        assert sbatch_args_from_dict({"time": "2:00:00"}) == ["--time=2:00:00"]
-
-    def test_short_key_string_value(self) -> None:
-        assert sbatch_args_from_dict({"N": "2"}) == ["-N", "2"]
-
-    def test_true_long_key_is_bare_flag(self) -> None:
-        assert sbatch_args_from_dict({"exclusive": True}) == ["--exclusive"]
-
-    def test_true_short_key_is_bare_flag(self) -> None:
-        assert sbatch_args_from_dict({"n": True}) == ["-n"]
-
-    def test_empty_string_omitted(self) -> None:
-        assert sbatch_args_from_dict({"gpus": ""}) == []
-
-    def test_false_omitted(self) -> None:
-        assert sbatch_args_from_dict({"requeue": False}) == []
-
-    def test_multiple_flags_in_order(self) -> None:
-        result = sbatch_args_from_dict({"time": "2:00:00", "gpus": "1", "exclusive": True})
-        assert result == ["--time=2:00:00", "--gpus=1", "--exclusive"]
-
-
 class TestMergeSbatchArgs:
     def test_cli_overrides_config_on_same_key(self) -> None:
         merged = merge_sbatch_args(
@@ -124,7 +99,7 @@ def test_bug_with_t_flag_and_time_in_config():
 
 
 @pytest.mark.parametrize("chunking", [None, 5])
-def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
+async def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
     chunking: int | None, monkeypatch: pytest.MonkeyPatch
 ):
     """Test that if we pass some unknown args as sbatch args, their order is preserved in the final sbatch command.
@@ -173,7 +148,7 @@ def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
             ),
         ),
     )
-    submissions = get_submissions(
+    submissions = await get_submissions(
         cluster=cluster,
         remote=unittest.mock.AsyncMock(Remote, hostname=cluster),
         chunking=chunking,
@@ -399,6 +374,7 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
             }
         )
 
@@ -419,6 +395,26 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
+            }
+        )
+
+    def test_vram_is_not_passed_along_to_sbatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--gpus=1", "--vram=10GB", "--", "python", "main.py"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--gpus=1"],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "chunking": None,
+                "vram": "10GB",
             }
         )
 
@@ -442,6 +438,7 @@ class TestSubmitCliParsing:
                 "program_args": [],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
             }
         )
 
@@ -465,6 +462,7 @@ class TestSubmitCliParsing:
                 "program_args": ["sleep", "10"],
                 "autocommit": False,
                 "chunking": 6,
+                "vram": None,
             }
         )
 
@@ -487,6 +485,7 @@ class TestSubmitCliParsing:
                 "program_args": ["sleep", "10"],
                 "autocommit": False,
                 "chunking": CHUNK_SIZE,
+                "vram": None,
             }
         )
 

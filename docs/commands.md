@@ -187,6 +187,29 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
     Before using this option, make sure that checkpointing is implemented in your code so it can be restarted at any step.
     Default size of a chunk is 3 hours. For example, a job of 12h will be split into 4 jobs of 3h.
 
+`--vram=<amount>`
+:   The amount of GPU memory your job needs, for example `--vram=10GB`. One job is submitted for
+    each GPU type of the cluster that has at least that much VRAM, and only the first one to start
+    is kept, the others being cancelled.
+
+    This makes single-GPU jobs start much sooner on the clusters that have
+    [MIG](https://docs.alliancecan.ca/wiki/Multi-Instance_GPU) slices (Fir, Rorqual, Narval, ...),
+    since those slices are usually idle and are never allocated unless you ask for them explicitly:
+
+    ```console
+    cluv submit rorqual scripts/job.sh --gpus=1 --vram=10GB
+    ```
+
+    On Rorqual, this races a `1g.10gb` slice, a `2g.20gb` slice, a `3g.40gb` slice and a full H100
+    against each other. When a GPU model is already requested (e.g. `--gpus=h100:1`), only that
+    model and its MIG slices are considered.
+
+    The GPU types (and how much VRAM they have) are read from `sinfo` on the cluster and cached for
+    a week, so new GPU models and MIG profiles are picked up automatically.
+
+    This option is ignored for jobs that ask for more than one GPU, since MIG slices can only be
+    used one at a time.
+
 ---
 
 ## [`cluv clean`](#cluv-clean)

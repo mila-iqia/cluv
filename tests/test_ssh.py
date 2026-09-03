@@ -8,25 +8,24 @@ import cluv.ssh as cluv_ssh
 
 
 @pytest.fixture(autouse=True)
-def patch_ssh_config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(cluv_ssh, "SSH_CONFIG_PATH", tmp_path / "config")
+def ssh_config_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    (tmp_path / ".ssh").mkdir()
+    return tmp_path / ".ssh" / "config"
 
 
 class TestGetHostnames:
     def test_returns_empty_set_when_no_file(self):
         assert cluv_ssh.get_ssh_hostnames() == set()
 
-    def test_returns_default_wildcard_for_empty_file(self, tmp_path: Path):
-        p = tmp_path / "config"
-        p.touch()
+    def test_returns_default_wildcard_for_empty_file(self, ssh_config_path: Path):
+        ssh_config_path.touch()
         assert cluv_ssh.get_ssh_hostnames() == set("*")
 
-    def test_get_all_hosts(self, tmp_path: Path):
-        p = tmp_path / "config"
-        p.write_text("Host mila\nHost narval\nHost rorqual\n")
+    def test_get_all_hosts(self, ssh_config_path: Path):
+        ssh_config_path.write_text("Host mila\nHost narval\nHost rorqual\n")
         assert cluv_ssh.get_ssh_hostnames() == {"*", "mila", "narval", "rorqual"}
 
-    def test_returns_no_duplicates(self, tmp_path: Path):
-        p = tmp_path / "config"
-        p.write_text("Host mila\nHost mila\n")
+    def test_returns_no_duplicates(self, ssh_config_path: Path):
+        ssh_config_path.write_text("Host mila\nHost mila\n")
         assert cluv_ssh.get_ssh_hostnames() == {"*", "mila"}

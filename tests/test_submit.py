@@ -465,7 +465,10 @@ class TestGetSbatchCommand:
         job_script.write_text("#SBATCH --time=20:00:00")
 
         n_chunks, chunked_args = apply_chunking(
-            {"time": "10:00:00"}, job_script=job_script, chunking=3
+            {"time": "10:00:00"},
+            job_script=job_script,
+            chunking=3,
+            env_vars={"SBATCH_TIMELIMIT": "50:00:00"},
         )
         assert n_chunks == 4
 

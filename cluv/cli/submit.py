@@ -16,7 +16,7 @@ import rich.table
 import rich.text
 from rich.live import Live
 
-from cluv.cache import Job, Submission, save_job
+from cluv.cache import Job, Submission, get_submission_log_dir, save_job
 from cluv.cli.submit_utils.chunking import apply_chunking
 from cluv.cli.sync import (
     get_cluster_to_remote,
@@ -58,6 +58,8 @@ class SubmissionProgress:
     """
 
     submission: Submission
+    log_path: Path
+    """Where this submission's `sbatch` output will be written."""
     state: JobState = "SYNCING"
     job: Job | None = None
     error: str | None = None
@@ -94,6 +96,15 @@ def _short_command(submission: Submission) -> str:
     return f"bash --login -c '(...) {sbatch_flags} -- {program_args_str}'"
 
 
+def _command_and_log_cell(row: SubmissionProgress) -> rich.text.Text:
+    """The command cell: the (short) command, with the log path as a clickable link (in
+    terminals that support it) on its own line below."""
+    cell = rich.text.Text(_short_command(row.submission))
+    cell.append("\nlog: ", style="dim")
+    cell.append(row.log_path.name, style=f"dim link file://{row.log_path}")
+    return cell
+
+
 def render_job_table(
     rows: list[SubmissionProgress], *, cancelling: bool = False
 ) -> rich.table.Table:
@@ -120,7 +131,7 @@ def render_job_table(
             row.cluster,
             str(row.job_id) if row.job_id is not None else "-",
             rich.text.Text(row.state, style=_state_style(row.state)),
-            _short_command(row.submission),
+            _command_and_log_cell(row),
         )
     return table
 
@@ -146,17 +157,24 @@ async def submit(
     git_commit = ensure_clean_git_state(autocommit=autocommit, submit_command=submit_command)
     cluster_to_remote = await get_cluster_to_remote(cluster)
 
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = get_submission_log_dir()
+
     job_submissions = [
-        SubmissionProgress(submission=submission)
+        SubmissionProgress(
+            submission=submission, log_path=log_dir / f"{timestamp}_{cluster_name}_{i}.txt"
+        )
         for cluster_name, remote in cluster_to_remote.items()
-        for submission in get_submissions(
-            cluster_name,
-            remote,
-            job_script=job_script,
-            sbatch_args=sbatch_args,
-            program_args=program_args,
-            chunking=chunking,
-            git_commit=git_commit,
+        for i, submission in enumerate(
+            get_submissions(
+                cluster_name,
+                remote,
+                job_script=job_script,
+                sbatch_args=sbatch_args,
+                program_args=program_args,
+                chunking=chunking,
+                git_commit=git_commit,
+            )
         )
     ]
 
@@ -369,7 +387,7 @@ async def submit_to_cluster(
         row.state = "SUBMITTING"
 
     results = await asyncio.gather(
-        *(submit_job(row.submission) for row in job_submissions),
+        *(submit_job(row.submission, row.log_path) for row in job_submissions),
         return_exceptions=True,
     )
 
@@ -738,8 +756,8 @@ def get_sbatch_command(
     return f"bash --login -c {shlex.quote(inner_command)}"
 
 
-async def submit_job(submission: Submission) -> Job:
-    """Does the actual sbatch call.
+async def submit_job(submission: Submission, log_path: Path) -> Job:
+    """Does the actual sbatch call, and writes its outcome to `log_path`.
 
     Raise a `JobSubmissionFailed` if the job submission fails for some reason.
     """
@@ -756,11 +774,18 @@ async def submit_job(submission: Submission) -> Job:
             tuple(shlex.split(submission.sbatch_command)), _display=display, warn=warn, hide=hide
         )
 
+    job_id = int(result.stdout.strip()) if result.returncode == 0 else None
+    error = None
     if result.returncode != 0:
-        raise JobSubmissionFailed(
+        error = (
             f"Failed to submit job on cluster {submission.cluster}: "
             f"{result.stderr or result.stdout}"
         )
+    write_submission_log(log_path, submission, job_id=job_id, error=error, result=result)
+
+    if error is not None:
+        raise JobSubmissionFailed(error)
+    assert job_id is not None
 
     return Job(
         cluster=submission.cluster,
@@ -771,9 +796,35 @@ async def submit_job(submission: Submission) -> Job:
         sbatch_command=submission.sbatch_command,
         n_chunks=submission.n_chunks,
         git_commit=submission.git_commit,
-        job_id=int(result.stdout.strip()),
+        job_id=job_id,
         submitted_at=datetime.datetime.now(),
     )
+
+
+def write_submission_log(
+    log_path: Path,
+    submission: Submission,
+    *,
+    job_id: int | None,
+    error: str | None,
+    result: subprocess.CompletedProcess[str],
+) -> None:
+    """Write the outcome of one `sbatch` call to `log_path`, so it can be found on its own even
+    when many submissions' console output is interleaved.
+    """
+    lines = [
+        f"cluster: {submission.cluster}",
+        f"command: {submission.sbatch_command}",
+        f"status: {'FAILED' if error is not None else 'SUBMITTED'}",
+        f"job_id: {job_id if job_id is not None else '-'}",
+        f"returncode: {result.returncode}",
+        "",
+        "--- stdout ---",
+        result.stdout,
+        "--- stderr ---",
+        result.stderr,
+    ]
+    log_path.write_text("\n".join(lines))
 
 
 def build_submit_command(

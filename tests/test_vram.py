@@ -160,7 +160,7 @@ class TestCompatibleGpuTypes:
         ]
 
     def test_slices_that_are_too_small_are_excluded(self):
-        assert compatible_gpu_types(parse_gpu_types(RORQUAL_SINFO), vram="10GB") == [
+        assert compatible_gpu_types(parse_gpu_types(RORQUAL_SINFO), vram="30GB") == [
             "nvidia_h100_80gb_hbm3_3g.40gb",
             "h100",
         ]

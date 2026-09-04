@@ -197,19 +197,19 @@ async def get_gpu_types(cluster: str, remote: Remote | None) -> dict[str, float 
 def compatible_gpu_types(
     gpu_types: dict[str, float | None], vram: str, model: str | None = None
 ) -> list[str]:
-    """Return the GPU types with at least `vram_gb` of VRAM, smallest (i.e. easiest to get) first.
+    """Return the GPU types with at least `vram` of VRAM, smallest (i.e. easiest to get) first.
 
     When a GPU `model` is requested, only that model and its MIG slices are considered.
 
     >>> gpu_types = {"h100": 80.0, "h100_1g.10gb": 10.0, "h100_3g.40gb": 40.0, "l40s": 48.0}
-    >>> compatible_gpu_types(gpu_types, vram_gb=10)
+    >>> compatible_gpu_types(gpu_types, vram="10GB")
     ['h100_1g.10gb', 'h100_3g.40gb', 'l40s', 'h100']
-    >>> compatible_gpu_types(gpu_types, vram_gb=10, model="h100")
+    >>> compatible_gpu_types(gpu_types, vram="10GB", model="h100")
     ['h100_1g.10gb', 'h100_3g.40gb', 'h100']
-    >>> compatible_gpu_types(gpu_types, vram_gb=48, model="h100")
+    >>> compatible_gpu_types(gpu_types, vram="48", model="h100")
     ['h100']
     """
-    vram_gb = parse_vram(vram)  # Accept "10G" or "10GB" as well as 10.0
+    vram_gb = parse_vram(vram)  # Accept "10" and "10G" as well as "10GB".
     compatible = {
         gpu_type: vram
         for gpu_type, vram in gpu_types.items()
@@ -274,8 +274,8 @@ def get_gpu_request(sbatch_args: SbatchArgs, job_script: Path | None = None) -> 
     GpuRequest(flag='gpus', model='h100', count=1)
     >>> get_gpu_request({"G": "2"})
     GpuRequest(flag='G', model=None, count=2)
-    >>> get_gpu_request({"time": "1:00:00"})
-    None
+    >>> get_gpu_request({"time": "1:00:00"}) is None
+    True
     """
     # First, look for a GPU request in the sbatch args.
     for flag, value in sbatch_args.items():

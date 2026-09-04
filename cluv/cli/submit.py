@@ -53,11 +53,11 @@ class SubmissionProgress:
     """
 
     submission: Submission
+    log_path: Path
+    """Where this submission's `sbatch` output will be written."""
     state: JobState = "SYNCING"
     job: Job | None = None
     error: str | None = None
-    log_path: Path | None = None
-    """Where this submission's `sbatch` output is written, once `submit_to_cluster` assigns it."""
 
     @property
     def cluster(self) -> str:
@@ -91,11 +91,13 @@ def _short_command(submission: Submission) -> str:
     return f"bash --login -c '(...) {sbatch_flags} -- {program_args_str}'"
 
 
-def _log_link(row: SubmissionProgress) -> rich.text.Text:
-    """A clickable link (in terminals that support it) to this submission's log file."""
-    if row.log_path is None:
-        return rich.text.Text("-")
-    return rich.text.Text(row.log_path.name, style=f"link file://{row.log_path}")
+def _command_and_log_cell(row: SubmissionProgress) -> rich.text.Text:
+    """The command cell: the (short) command, with the log path as a clickable link (in
+    terminals that support it) on its own line below."""
+    cell = rich.text.Text(_short_command(row.submission))
+    cell.append("\nlog: ", style="dim")
+    cell.append(row.log_path.name, style=f"dim link file://{row.log_path}")
+    return cell
 
 
 def render_job_table(
@@ -112,7 +114,6 @@ def render_job_table(
         "Job ID",
         "Status",
         "Command",
-        "Log",
         title=title,
         box=rich.box.ROUNDED,
         show_lines=True,
@@ -125,8 +126,7 @@ def render_job_table(
             row.cluster,
             str(row.job_id) if row.job_id is not None else "-",
             rich.text.Text(row.state, style=_state_style(row.state)),
-            _short_command(row.submission),
-            _log_link(row),
+            _command_and_log_cell(row),
         )
     return table
 
@@ -150,19 +150,25 @@ async def submit(
     )
     git_commit = ensure_clean_git_state(autocommit=autocommit, submit_command=submit_command)
     cluster_to_remote = await get_cluster_to_remote(cluster)
-    run_id = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = get_submission_log_dir()
 
     job_submissions = [
-        SubmissionProgress(submission=submission)
+        SubmissionProgress(
+            submission=submission, log_path=log_dir / f"{timestamp}_{cluster_name}_{i}.txt"
+        )
         for cluster_name, remote in cluster_to_remote.items()
-        for submission in get_submissions(
-            cluster_name,
-            remote,
-            job_script=job_script,
-            sbatch_args=sbatch_args,
-            program_args=program_args,
-            chunking=chunking,
-            git_commit=git_commit,
+        for i, submission in enumerate(
+            get_submissions(
+                cluster_name,
+                remote,
+                job_script=job_script,
+                sbatch_args=sbatch_args,
+                program_args=program_args,
+                chunking=chunking,
+                git_commit=git_commit,
+            )
         )
     ]
 
@@ -182,7 +188,6 @@ async def submit(
                     if job_submission.cluster == cluster_name
                 ],
                 found_running_job=found_running_job,
-                run_id=run_id,
                 _skip_sync=_skip_sync,
             )
         )
@@ -338,7 +343,6 @@ async def submit_to_cluster(
     remote: Remote | None,
     job_submissions: list[SubmissionProgress],
     found_running_job: asyncio.Event,
-    run_id: str,
     _skip_sync: bool = False,
 ) -> None:
     """Sync then submit every submission for one cluster, in parallel."""
@@ -357,10 +361,6 @@ async def submit_to_cluster(
 
     for row in job_submissions:
         row.state = "SUBMITTING"
-
-    log_dir = get_submission_log_dir()
-    for i, row in enumerate(job_submissions):
-        row.log_path = log_dir / f"{run_id}_{cluster}_{i}.txt"
 
     results = await asyncio.gather(
         *(submit_job(row.submission, row.log_path) for row in job_submissions),

@@ -22,6 +22,7 @@ from cluv.cache import CacheContent, ProjectStateOnCluster, read_cache, write_ca
 from cluv.cli.clean import clean, compute_runs_to_delete
 from cluv.cli.sync import (
     create_results_dir_with_symlink_to_scratch,
+    expandvars,
     fetch_results,
     get_active_remotes,
     remote_test,
@@ -378,7 +379,11 @@ async def test_clean(
             f"is not configured in the cluv section of that example's pyproject.toml file. (err={err})"
         )
 
-    real_results_path_on_cluster = cluster_config.results_path
+    # Unlike `cluv clean`, this test also runs `mkdir`/`ls`/`rm` on the cluster itself, so it has
+    # to resolve `results_path` the same way cluv does. `Remote.run` uses a *non-login* shell, and
+    # on some clusters (vulcan, killarney) `$SCRATCH` is only set in a login shell -- leaving it
+    # unexpanded would turn `$SCRATCH/logs/pytorch_example` into `/logs/pytorch_example`.
+    real_results_path_on_cluster = await expandvars(remote, cluster_config.results_path)
 
     # Local "logs" directory.
     fake_local_results_dir = tmp_path / real_results_path_on_cluster.name

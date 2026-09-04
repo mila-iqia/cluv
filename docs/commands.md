@@ -187,6 +187,11 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
     Before using this option, make sure that checkpointing is implemented in your code so it can be restarted at any step.
     Default size of a chunk is 3 hours. For example, a job of 12h will be split into 4 jobs of 3h.
 
+`--sync-datasets`, `--no-sync-datasets`
+:   Whether the sync that precedes the submission should also replicate `data_source` to the
+    cluster's `datasets_path`. Enabled by default. Use `--no-sync-datasets` when the data is already
+    on the cluster, or when a separate `cluv sync` is already replicating it.
+
 ---
 
 ## [`cluv clean`](#cluv-clean)

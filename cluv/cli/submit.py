@@ -4,6 +4,7 @@ import dataclasses
 import datetime
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -17,8 +18,12 @@ from rich.live import Live
 
 from cluv.cache import Job, Submission, save_job
 from cluv.cli.submit_utils.chunking import apply_chunking
-from cluv.cli.sync import get_cluster_to_remote, sync_common_part, sync_per_cluster_part
-from cluv.config import SbatchArgs, find_pyproject, get_cluv_config
+from cluv.cli.sync import (
+    get_cluster_to_remote,
+    sync_common_part,
+    sync_per_cluster_part,
+)
+from cluv.config import ClusterConfig, SbatchArgs, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.slurm import FAILED_JOB_STATES, run_saccts
 from cluv.utils import console, group_by_cluster
@@ -128,6 +133,7 @@ async def submit(
     autocommit: bool = False,
     chunking: int | None = None,
     _skip_sync: bool = False,
+    sync_datasets: bool = True,
 ) -> Job | None:
     """Submit a job to the given cluster (or all clusters if `cluster=="first"`),
     and return the Job object if successful.
@@ -156,7 +162,7 @@ async def submit(
 
     if not _skip_sync:
         remotes = [r for r in cluster_to_remote.values() if r]
-        await sync_common_part(remotes)
+        await sync_common_part(remotes, sync_datasets=sync_datasets)
 
     found_running_job = asyncio.Event()
     tasks = [
@@ -171,6 +177,7 @@ async def submit(
                 ],
                 found_running_job=found_running_job,
                 _skip_sync=_skip_sync,
+                sync_datasets=sync_datasets,
             )
         )
         for cluster_name, remote in cluster_to_remote.items()
@@ -342,10 +349,11 @@ async def submit_to_cluster(
     job_submissions: list[SubmissionProgress],
     found_running_job: asyncio.Event,
     _skip_sync: bool = False,
+    sync_datasets: bool = True,
 ) -> None:
     """Sync then submit every submission for one cluster, in parallel."""
     if not _skip_sync:
-        await sync_per_cluster_part(remote)
+        await sync_per_cluster_part(remote, sync_datasets=sync_datasets)
 
     if found_running_job.is_set():
         # If a job has already started on another cluster, we don't need to submit more jobs.
@@ -412,17 +420,26 @@ def get_submissions(
             f"read its header to infer sbatch defaults."
         )
 
+    job_env_vars = get_job_env_vars(
+        cluster=cluster, git_commit=git_commit, cluster_config=cluster_config
+    )
+    cluster_job_script_path = get_cluster_job_script_path(
+        local_job_script_path=job_script, cluster=cluster, cluster_config=cluster_config
+    )
     for job_resources in job_resources_options:
         job_resources = merge_sbatch_args(from_config=job_resources, from_cli=sbatch_args)
         n_chunks, job_resources = apply_chunking(
             job_resources, job_script=job_script, chunking=chunking
         )
+        job_resources = add_cluv_sbatch_args(
+            job_resources, job_script=job_script, cluster=cluster, cluster_config=cluster_config
+        )
         sbatch_command = get_sbatch_command(
             cluster,
-            job_script=job_script,
+            env_vars=job_env_vars,
+            job_script=cluster_job_script_path,
             sbatch_args=job_resources,
             program_args=program_args,
-            git_commit=git_commit,
         )
         submissions.append(
             Submission(
@@ -437,6 +454,33 @@ def get_submissions(
             )
         )
     return submissions
+
+
+def get_cluster_job_script_path(
+    local_job_script_path: Path, cluster: str, cluster_config: ClusterConfig
+) -> PurePosixPath:
+    if cluster_config.job_script_path:
+        return cluster_config.job_script_path
+
+    local_project_dir = find_pyproject().parent
+    cluster_project_dir = cluster_config.project_dir
+    if cluster_project_dir is None:
+        if not local_project_dir.is_relative_to(Path.home()):
+            raise RuntimeError(
+                f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
+                f"project root ({local_project_dir}) is not under $HOME. "
+                f"Please set `project_dir` in the Cluv config section of pyproject.toml for that cluster."
+            )
+        cluster_project_dir = PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
+
+    if not local_job_script_path.is_absolute():
+        local_job_script_path = local_job_script_path.resolve()
+
+    if not local_job_script_path.is_relative_to(local_project_dir):
+        raise RuntimeError("The job script should be relative to the local project root.")
+
+    local_job_script_relative_path = local_job_script_path.relative_to(local_project_dir)
+    return cluster_project_dir / local_job_script_relative_path
 
 
 def sbatch_args_from_args_list(sbatch_args_list: list[str]) -> SbatchArgs:
@@ -550,66 +594,148 @@ def sbatch_args_from_dict(d: SbatchArgs) -> list[str]:
     return flags
 
 
-def get_sbatch_command(
-    cluster: str,
-    job_script: Path,
-    sbatch_args: SbatchArgs,
-    program_args: list[str],
-    git_commit: str,
-) -> str:
-    """Generate the command to submit the job via `sbatch` on `cluster`, with the appropriate
-    sbatch arguments, environment variables and paths set.
+# Characters the cluster's login shell would act on in a value that reaches it unquoted. `$` is
+# deliberately *not* in here: `$SCRATCH/logs/x` has to reach that shell intact, so that it is the
+# one to expand it.
+_UNSAFE_PATH_CHARS = re.compile(r"""[\s'"`;&|<>()\\]""")
+
+
+def check_path_is_safe_to_interpolate(path: PurePosixPath | str, setting: str) -> None:
+    """Raise a `ValueError` if `path` can't be interpolated into the sbatch command as-is.
+
+    Values that may contain environment variables are written into the command *unquoted*, so that
+    the cluster's login shell is the one that expands them (see `get_sbatch_command`). Escaping them
+    with `shlex.quote` first would stop exactly that, so anything else that shell treats specially
+    has to be rejected up front instead: a space would split the value into two `sbatch` arguments,
+    and a `;` would end the command and start another one.
+
+    >>> check_path_is_safe_to_interpolate("$SCRATCH/logs/imagenet", "results_path")
+    >>> check_path_is_safe_to_interpolate("/home/me/my logs", "results_path")
+    ... # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+        ...
+    ValueError: The results_path '/home/me/my logs' contains a ' ', ...
     """
-    local_project_dir = find_pyproject().parent
-    local_job_script = job_script if job_script.is_absolute() else local_project_dir / job_script
-    job_script_relative_path = local_job_script.relative_to(local_project_dir)
+    if match := _UNSAFE_PATH_CHARS.search(str(path)):
+        raise ValueError(
+            f"The {setting} {str(path)!r} contains a {match.group()!r}, which cluv can't pass to "
+            f"sbatch safely: it goes into a `bash --login -c ...` command unquoted, so that the "
+            f"cluster's login shell expands variables like $SCRATCH in it. Please use a value "
+            f"without whitespace or shell metacharacters."
+        )
 
-    config = get_cluv_config()
-    cluster_config = config.get_cluster_config(cluster)
-    remote_project_dir = cluster_config.project_dir or (
-        PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
-    )
-    remote_job_script = PurePosixPath(remote_project_dir) / job_script_relative_path
 
-    env_vars: dict[str, str] = {**config.env, **cluster_config.env}
-    base_name = env_vars.get("SBATCH_JOB_NAME") or Path(job_script).stem
-    env_vars["SBATCH_JOB_NAME"] = f"cluv-{base_name}"
+def get_job_env_vars(
+    cluster: str, git_commit: str, cluster_config: ClusterConfig
+) -> dict[str, str]:
+    env_vars = cluster_config.env.copy()
     env_vars["GIT_COMMIT"] = git_commit
+    # Tell the job which cluster config it is running under, so that `cluv.job` / `cluv.config`
+    # resolve the same `[tool.cluv.clusters.<name>]` section that we used to submit it. The cluster
+    # can't always be identified from inside the job: a job submitted to `trillium-gpu` reports
+    # `CC_CLUSTER=trillium`, and Killarney/Vulcan only set `CC_CLUSTER` in a login shell.
+    env_vars["CLUV_CLUSTER"] = cluster
+    return env_vars
 
-    sbatch_flags = sbatch_args_from_dict(sbatch_args)
-    if not any("--output" in flag for flag in sbatch_flags):
-        # Chunked (job array) jobs need `%A`/`%a` (array job id / task id) instead of `%j`.
-        if "array" in sbatch_args:
-            env_vars["SBATCH_OUTPUT"] = (
-                f"{cluster_config.results_path}/{cluster}_%A/slurm-%A_%a.out"
-            )
-        else:
-            env_vars["SBATCH_OUTPUT"] = f"{cluster_config.results_path}/{cluster}_%j/slurm-%j.out"
 
-        header_output = next(
+def add_cluv_sbatch_args(
+    sbatch_args: SbatchArgs,
+    job_script: Path,
+    cluster: str,
+    cluster_config: ClusterConfig,
+) -> SbatchArgs:
+    """
+    - Add the --output flag (So that outputs are created in the `results_path` for the run prescribed by Cluv)
+    - Add the --job-name flag (So that we can identify the cluv jobs later)
+    - Add the --export=ALL flag (since trillium and trillium-gpu apparently have `--export=None` as default).
+    - Add the --chdir flag to move to the project folder when running the command.
+
+    Returns a new dict; the one passed in is left alone.
+    """
+    sbatch_args = sbatch_args.copy()
+
+    base_name = sbatch_args.get("job-name") or Path(job_script).stem
+    sbatch_args["job-name"] = f"cluv-{base_name}"
+
+    if "output" not in sbatch_args and (
+        _header_output := next(
             (
                 line
-                for line in local_job_script.read_text().splitlines()
+                for line in job_script.read_text().splitlines()
                 if line.strip().startswith("#SBATCH") and "--output" in line
             ),
             None,
         )
-        if header_output is not None:
-            logger.warning(
-                f"[yellow]The job script {job_script} sets {header_output.strip()!r}, which "
-                f"will be overridden by cluv's SBATCH_OUTPUT so that results can be synced "
-                f"back. Consider using cluv in your Python script to decide where to store "
-                f"results instead.[/yellow]"
-            )
+    ):
+        logger.warning(
+            f"[yellow]The job script {job_script} sets {_header_output.strip()!r}, which "
+            f"will be overridden by cluv's --output so that results can be synced "
+            f"back. Consider using cluv in your Python script to decide where to store "
+            f"results instead.[/yellow]"
+        )
 
-    env_vars_prefix = " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env_vars.items())
-    sbatch_args_str = shlex.join(sbatch_flags)
-    program_args_str = shlex.join(program_args)
+    # Chunked (job array) jobs need `%A`/`%a` (array job id / task id) instead of `%j`.
+    if "array" in sbatch_args:
+        sbatch_args["output"] = str(cluster_config.results_path / f"{cluster}_%A/slurm-%A_%a.out")
+    else:
+        sbatch_args["output"] = str(cluster_config.results_path / f"{cluster}_%j/slurm-%j.out")
 
-    return (
-        f"bash --login -c '{env_vars_prefix} sbatch --parsable --chdir={remote_project_dir} "
-        f"{sbatch_args_str} {remote_job_script} {program_args_str}'"
+    # NOTE: `cluster_config.project_dir` already falls back to the global `project_dir`, so the
+    # `$HOME/<project>` default below is only used when neither is set.
+    local_project_dir = find_pyproject().parent
+    remote_project_dir = cluster_config.project_dir or (
+        PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
     )
+    sbatch_args["chdir"] = str(remote_project_dir)
+    # Some clusters (trillium, trillium-gpu) have a wrapper around `sbatch` that sets `--export=NONE` by default,
+    # which would discard the environment variables.
+    sbatch_args["export"] = "ALL"
+    return sbatch_args
+
+
+def get_sbatch_command(
+    cluster: str,
+    job_script: PurePosixPath,
+    sbatch_args: SbatchArgs,
+    program_args: list[str],
+    env_vars: dict[str, str],
+) -> str:
+    """Generate the command to submit the job via `sbatch` on the cluster."""
+    if job_script.is_absolute():
+        raise RuntimeError(
+            f"The job script path {str(job_script)!r} is an absolute path on this machine, but it "
+            f"has to be the path of the script *on the cluster* (relative to the project there, or "
+            f"starting with a variable like $HOME that the cluster's shell expands). This is what "
+            f"`get_cluster_job_script_path` returns."
+        )
+
+    sbatch_flags = sbatch_args_from_dict(sbatch_args)
+    env_vars_prefix = " ".join(f"{k}={v}" for k, v in env_vars.items())
+
+    # These are interpolated unquoted, so the cluster's login shell expands any env vars in them
+    # (`$SCRATCH`, `$HOME`); they can't be `shlex`-escaped first, since quoting would both stop
+    # that expansion and close the surrounding single-quoted string.
+    check_path_is_safe_to_interpolate(job_script, "job_script")
+    if isinstance(chdir := sbatch_args.get("chdir"), str):
+        check_path_is_safe_to_interpolate(chdir, "chdir")
+    if isinstance(output := sbatch_args.get("output"), str):
+        check_path_is_safe_to_interpolate(output, "output")
+    for name, value in env_vars.items():
+        # Same deal: `UV_CACHE_DIR=$SCRATCH/.cache/uv` has to stay unquoted to be expanded on the
+        # cluster, so a value with a space in it would make the login shell read the second word
+        # as the command to run, and `sbatch` would never be reached.
+        check_path_is_safe_to_interpolate(value, f"{name} environment variable")
+
+    # `program_args` is the one part that is *not* meant to be expanded here: it is whatever the
+    # user wrote after `--`, so it gets escaped, and a `$SLURM_TMPDIR` in it survives for the job
+    # itself to expand. That only holds together because the whole inner command is quoted in one
+    # go below - `shlex.join`'s quotes would otherwise close a hand-written `'...'` around it, and
+    # an argument containing a space would break apart (POSIX single quotes don't nest).
+    inner_command = (
+        f"{env_vars_prefix} sbatch --parsable {' '.join(sbatch_flags)} {job_script} "
+        f"{shlex.join(program_args)}"
+    )
+    return f"bash --login -c {shlex.quote(inner_command)}"
 
 
 async def submit_job(submission: Submission) -> Job:

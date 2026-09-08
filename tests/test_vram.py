@@ -300,6 +300,7 @@ class TestExpandForVram:
             sbatch_args,
             job_script=job_script,
             vram="10GB",
+            env_vars={},
         )
         assert expanded == [
             {"account": "rrg-bengioy-ad", "gpus": f"{gpu_type}:1"}
@@ -319,6 +320,7 @@ class TestExpandForVram:
             sbatch_args,
             job_script=job_script,
             vram="40GB",
+            env_vars={},
         )
         assert expanded == [
             {"account": "rrg-bengioy-ad", "gpus": "nvidia_h100_80gb_hbm3_3g.40gb:1"},
@@ -333,6 +335,7 @@ class TestExpandForVram:
             sbatch_args,
             job_script=job_script,
             vram="10GB",
+            env_vars={},
         ) == [sbatch_args]
 
     async def test_left_alone_when_no_gpu_type_is_big_enough(self, job_script: Path):
@@ -343,6 +346,7 @@ class TestExpandForVram:
             sbatch_args,
             job_script=job_script,
             vram="200GB",
+            env_vars={},
         ) == [sbatch_args]
 
     async def test_left_alone_when_vram_not_set(self, job_script: Path):
@@ -353,4 +357,17 @@ class TestExpandForVram:
             sbatch_args,
             job_script=job_script,
             vram=None,
+            env_vars={},
+        ) == [sbatch_args]
+
+    async def test_left_alone_when_gpu_env_vars_are_used(self, job_script: Path):
+        sbatch_args: SbatchArgs = {"account": "rrg-bengioy-ad", "gpus": "1"}
+        env_vars = {"SBATCH_GPUS": "1"}
+        assert await expand_for_vram(
+            "rorqual",
+            mock.Mock(hostname="rorqual"),
+            sbatch_args,
+            job_script=job_script,
+            vram="10GB",
+            env_vars=env_vars,
         ) == [sbatch_args]

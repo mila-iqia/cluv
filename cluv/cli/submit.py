@@ -450,7 +450,7 @@ async def get_submissions(
         )
 
         for expanded_resources in await expand_for_vram(
-            cluster, remote, job_resources, job_script=job_script, vram=vram
+            cluster, remote, job_resources, job_script=job_script, vram=vram, env_vars=job_env_vars
         ):
             expanded_resources = add_cluv_sbatch_args(
                 expanded_resources,

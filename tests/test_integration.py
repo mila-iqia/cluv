@@ -277,7 +277,12 @@ async def test_vram_sbatch_args_are_valid(remote: Remote, dont_cache_gpu_types: 
     sbatch_args_from_config = get_cluv_config().get_cluster_config(cluster).sbatch_args[0]
     job_script = REPO_ROOT / "scripts" / "job.sh"
     expanded = await expand_for_vram(
-        cluster, remote, sbatch_args_from_config, job_script=job_script, vram=TEST_VRAM
+        cluster,
+        remote,
+        sbatch_args_from_config,
+        job_script=job_script,
+        vram=TEST_VRAM,
+        env_vars={},
     )
     gpu_types_asked_for = [
         gpu_request.model

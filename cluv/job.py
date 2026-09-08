@@ -147,7 +147,7 @@ def current_run_info() -> RunInfo | None:
     return RunInfo(
         run_id=run_id,
         cluster=cluster,
-        results_path=cluster_config.results_path / run_id,
+        results_path=Path(os.path.expandvars(cluster_config.results_path / run_id)),
         command=[],
     )
 

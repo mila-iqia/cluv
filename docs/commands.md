@@ -192,6 +192,10 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
     cluster's `datasets_path`. Enabled by default. Use `--no-sync-datasets` when the data is already
     on the cluster, or when a separate `cluv sync` is already replicating it.
 
+`--parsable`
+:   Print only the job ID (or `<cluster>:<job_id>` when `cluster` is `first`) instead of the usual
+    human-readable summary, for use in scripts.
+
 ---
 
 ## [`cluv clean`](#cluv-clean)

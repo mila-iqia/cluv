@@ -54,6 +54,13 @@ VRAM_GB_BY_MODEL: dict[str, float] = {
 _GPU_COUNT_FLAGS = ("gpus", "gpus-per-node", "gpus-per-task", "gpus-per-socket", "G")
 # The "gres" key, whose value is "gpu[:<type>]:<count>" (possibly among other resources).
 _GRES_FLAG = "gres"
+# The environment variables that can be used to request GPUs (value is "<count>").
+_GPU_COUNT_ENV_VARS = (
+    "SBATCH_GPUS",
+    "SBATCH_GPUS_PER_NODE",
+    "SBATCH_GPUS_PER_TASK",
+    "SBATCH_GRES",
+)
 
 # A MIG profile, like "3g.40gb" in "nvidia_h100_80gb_hbm3_3g.40gb": the VRAM is the second number.
 _MIG_PROFILE_RE = re.compile(r"(\d+)g\.(\d+)gb", re.IGNORECASE)
@@ -72,6 +79,7 @@ async def expand_for_vram(
     *,
     job_script: Path,
     vram: str | None,
+    env_vars: dict[str, str],
 ) -> list[SbatchArgs]:
     """Turn one set of sbatch args into one per GPU type of `cluster` that has enough VRAM.
 
@@ -79,10 +87,19 @@ async def expand_for_vram(
     clusters, which are under-used) makes the job start sooner. When a GPU model is already
     requested (e.g. `--gpus=h100:1`), only that model and its MIG slices are considered.
 
-    Returns `[sbatch_args]` unchanged when `vram` isn't set, when the job asks for more than one
+    Returns `[sbatch_args]` unchanged when `vram` isn t set, when the job asks for more than one
     GPU (MIG slices can't be used for multi-GPU jobs), or when no GPU type on `cluster` has
     enough VRAM.
     """
+    if any(var in env_vars for var in _GPU_COUNT_ENV_VARS):
+        console.print(
+            f"Ignoring --vram on {cluster}: the job uses a GPU-related environment variable "
+            "(SBATCH_GPUS, SBATCH_GPUS_PER_NODE, SBATCH_GPUS_PER_TASK or SBATCH_GRES), which is not "
+            "supported by cluv.",
+            style="yellow",
+        )
+        return [sbatch_args]
+
     if not vram:
         return [sbatch_args]
 

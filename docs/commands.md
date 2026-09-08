@@ -166,6 +166,9 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 `cluster`
 :   The cluster to submit the job on. Can be set to `first` to submit the job to every cluster and
     wait until one of them starts; once one starts, the others are automatically cancelled.
+    The same happens when the target cluster has
+    [more than one job configuration](guides/submit/config.md#multiple-job-configurations-on-the-same-cluster)
+    configured: one job is submitted per configuration, and only the first one to start is kept.
 
 `job.sh`
 :   Path to the sbatch job script, relative to the project root. Defaults to the job script
@@ -183,6 +186,11 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 :   Split the submitted job into an array of smaller consecutive jobs ("chunks"), based on the requested time.
     Before using this option, make sure that checkpointing is implemented in your code so it can be restarted at any step.
     Default size of a chunk is 3 hours. For example, a job of 12h will be split into 4 jobs of 3h.
+
+`--sync-datasets`, `--no-sync-datasets`
+:   Whether the sync that precedes the submission should also replicate `data_source` to the
+    cluster's `datasets_path`. Enabled by default. Use `--no-sync-datasets` when the data is already
+    on the cluster, or when a separate `cluv sync` is already replicating it.
 
 ---
 

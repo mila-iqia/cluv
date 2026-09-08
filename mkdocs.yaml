@@ -71,6 +71,8 @@ markdown_extensions:
   - attr_list
   - def_list
   - md_in_html
+  - toc:
+      permalink: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid

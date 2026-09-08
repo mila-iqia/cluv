@@ -57,4 +57,4 @@ what's currently synced in the project root:
 
 This variant also copies any existing results for `$SLURM_JOB_ID` into `$SLURM_TMPDIR` before
 running (in case of requeue) and rsyncs them back to `results_path` afterwards, matching the
-`{results_path}/{cluster}_%j/` layout that `SBATCH_OUTPUT` uses.
+`{results_path}/{cluster}_%j/` layout that cluv's `--output` uses.

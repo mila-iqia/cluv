@@ -11,9 +11,17 @@ This guide explains which config fields are used, how global and per-cluster val
 | `project_dir` | global / per-cluster | Where the project is replicated on clusters. |
 | `results_path` | global / per-cluster | Results directory to sync back to the current cluster. |
 | `env` | global / per-cluster | Extra environment variables exported before `sbatch` |
-| `sbatch_args` | global / per-cluster | Extra `sbatch` flags (e.g. `--time`, `--gpus`) |
+| `sbatch_args` | global / per-cluster | Extra `sbatch` flags (e.g. `--time`, `--gpus`). Per-cluster, this can be a list, [one entry per configuration](#multiple-job-configurations-on-the-same-cluster) |
 
 Per-cluster values are set under `[tool.cluv.clusters.<name>]`.
+
+!!! note "`project_dir` and `results_path` may use env vars, but not whitespace"
+    Both may contain environment variables (`$SCRATCH/logs/x`), which are expanded by the
+    cluster's *login* shell - on some clusters (Killarney, Vulcan) that's the only shell where
+    `$SCRATCH` is set. To make that work, `cluv submit` interpolates them into its `sbatch` command
+    without shell-quoting them, so they must not contain whitespace or shell metacharacters
+    (`'`, `"`, `` ` ``, `;`, `&`, `|`, `<`, `>`, `(`, `)`, `\`). `cluv submit` fails with an
+    explanatory error rather than building a command that would break on the cluster.
 
 ## How global and per-cluster settings merge
 
@@ -48,6 +56,82 @@ When submitting to `narval`, the effective settings are:
 
 When submitting to any other cluster, the global values apply.
 
+## Multiple job configurations on the same cluster
+
+The list form of `sbatch_args` isn't limited to switching between `--account` values. Any sbatch
+flags can differ between entries, so use it whenever you have several valid configurations for a
+cluster and want `cluv` to try them all and keep whichever starts first. Typical cases:
+
+- more than one allocation (through two supervisors, or a `def-` and an `rrg-` account of the same group)
+- different GPU types, when one model tends to be less contended than another
+- different partitions or walltime limits, when a shorter/smaller request tends to schedule sooner
+
+```toml title="pyproject.toml"
+[tool.cluv.clusters.narval]
+sbatch_args = [
+    { account = "rrg-bengioy-ad" },
+    { account = "def-bengioy" },
+]
+```
+
+The equivalent array-of-tables syntax also works, and is nicer when each entry sets several flags:
+
+```toml title="pyproject.toml"
+[[tool.cluv.clusters.narval.sbatch_args]]
+account = "rrg-bengioy-ad"
+
+[[tool.cluv.clusters.narval.sbatch_args]]
+account = "def-bengioy"
+time = "24:00:00"       # this allocation allows longer jobs
+```
+
+Or without touching `account` at all - here trying an A100 first, and falling back to whichever
+other GPU type frees up first:
+
+```toml title="pyproject.toml"
+[tool.cluv.clusters.mila]
+sbatch_args = [
+    { gpus = "a100:1" },
+    { gpus = "rtx8000:1" },
+]
+```
+
+Each entry is merged on top of the global `[tool.cluv.sbatch_args]` independently, so flags shared
+by every entry of a cluster are best kept in the global section (there is no per-cluster "shared"
+section: a `sbatch_args` list *replaces* the single-flag-set form).
+
+`cluv submit narval` then submits **one job per entry**, waits until one of them starts, and
+cancels the others - exactly what [`cluv submit first`](../../commands.md#cluv-submit) does across
+clusters. This is useful whenever you can't predict which configuration will be scheduled first: a
+`def-` allocation often starts sooner when the group has been using a lot of compute recently, and
+the same reasoning applies to a less-requested GPU type or a shorter walltime bucket.
+
+```console
+$ cluv submit narval job.sh
+                                 Jobs submitted on the clusters
+┏━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Cluster ┃ sbatch arguments                        ┃ Result                                       ┃
+┡━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ narval  │ --account=rrg-bengioy-ad --time=3:00:00 │ bash --login -c 'sbatch --parsable           │
+│         │                                         │ --chdir=$HOME/my_project                     │
+│         │                                         │ --account=rrg-bengioy-ad --time=3:00:00      │
+│         │                                         │ $HOME/my_project/job.sh'                     │
+│         │                                         │ Job ID: 1234                                 │
+├─────────┼─────────────────────────────────────────┼──────────────────────────────────────────────┤
+│ narval  │ --account=def-bengioy --time=3:00:00    │ bash --login -c 'sbatch --parsable           │
+│         │                                         │ --chdir=$HOME/my_project                     │
+│         │                                         │ --account=def-bengioy --time=3:00:00         │
+│         │                                         │ $HOME/my_project/job.sh'                     │
+│         │                                         │ Job ID: 1235                                 │
+└─────────┴─────────────────────────────────────────┴──────────────────────────────────────────────┘
+Job 1235 on cluster narval is RUNNING. Cancelling the other jobs...
+```
+
+The "sbatch arguments" column only appears when a cluster has more than one configuration - it
+shows the full flag set of that entry (config + CLI), so you can tell which one a given job used.
+
+`cluv submit first` also takes every configuration of every cluster into account.
+
 ## What cluv injects automatically
 
 Regardless of your config, `cluv submit` always sets these variables before calling `sbatch`:
@@ -56,16 +140,21 @@ Regardless of your config, `cluv submit` always sets these variables before call
 |---|---|
 | `GIT_COMMIT` | SHA of the current local `HEAD` commit |
 | `SBATCH_JOB_NAME` | Your configured name (or the job script stem) prefixed with `cluv-` |
-| `SBATCH_OUTPUT` | `{results_path}/{cluster}_%j/slurm-%j.out` |
+
+It also always passes an explicit `--output={results_path}/{cluster}_%j/slurm-%j.out` sbatch flag
+(`%A`/`%a` instead of `%j` for chunked/array submissions).
 
 `GIT_COMMIT` is available inside your job script, so you can use it to tag results or check out
 the exact commit that was running.
 
-!!! note "`SBATCH_OUTPUT` overrides `#SBATCH --output` in your script"
+!!! note "cluv's `--output` overrides `#SBATCH --output` in your script"
     If your job script contains an `#SBATCH --output` directive, it will be silently overridden by
     the value cluv computes from `results_path`. This is intentional - it lets `cluv` change the
     output dir based on the cluster the job runs on. The cluster name would otherwise have to
     be hard-coded in the job script file. You will see a warning in the console if this happens.
+
+    If you pass your own `--output` (via `sbatch_args` or the CLI), it is placed *after* cluv's on
+    the command line, so it wins instead - `sbatch` uses the last `--output` it's given.
 
 
 ## CLI flags and program args
@@ -106,3 +195,12 @@ cluv submit narval new_job.sh   # uses new_job.sh, ignoring config
 If neither a CLI script nor a configured `job_script_path` exists for the target cluster, [`cluv
 submit`](../../commands.md) exits with an error. See the page ["Writing a job script"](job-scripts.md) for what the
 script should contain.
+
+Note that a per-cluster job script still has to exist **on your local machine**: [`cluv
+submit`](../../commands.md#cluv-submit) reads its header to detect an `#SBATCH --output` directive
+before submitting.
+
+!!! tip "Worked example"
+    [`examples/imagenet`](https://github.com/mila-iqia/cluv/tree/master/examples/imagenet) uses one
+    job script per cluster: each `scripts/job_<cluster>.sh` holds only the `#SBATCH` directives for
+    that cluster's node layout, then `exec`s a shared `scripts/train.sh`.

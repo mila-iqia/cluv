@@ -9,27 +9,44 @@ import platformdirs
 import pydantic
 import yaml
 
+from cluv.config import SbatchArgs
+from cluv.remote import Remote
 from cluv.utils import find_pyproject
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
-class Job:
-    """A Job on a Slurm cluster. This object is returned by `cluv submit`."""
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class Submission:
+    """One job to submit: on which cluster, over which connection, and with which sbatch flags."""
 
-    job_id: int
     cluster: str
-    job_script: str
-    git_commit: str
-    submitted_at: str  # ISO 8601 UTC
-    sbatch_args: list[str]
+
+    remote: Remote | None
+    """Remote used to run `sbatch`, or `None` to run it on the current cluster."""
+
+    job_script: Path
+
+    sbatch_args: SbatchArgs
+    """The sbatch flags actually used, after merging the config and the CLI."""
+
     program_args: list[str]
 
-    n_chunks: int | None = None
+    sbatch_command: str
 
-    def __hash__(self) -> int:
-        return hash((self.cluster, self.job_id))
+    n_chunks: int | None
+
+    git_commit: str
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class Job(Submission):
+    """A Job on a Slurm cluster. Returned by `cluv submit`, and persisted to the on-disk
+    job-history cache (see `save_job`/`load_jobs`, used e.g. by `cluv status`).
+    """
+
+    job_id: int
+    submitted_at: datetime
 
 
 @dataclass()
@@ -66,23 +83,108 @@ class CacheContent:
     disabled_clusters: dict[str, DisabledCluster] = dataclasses.field(default_factory=dict)
 
 
+def _job_record(job: Job) -> dict:
+    """The on-disk (JSON-safe) shape of a `Job`, as written by `save_job` and read by
+    `load_jobs` -- factored out so a migrated record (see `_migrate_legacy_job_record`) can be
+    rewritten in the exact same shape.
+    """
+    record = asdict(job)
+    record["job_script"] = str(job.job_script)
+    record["submitted_at"] = job.submitted_at.isoformat()
+    # `remote` isn't meaningful once persisted (a stale SSH-multiplexing handle); `cluster`
+    # already identifies where the job ran, and callers reconnect by hostname when needed.
+    record.pop("remote", None)
+    return record
+
+
 def save_job(job: Job) -> None:
     path = _get_cached_jobs_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
-        f.write(json.dumps(asdict(job)) + "\n")
+        f.write(json.dumps(_job_record(job)) + "\n")
+
+
+def _parse_legacy_sbatch_args(flags: list[str]) -> SbatchArgs:
+    """Parse a pre-refactor cache record's flat `sbatch_args` flag list (e.g.
+    `["--time=1:00:00", "-N", "2"]`) into the current dict shape.
+
+    Mirrors the CLI-flag-parsing half of `merge_sbatch_args` in `cli/submit.py` -- duplicated
+    rather than imported, since `cli.submit` already imports from this module and importing
+    back would be circular.
+    """
+    parsed: SbatchArgs = {}
+    index = 0
+    while index < len(flags):
+        flag = flags[index]
+        if flag.startswith("--"):
+            key, _, value = flag[2:].partition("=")
+            parsed[key] = value if value else True
+            index += 1
+        elif flag.startswith("-"):
+            key = flag[1:]
+            has_separate_value = index + 1 < len(flags) and not flags[index + 1].startswith("-")
+            if has_separate_value:
+                parsed[key] = flags[index + 1]
+                index += 2
+            else:
+                parsed[key] = True
+                index += 1
+        else:
+            index += 1  # Not a flag shape we recognize; skip it rather than fail the record.
+    return parsed
+
+
+def _migrate_legacy_job_record(data: dict) -> dict:
+    """Convert a pre-refactor cache record into the current `Job` schema: `sbatch_args` was a
+    flat flag list rather than a dict, and there was no `sbatch_command` field at all.
+
+    `sbatch_command` has no old-schema equivalent -- older cluv versions never recorded the
+    exact command that ran -- so it's left as an empty string. That's safe: nothing currently
+    reads `sbatch_command`/`sbatch_args` back from job history (`cluv status jobs` only shows
+    `cluster`, `job_id`, `submitted_at`, `git_commit`).
+    """
+    data = dict(data)
+    data["sbatch_args"] = _parse_legacy_sbatch_args(data["sbatch_args"])
+    data.setdefault("sbatch_command", "")
+    return data
 
 
 def load_jobs() -> list[Job]:
+    """Load every cached job record, migrating any pre-refactor ones (see
+    `_migrate_legacy_job_record`) and dropping any that are unreadable even after that.
+
+    If migrating or dropping anything, rewrites the cache file with just the surviving
+    records in the current schema, so this only has to happen once.
+    """
     path = _get_cached_jobs_path()
     if not path.exists():
         return []
     jobs = []
+    migrated = 0
+    skipped = 0
     for line in path.read_text().splitlines():
         try:
-            jobs.append(Job(**json.loads(line)))
+            data = json.loads(line)
+            if isinstance(data.get("sbatch_args"), list):
+                data = _migrate_legacy_job_record(data)
+                migrated += 1
+            data["job_script"] = Path(data["job_script"])
+            data["submitted_at"] = datetime.fromisoformat(data["submitted_at"])
+            data.setdefault("remote", None)
+            jobs.append(Job(**data))
         except Exception:
-            pass
+            skipped += 1
+    if migrated:
+        logger.info(f"Migrated {migrated} job record(s) from an older cluv cache format.")
+    if skipped:
+        # Most likely records written by a version of cluv with a different Job schema
+        # (e.g. before a field was added/renamed) -- surfaced so "no jobs shown" is
+        # diagnosable instead of silently empty.
+        logger.warning(f"Dropped {skipped} unreadable job record(s) from {path}.")
+    if migrated or skipped:
+        with path.open("w") as f:
+            for job in jobs:
+                f.write(json.dumps(_job_record(job)) + "\n")
     return jobs
 
 

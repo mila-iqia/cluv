@@ -1,3 +1,12 @@
+"""Runtime information about the current job, such as its unique run id and results path.
+
+Allows user code to determine where to save checkpoints or results for this job, and to have a unique
+identifier for this job that can be used in Weights & Biases or elsewhere.
+
+This for example prevents having to use some if statements to fetch things in different places based on which cluster
+the job is running on.
+"""
+
 from __future__ import annotations
 
 import dataclasses
@@ -115,7 +124,7 @@ def current_run_info() -> RunInfo | None:
     """
     if not SLURM_JOB_ID:
         return None  # not in a Slurm job.
-    if SLURM_JOB_ID and not SLURM_PROCID:
+    if SLURM_PROCID is None:
         # Inside a job, but we don't have all the Slurm environment variables set.
         # This happens when using `python main.py -m launcher=cluv` in the Hydra example.
         warnings.warn(
@@ -138,7 +147,7 @@ def current_run_info() -> RunInfo | None:
     return RunInfo(
         run_id=run_id,
         cluster=cluster,
-        results_path=cluster_config.results_path / run_id,
+        results_path=Path(os.path.expandvars(cluster_config.results_path / run_id)),
         command=[],
     )
 

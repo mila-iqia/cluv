@@ -19,6 +19,9 @@ from cluv.utils import current_cluster, find_pyproject
 
 logger = logging.getLogger(__name__)
 
+SbatchArgs = dict[str, str | int | float | bool]
+"""A set of sbatch flags, as a mapping from flag name to value."""
+
 
 @dataclass(frozen=True)
 class PartialClusterConfig:
@@ -27,8 +30,13 @@ class PartialClusterConfig:
     env: dict[str, str] = field(default_factory=dict)
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    sbatch_args: dict[str, str | int | float | bool] = field(default_factory=dict)
-    """Per-cluster sbatch flags, overriding the global `sbatch_args`."""
+    sbatch_args: SbatchArgs | list[SbatchArgs] = field(default_factory=dict)
+    """Per-cluster sbatch flags, overriding the global `sbatch_args`.
+
+    A list of flag sets can be used when you have access to more than one allocation on this
+    cluster (for example a `def-` and an `rrg-` account). `cluv submit <cluster>` then submits one
+    job per allocation and keeps the first one that starts, cancelling the others.
+    """
 
     results_path: str | None = None
     """Path to the results directory for a specific cluster."""
@@ -63,8 +71,11 @@ class ClusterConfig(Generic[PathType]):
     env: dict[str, str]
     """Environment variables to set when running Slurm commands on this cluster."""
 
-    sbatch_args: dict[str, str | int | float | bool]
-    """Merged sbatch flags (global defaults overridden by per-cluster values)."""
+    sbatch_args: list[SbatchArgs]
+    """Merged sbatch flags (global defaults overridden by per-cluster values).
+
+    There is one entry per allocation configured for this cluster, and always at least one.
+    """
 
     results_path: PathType
     """Path to the results directory for a specific cluster."""
@@ -108,7 +119,7 @@ class CluvConfig(BaseModel):
     env: dict[str, str] = {}
     """Global environment variables set on all clusters when running Slurm commands."""
 
-    sbatch_args: dict[str, str | int | float | bool] = {}
+    sbatch_args: SbatchArgs = {}
     """Global sbatch flags applied on all clusters.
 
     These are passed directly to `sbatch` and complement `env` (which sets `SBATCH_*` env vars).
@@ -172,9 +183,15 @@ class CluvConfig(BaseModel):
         datasets_path = cluster_config.datasets_path or self.datasets_path
         job_script_path = cluster_config.job_script_path or self.job_script_path
         project_dir = cluster_config.project_dir or self.project_dir
+        # One set of sbatch args per allocation on this cluster (a single one in most cases).
+        sbatch_args_list = cluster_config.sbatch_args
+        if isinstance(sbatch_args_list, dict):
+            sbatch_args_list = [sbatch_args_list]
+
         return ClusterConfig(
             env=self.env | cluster_config.env,
-            sbatch_args=self.sbatch_args | cluster_config.sbatch_args,
+            sbatch_args=[self.sbatch_args | sbatch_args for sbatch_args in sbatch_args_list]
+            or [dict(self.sbatch_args)],
             results_path=PurePosixPath(results_path),
             datasets_path=PurePosixPath(datasets_path) if datasets_path else None,
             job_script_path=PurePosixPath(job_script_path) if job_script_path else None,

@@ -62,7 +62,6 @@ def build_sbatch_command(
     """
     cluster_config = get_cluv_config().get_cluster_config(cluster)
     return get_sbatch_command(
-        cluster,
         job_script=get_cluster_job_script_path(job_script, cluster, cluster_config),
         sbatch_args=add_cluv_sbatch_args(
             sbatch_args, job_script=job_script, cluster=cluster, cluster_config=cluster_config

@@ -435,7 +435,6 @@ def get_submissions(
             job_resources, job_script=job_script, cluster=cluster, cluster_config=cluster_config
         )
         sbatch_command = get_sbatch_command(
-            cluster,
             env_vars=job_env_vars,
             job_script=cluster_job_script_path,
             sbatch_args=job_resources,
@@ -594,7 +593,6 @@ def add_cluv_sbatch_args(
 
 
 def get_sbatch_command(
-    cluster: str,
     job_script: PurePosixPath,
     sbatch_args: SbatchArgs,
     program_args: list[str],

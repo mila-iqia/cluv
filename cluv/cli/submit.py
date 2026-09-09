@@ -101,7 +101,7 @@ def _command_and_log_cell(row: SubmissionProgress) -> rich.text.Text:
     terminals that support it) on its own line below."""
     cell = rich.text.Text(_short_command(row.submission))
     cell.append("\nlog: ", style="dim")
-    cell.append(row.log_path.name, style=f"dim link file://{row.log_path}")
+    cell.append(str(row.log_path), style="dim")
     return cell
 
 

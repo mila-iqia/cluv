@@ -1,4 +1,3 @@
-import argparse
 import logging
 from pathlib import Path
 
@@ -14,7 +13,7 @@ def apply_chunking(
     sbatch_args: SbatchArgs,
     job_script: Path | None,
     chunking: int | None,
-    env_vars: dict[str, str] | None = None,
+    env_vars: dict[str, str],
 ) -> tuple[int | None, SbatchArgs]:
     """Split a job into consecutive chunks of `chunking` hours each, if requested.
 
@@ -49,7 +48,7 @@ def apply_chunking(
             time_limit = val
     # If still not found, use the env vars or the job script header.
     if time_limit is None:
-        time_limit = (env_vars or {}).get("SBATCH_TIMELIMIT") or (
+        time_limit = env_vars.get("SBATCH_TIMELIMIT") or (
             job_script and get_time_from_job_script_header(job_script)
         )
     if not time_limit:
@@ -67,23 +66,6 @@ def apply_chunking(
     sbatch_args_from_config["time"] = f"{chunking:02d}:00:00"
     sbatch_args_from_config["array"] = f"0-{n_chunks - 1}%1"
     return n_chunks, sbatch_args_from_config
-
-
-def get_time_from_sbatch_args(sbatch_args: list[str]) -> str | None:
-    """Return the SLURM time limit from the sbatch args if it exists."""
-    # Last occurrence of --time or -t takes precedence, so we iterate in reverse.
-    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
-    parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
-    args, _ = parser.parse_known_args(sbatch_args)
-    return getattr(args, "time", None)
-    # for i, arg in reversed(list(enumerate(sbatch_args))):
-    #     if arg.startswith(("--time=", "-t=")):
-    #         # Like "--time=00:10:00" or "-t=1-02:00:00"
-    #         return arg.split("=")[1]
-    #     if arg.strip() in ("--time", "-t"):
-    #         # Like ["--time", "00:10:00"] or ["-t", "1-02:00:00"]
-    #         return sbatch_args[i + 1] if i + 1 < len(sbatch_args) else None
-    return None
 
 
 def get_time_from_job_script_header(job_script: Path) -> str | None:

@@ -31,11 +31,11 @@ from cluv.cli.submit_utils.chunking import CHUNK_SIZE, apply_chunking
 from cluv.config import (
     CluvConfig,
     PartialClusterConfig,
-    SbatchArgs,
     get_cluv_config,
     load_cluv_config,
 )
 from cluv.remote import Remote
+from cluv.sbatch_args import SbatchArgs
 from cluv.utils import current_cluster
 from tests.test_integration import IN_GITHUB_CLOUD_CI
 
@@ -62,7 +62,6 @@ def build_sbatch_command(
     """
     cluster_config = get_cluv_config().get_cluster_config(cluster)
     return get_sbatch_command(
-        cluster,
         job_script=get_cluster_job_script_path(job_script, cluster, cluster_config),
         sbatch_args=add_cluv_sbatch_args(
             sbatch_args, job_script=job_script, cluster=cluster, cluster_config=cluster_config
@@ -440,7 +439,10 @@ class TestGetSbatchCommand:
         job_script.write_text("#SBATCH --time=20:00:00")
 
         n_chunks, chunked_args = apply_chunking(
-            {"time": "10:00:00"}, job_script=job_script, chunking=3
+            {"time": "10:00:00"},
+            job_script=job_script,
+            chunking=3,
+            env_vars={"SBATCH_TIMELIMIT": "50:00:00"},
         )
         assert n_chunks == 4
 

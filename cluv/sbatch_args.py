@@ -4,7 +4,7 @@ SbatchArgs = dict[str, str | int | float | bool]
 """A set of sbatch flags, as a mapping from flag name to value."""
 
 
-def sbatch_args_to_list(d: SbatchArgs) -> list[str]:
+def sbatch_args_to_list(sbatch_args: SbatchArgs) -> list[str]:
     """Convert a dict of sbatch options to a list of command-line flags.
 
     Key-to-flag conversion:
@@ -26,7 +26,7 @@ def sbatch_args_to_list(d: SbatchArgs) -> list[str]:
     ['-n']
     """
     flags: list[str] = []
-    for key, value in d.items():
+    for key, value in sbatch_args.items():
         if value == "" or value is False:
             continue
         is_short_flag = len(key) == 1
@@ -63,6 +63,7 @@ def sbatch_args_from_list(sbatch_args_list: list[str]) -> SbatchArgs:
     >>> sbatch_args_from_list(["--array=0-3%2", "-a=0-1%1"])
     {'array': '0-3%2', 'a': '0-1%1'}
     """
+    # Parse known args with argparse to handle common aliases and defaults, and leave the rest in `unknown`.
     parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
     parser.add_argument("-c", "--cpus-per-task", dest="cpus-per-task", default=argparse.SUPPRESS)
     parser.add_argument("-t", "--time", dest="time", default=argparse.SUPPRESS)
@@ -85,6 +86,7 @@ def sbatch_args_from_list(sbatch_args_list: list[str]) -> SbatchArgs:
         else:
             joined_unknown_args.append(arg)
 
+    # Then, parse the joined unknown args into the sbatch_args dict.
     for value in joined_unknown_args:
         if value.startswith("--"):
             key, _, val = value[2:].partition("=")

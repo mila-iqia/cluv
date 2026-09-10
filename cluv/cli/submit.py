@@ -446,7 +446,7 @@ async def get_submissions(
     for job_resources in job_resources_options:
         job_resources = merge_sbatch_args(from_config=job_resources, from_cli=sbatch_args)
         n_chunks, job_resources = apply_chunking(
-            job_resources, job_script=job_script, chunking=chunking
+            job_resources, job_script=job_script, chunking=chunking, env_vars=job_env_vars
         )
 
         for expanded_resources in await expand_for_vram(
@@ -459,7 +459,6 @@ async def get_submissions(
                 cluster_config=cluster_config,
             )
             sbatch_command = get_sbatch_command(
-                cluster,
                 env_vars=job_env_vars,
                 job_script=cluster_job_script_path,
                 sbatch_args=expanded_resources,
@@ -618,7 +617,6 @@ def add_cluv_sbatch_args(
 
 
 def get_sbatch_command(
-    cluster: str,
     job_script: PurePosixPath,
     sbatch_args: SbatchArgs,
     program_args: list[str],

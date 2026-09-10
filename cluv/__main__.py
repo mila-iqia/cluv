@@ -22,13 +22,15 @@ import simple_parsing
 
 from . import __version__
 from .cli.clean import clean
+from .cli.disable import disable, enable
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run
+from .cli.sh import sh
 from .cli.status import status
 from .cli.submit import submit
+from .cli.submit_utils.chunking import CHUNK_SIZE
 from .cli.sync import sync
-from .cli.disable import disable, enable
 from .utils import console
 
 logger = logging.getLogger("cluv")
@@ -72,6 +74,9 @@ def main(argv: list[str] | None = None) -> None:
     run_parser = add_run_args(subparsers)
     _add_v_arg(run_parser)
 
+    sh_parser = add_sh_args(subparsers)
+    _add_v_arg(sh_parser)
+
     login_parser = add_login_args(subparsers)
     _add_v_arg(login_parser)
 
@@ -111,10 +116,44 @@ def main(argv: list[str] | None = None) -> None:
             args_dict["sbatch_args"] = [str(job_script), *args_dict["sbatch_args"]]
             job_script = None
             args_dict["job_script"] = None
+
+        # `--autocommit` / `--chunking` / `--no-sync-datasets` can end up swallowed into the
+        # `sbatch_args` REMAINDER instead of being recognized as its own flag, since REMAINDER
+        # consumes all remaining tokens (including ones that look like other known options) once
+        # positional parsing starts.
+        #
+        # Boolean flags are rescued by literal token match, since a `BooleanOptionalAction`'s
+        # `--flag`/`--no-flag` spellings share one Action object with no `const`/`type` that could
+        # tell them apart - both spellings are checked. Value-taking flags (like `--chunking`) use
+        # the option's own `const`/`type` instead, so `--chunking=6` ends up with `6` (not left in
+        # `sbatch_args`) and a bare `--chunking` ends up with its `const` default (not `True`).
+        for flag, current_value in list(args_dict.items()):
+            dashed = flag.replace("_", "-")
+            if isinstance(current_value, bool):
+                for token, value in ((f"--{dashed}", True), (f"--no-{dashed}", False)):
+                    if token in args_dict["sbatch_args"]:
+                        args_dict["sbatch_args"] = [
+                            a for a in args_dict["sbatch_args"] if a != token
+                        ]
+                        args_dict[flag] = value
+                continue
+            action = submit_parser._option_string_actions.get(f"--{dashed}")
+            if action is None:
+                continue
+            remaining_sbatch_args = []
+            for arg in args_dict["sbatch_args"]:
+                name, _, value = arg.partition("=")
+                if name == f"--{dashed}":
+                    args_dict[flag] = (
+                        action.type(value) if value and action.type else value or action.const
+                    )
+                else:
+                    remaining_sbatch_args.append(arg)
+            args_dict["sbatch_args"] = remaining_sbatch_args
         args_dict["program_args"] = submit_program_args
 
     if subcommand == "status" and quiet:
-        console.print("[yellow]Warning: --quiet has no effect with the 'status' command.[/yellow]")
+        console.print("Warning: --quiet has no effect with the 'status' command.", style="yellow")
         quiet = False
     console.quiet = quiet
 
@@ -144,17 +183,14 @@ def add_submit_args(subparsers: Subparsers):
         usage="cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]",
     )
     submit_parser.add_argument(
-        "--autocommit",
-        action="store_true",
-        help="Create a local commit with tracked changes before submitting the job.",
-    )
-    submit_parser.add_argument(
         "cluster",
         metavar="<cluster>",
         help=(
             "The cluster to submit the job on. "
             "Set at 'first' to submit a job on all clusters, and wait until one of them starts. "
-            "Once one starts, cancel the others."
+            "Once one starts, cancel the others. "
+            "This also happens when more than one allocation is configured for the cluster: one "
+            "job is submitted per allocation, and only the first one to start is kept."
         ),
     )
     submit_parser.add_argument(
@@ -164,6 +200,41 @@ def add_submit_args(subparsers: Subparsers):
         default=None,
         type=Path,
         help="Path to the sbatch job script (relative to project root). Defaults to the job script specified in the config at 'job_script_path'.",
+    )
+    submit_parser.add_argument(
+        "--autocommit",
+        action="store_true",
+        help="Create a local commit with tracked changes before submitting the job.",
+    )
+    submit_parser.add_argument(
+        "--chunking",
+        nargs="?",
+        const=CHUNK_SIZE,
+        default=None,
+        type=int,
+        metavar="HOURS",
+        help=(
+            "Split the job into multiple consecutive short jobs of HOURS hours each. "
+            f"Defaults to {CHUNK_SIZE} hours when --chunking is used without a value."
+        ),
+    )
+    submit_parser.add_argument(
+        "--sync-datasets",
+        dest="sync_datasets",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Push datasets from data_source to the cluster during the sync that precedes the "
+            "submission. Use --no-sync-datasets when the data is already there."
+        ),
+    )
+    submit_parser.add_argument(
+        "--parsable",
+        action="store_true",
+        help=(
+            "Output only the job ID (or '<cluster>:<job_id>' when cluster is 'first'), "
+            "for programmatic use."
+        ),
     )
     submit_parser.add_argument(
         "sbatch_args",
@@ -188,6 +259,11 @@ def add_status_args(subparsers: Subparsers):
         default="all",
         metavar="<table>",
         help="Which table to display: cluster overview, jobs overview, or both (default: all).",
+    )
+    status_parser.add_argument(
+        "--all-jobs",
+        action="store_true",
+        help="Show all jobs instead of only the 10 most recent.",
     )
     status_parser.set_defaults(func=status)
     return status_parser
@@ -309,7 +385,6 @@ def add_run_args(subparsers: Subparsers):
     )
     run_parser.add_argument(
         "cluster",
-        # default=,
         metavar="<cluster>",
         help="The cluster to run the command on",
     )
@@ -322,6 +397,24 @@ def add_run_args(subparsers: Subparsers):
     )
     run_parser.set_defaults(func=run)
     return run_parser
+
+
+def add_sh_args(subparsers: Subparsers):
+    sh_parser = subparsers.add_parser(
+        "sh",
+        help="Run a raw command on every currently-connected cluster (and locally, if applicable) via clush.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+        usage="cluv sh <command...>",
+    )
+    sh_parser.add_argument(
+        "command",
+        type=str,
+        metavar="<command>",
+        help="The command to run on every currently-connected cluster.",
+        nargs=argparse.REMAINDER,
+    )
+    sh_parser.set_defaults(func=sh)
+    return sh_parser
 
 
 def add_disable_args(subparsers: Subparsers):

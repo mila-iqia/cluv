@@ -8,7 +8,6 @@ project_name="cluv"  # to be replaced with the user's project name.
 project_root="$HOME/repos/$project_name" # to be replaced with the path to the user's project in their $HOME.
 results_path="logs" # to be replaced with the path to the results path name. (--output flag above too)
 
-
 echo "GIT_COMMIT=${GIT_COMMIT:?GIT_COMMIT is not set. Use 'cluv submit' to submit this job script.}"
 # Setup the repo in $SLURM_TMPDIR, so the code can change in the project without affecting the job.
 project_root_in_tmpdir="$SLURM_TMPDIR/$project_name"

@@ -1,3 +1,14 @@
+"""Runtime information about the current job, such as its unique run id and results path.
+
+Allows user code to determine where to save checkpoints or results for this job, and to have a unique
+identifier for this job that can be used in Weights & Biases or elsewhere.
+
+This for example prevents having to use some if statements to fetch things in different places based on which cluster
+the job is running on.
+"""
+
+from __future__ import annotations
+
 import dataclasses
 import functools
 import os
@@ -76,41 +87,14 @@ class RunInfo:
         return cluv.config.get_cluv_config().get_cluster_config(self.cluster)
 
 
-@dataclass(frozen=True)
+@dataclass()
 class JobInfo:
     """Information about a job, which contains one or more tasks/"runs"."""
 
     cluster: str
-    job_id: int
-    array_job_id: int | None
+    job_id: str
     tasks: list[RunInfo]
-
-    @property
-    def state(self):
-        """Reuse the state polling logic from submitit to get the state of the job.
-
-        Note: This doesn't call sacct too often, there is a caching mechanism in submitit.
-        """
-
-        if self.cluster == current_cluster():
-            from submitit.slurm.slurm import SlurmJob
-
-            return SlurmJob(
-                # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
-                folder=self.tasks[0].results_path,
-                job_id=str(self.job_id),
-                tasks=list(range(len(self.tasks))),
-            ).state
-        from remote_slurm_executor.slurm_remote import RemoteSlurmJob
-
-        return RemoteSlurmJob(
-            self.cluster,
-            # TODO: Unclear if this makes sense when tasks>1 (for example when doing job packing).
-            folder=self.tasks[0].results_path,
-            job_id=str(self.job_id),
-            tasks=list(range(len(self.tasks))),
-            remote_dir_sync=None,  # type: ignore
-        ).state
+    n_chunks: int | None = None
 
 
 def get_results_path() -> Path:
@@ -140,7 +124,7 @@ def current_run_info() -> RunInfo | None:
     """
     if not SLURM_JOB_ID:
         return None  # not in a Slurm job.
-    if SLURM_JOB_ID and not SLURM_PROCID:
+    if SLURM_PROCID is None:
         # Inside a job, but we don't have all the Slurm environment variables set.
         # This happens when using `python main.py -m launcher=cluv` in the Hydra example.
         warnings.warn(
@@ -163,7 +147,7 @@ def current_run_info() -> RunInfo | None:
     return RunInfo(
         run_id=run_id,
         cluster=cluster,
-        results_path=cluster_config.results_path / run_id,
+        results_path=Path(os.path.expandvars(cluster_config.results_path / run_id)),
         command=[],
     )
 
@@ -228,7 +212,7 @@ def get_run_id(
     cluster: str,
     job_id: int | str,
     task_index: int | str = 0,
-    array_job_id: str | None = None,
+    array_job_id: int | str | None = None,
     doing_job_packing: bool = False,
     doing_job_chunking: bool = False,
 ) -> str:

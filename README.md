@@ -1,10 +1,6 @@
 # cluv
 
-cluv — sync UV-based Python projects across HPC clusters.
-
-## Status
-
-In early development. Commands are functional, but expect bugs or missing features.
+cluv — sync and submit UV-based Python projects across HPC clusters.
 
 ## Requirements
 
@@ -49,7 +45,7 @@ cluv submit mila job.sh
 
 ## Documentation
 
-* Cluv is documented at https://mila-iqia.github.io/cluv/.
+* **Full documentation** : See https://mila-iqia.github.io/cluv/.
 * **Command line help** : Use `cluv --help` or `cluv <command> --help`.
 * **Examples** : See the [examples](examples) folder for sample projects using cluv. Each example includes a README with instructions specific to that project.
 

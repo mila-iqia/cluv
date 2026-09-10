@@ -191,7 +191,7 @@ exclusive = true
             "exclusive": True,
         }
         assert cfg.sbatch_args == expected
-        assert cfg.get_cluster_config("mila").sbatch_args == expected
+        assert cfg.get_cluster_config("mila").sbatch_args == [expected]
 
     def test_per_cluster_sbatch_args_override_global(self, tmp_path: Path) -> None:
         p = write_pyproject(
@@ -215,8 +215,12 @@ gpus = ""
         )
         cfg = load_cluv_config(p)
         # Check that per-cluster sbatch_args are stored correctly
-        assert cfg.get_cluster_config("mila").sbatch_args == {"time": "2:00:00", "gpus": "a100:2"}
-        assert cfg.get_cluster_config("cpu_cluster").sbatch_args == {"time": "2:00:00", "gpus": ""}
+        assert cfg.get_cluster_config("mila").sbatch_args == [
+            {"time": "2:00:00", "gpus": "a100:2"}
+        ]
+        assert cfg.get_cluster_config("cpu_cluster").sbatch_args == [
+            {"time": "2:00:00", "gpus": ""}
+        ]
         # Global defaults are preserved in the global config
         assert cfg.sbatch_args == {"gpus": "1", "time": "2:00:00"}
 
@@ -231,7 +235,56 @@ results_path = "logs"
         )
         cfg = load_cluv_config(p)
         assert cfg.sbatch_args == {}
-        assert cfg.get_cluster_config("mila").sbatch_args == {}
+        assert cfg.get_cluster_config("mila").sbatch_args == [{}]
+
+    def test_multiple_allocations_per_cluster(self, tmp_path: Path) -> None:
+        """A list of flag sets gives one entry per allocation, each merged with the global args."""
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+
+[tool.cluv.sbatch_args]
+time = "2:00:00"
+
+[tool.cluv.clusters.narval]
+sbatch_args = [{ account = "rrg-bengioy-ad" }, { account = "def-bengioy", time = "1:00:00" }]
+
+[[tool.cluv.clusters.fir.sbatch_args]]
+account = "rrg-bengioy-ad"
+
+[[tool.cluv.clusters.fir.sbatch_args]]
+account = "def-bengioy"
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.get_cluster_config("narval").sbatch_args == [
+            {"time": "2:00:00", "account": "rrg-bengioy-ad"},
+            {"time": "1:00:00", "account": "def-bengioy"},
+        ]
+        # The array-of-tables syntax is equivalent to a list of inline tables.
+        assert cfg.get_cluster_config("fir").sbatch_args == [
+            {"time": "2:00:00", "account": "rrg-bengioy-ad"},
+            {"time": "2:00:00", "account": "def-bengioy"},
+        ]
+
+    def test_empty_allocations_list_falls_back_to_global(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+
+[tool.cluv.sbatch_args]
+time = "2:00:00"
+
+[tool.cluv.clusters.mila]
+sbatch_args = []
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.get_cluster_config("mila").sbatch_args == [{"time": "2:00:00"}]
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +371,31 @@ class TestRealProjectConfig:
         cfg = load_cluv_config(root_dir / "pyproject.toml")
         assert cfg is not None
         assert set(cfg.clusters_names) == set(DRAC_CLUSTERS + ["mila"])
+
+    @pytest.mark.parametrize("example", ["imagenet", "hydra_example"])
+    def test_example_job_scripts_exist(self, pytestconfig, example: str) -> None:
+        """Every configured `job_script_path` has to exist locally to be submittable.
+
+        `cluv submit` reads the job script header on the local machine to check for an `--output`
+        directive, so a typo in a per-cluster `job_script_path` would otherwise only show up at
+        submission time. See `cluv.cli.submit._check_job_script_exists_locally`.
+        """
+        project_dir = pytestconfig.rootpath / "examples" / example
+        cfg = load_cluv_config(project_dir / "pyproject.toml")
+        job_scripts = [cfg.job_script_path] + [
+            cluster.job_script_path for cluster in cfg.clusters.values()
+        ]
+        for job_script in filter(None, job_scripts):
+            assert (project_dir / job_script).exists()
+
+    def test_imagenet_sync_wandb_script_exists(self, pytestconfig) -> None:
+        """`scripts/sync_wandb.sh` uploads offline W&B runs pulled back by `cluv sync`.
+
+        It has to exist and be executable for the README instructions to work.
+        """
+        script = pytestconfig.rootpath / "examples" / "imagenet" / "scripts" / "sync_wandb.sh"
+        assert script.exists()
+        assert os.access(script, os.X_OK)
 
 
 def test_cluv_local_env_section(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

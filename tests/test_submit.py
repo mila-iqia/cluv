@@ -36,7 +36,7 @@ from cluv.config import (
 )
 from cluv.remote import Remote
 from cluv.sbatch_args import SbatchArgs
-from cluv.utils import current_cluster
+from cluv.utils import console, current_cluster
 from tests.test_integration import IN_GITHUB_CLOUD_CI
 
 # `cluv/cli/__init__.py` does `from .sync import sync`, which overwrites the `sync` attribute of
@@ -569,6 +569,7 @@ class TestSubmitCliParsing:
                 "autocommit": False,
                 "chunking": None,
                 "sync_datasets": True,
+                "parsable": False,
             }
         )
 
@@ -590,6 +591,7 @@ class TestSubmitCliParsing:
                 "autocommit": False,
                 "chunking": None,
                 "sync_datasets": True,
+                "parsable": False,
             }
         )
 
@@ -614,6 +616,27 @@ class TestSubmitCliParsing:
                 "autocommit": False,
                 "chunking": None,
                 "sync_datasets": True,
+                "parsable": False,
+            }
+        )
+
+    def test_parsable_flag_is_forwarded_to_submit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--parsable", "--", "python", "main.py"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": [],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "chunking": None,
+                "sync_datasets": True,
+                "parsable": True,
             }
         )
 
@@ -638,6 +661,7 @@ class TestSubmitCliParsing:
                 "autocommit": False,
                 "chunking": 6,
                 "sync_datasets": True,
+                "parsable": False,
             }
         )
 
@@ -661,6 +685,7 @@ class TestSubmitCliParsing:
                 "autocommit": False,
                 "chunking": CHUNK_SIZE,
                 "sync_datasets": True,
+                "parsable": False,
             }
         )
 
@@ -951,6 +976,66 @@ async def test_can_submit_on_current_cluster(
     assert returned_job.job_id == jobid
     mock_ensure_clean_git_state.assert_called_once()
     mock.assert_called()
+
+
+async def test_parsable_prints_only_the_job_id_on_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_current_cluster: str,
+    cluv_project_dir: Path,
+    no_active_remotes,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """With `--parsable`, stdout must carry nothing but the job id: logs, the live jobs table
+    and command outputs are all silenced (like `--quiet`)."""
+    monkeypatch.setattr(
+        cluv.cli.submit,
+        ensure_clean_git_state.__name__,
+        lambda *args, **kwargs: "dummy_git_commit",
+    )
+    here = mock_current_cluster
+    monkeypatch.setenv("CC_CLUSTER", here)
+
+    jobid = 123
+
+    async def fake_run(
+        program_and_args: tuple[str, ...], **kwargs
+    ) -> subprocess.CompletedProcess[str]:
+        full_command = shlex.join(program_and_args)
+        if "sbatch --parsable" in full_command:
+            return subprocess.CompletedProcess(
+                program_and_args, returncode=0, stdout=f"{jobid}", stderr=""
+            )
+        if full_command.startswith(f"sacct -j {jobid}"):
+            return subprocess.CompletedProcess(
+                program_and_args, returncode=0, stdout="RUNNING", stderr=""
+            )
+        raise AssertionError(f"Unexpected command: {full_command}")
+
+    run_name = cluv.remote.run.__name__
+    for module in (cluv.remote, cluv.slurm, cluv.cli.submit):
+        monkeypatch.setattr(module, run_name, unittest.mock.AsyncMock(wraps=fake_run))
+
+    job_script = cluv_project_dir / "my_script.sh"
+    job_script.parent.mkdir(exist_ok=True)
+    job_script.write_text("#!/bin/bash\necho Hello World\n")
+    job_script.touch(0o755)
+
+    try:
+        returned_job = await submit(
+            cluster=here,
+            job_script=job_script,
+            sbatch_args=[],
+            program_args=[],
+            _skip_sync=True,
+            parsable=True,
+        )
+    finally:
+        console.quiet = False  # `submit(parsable=True)` mutes the shared console as a side effect.
+
+    assert returned_job
+    assert returned_job.job_id == jobid
+    captured = capsys.readouterr()
+    assert captured.out == f"{jobid}\n"
 
 
 async def test_submit_cancels_in_flight_jobs_when_interrupted(

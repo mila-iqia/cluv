@@ -193,8 +193,8 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
     on the cluster, or when a separate `cluv sync` is already replicating it.
 
 `--parsable`
-:   Print only the job ID (or `<cluster>:<job_id>` when `cluster` is `first`) instead of the usual
-    human-readable summary, for use in scripts.
+:   Print only the job ID (or `<cluster>:<job_id>` when `cluster` is `first`) on stdout, for use in
+    scripts. Everything else (logs, the live jobs table) is silenced, as with `--quiet`.
 
 ---
 

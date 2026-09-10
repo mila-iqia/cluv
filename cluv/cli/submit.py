@@ -141,9 +141,15 @@ async def submit(
 
     If `parsable` is True, print only the job ID (or '<cluster>:<job_id>' when `cluster`
     is 'first') to stdout, for programmatic use, instead of the usual human-readable summary.
+    Everything else (logs, the live jobs table, command outputs) is silenced, as with `--quiet`.
 
     Returns None if the submission failed.
     """
+    # `--parsable` promises that stdout carries nothing but the job id. `--quiet` already suppresses
+    # everything the submission writes through the shared console (and the raw command outputs in
+    # `cluv.remote.run`, which check `console.quiet` too), so it is all this needs to do.
+    if parsable:
+        console.quiet = True
     submit_command = build_submit_command(
         cluster=cluster, job_script=job_script, sbatch_args=sbatch_args, program_args=program_args
     )
@@ -220,15 +226,12 @@ async def submit(
     assert job is not None
 
     if parsable:
-        if cluster == "first":
-            print(f"{first_running_row.cluster}:{first_running_row.job_id}")
-        else:
-            print(first_running_row.job_id)
+        print(f"{job.cluster}:{job.job_id}" if cluster == "first" else job.job_id)
     else:
         console.print(
-            f"Successfully submitted job {first_running_row.job_id} on cluster {first_running_row.cluster}.\n"
-            f"Use `ssh {first_running_row.cluster} sacct -j {first_running_row.job_id}` to view its "
-            f"status, and `cluv sync {first_running_row.cluster}` to fetch results once it is complete.",
+            f"Successfully submitted job {job.job_id} on cluster {job.cluster}.\n"
+            f"Use `ssh {job.cluster} sacct -j {job.job_id}` to view its status, and `cluv sync"
+            f" {job.cluster}` to fetch results once it is complete.",
             style="green",
         )
 

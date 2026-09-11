@@ -216,7 +216,15 @@ def check_ssh_hostnames(clusters: list[str]) -> None:
     Check if the names of the clusters in the cluv config are present in the SSH config file.
     If not, print a warning.
     """
-    ssh_hostnames = get_ssh_hostnames()
+    try:
+        ssh_hostnames = get_ssh_hostnames()
+    except Exception as e:
+        console.print(
+            f"⚠️  Warning: Could not read SSH config file. Error: {e}. Skipping SSH hostnames check.",
+            style="yellow",
+        )
+        return
+
     missing_clusters = set(clusters).difference(ssh_hostnames)
 
     if len(missing_clusters) > 0:

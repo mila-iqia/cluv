@@ -215,6 +215,10 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
     This option is ignored for jobs that ask for more than one GPU, since MIG slices can only be
     used one at a time.
 
+`--parsable`
+:   Print only the job ID (or `<cluster>:<job_id>` when `cluster` is `first`) on stdout, for use in
+    scripts. Everything else (logs, the live jobs table) is silenced, as with `--quiet`.
+
 ---
 
 ## [`cluv clean`](#cluv-clean)

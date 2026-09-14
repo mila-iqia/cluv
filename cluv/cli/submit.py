@@ -136,6 +136,7 @@ async def submit(
     vram: str | None = None,
     _skip_sync: bool = False,
     sync_datasets: bool = True,
+    parsable: bool = False,
 ) -> Job | None:
     """Submit a job to the given cluster (or all clusters if `cluster=="first"`),
     and return the Job object if successful.
@@ -143,8 +144,17 @@ async def submit(
     When `vram` is set, one job is submitted per GPU type of each cluster that has at least
     that much VRAM (including MIG slices), racing them the same way as multiple allocations.
 
+    If `parsable` is True, print only the job ID (or '<cluster>:<job_id>' when `cluster`
+    is 'first') to stdout, for programmatic use, instead of the usual human-readable summary.
+    Everything else (logs, the live jobs table, command outputs) is silenced, as with `--quiet`.
+
     Returns None if the submission failed.
     """
+    # `--parsable` promises that stdout carries nothing but the job id. `--quiet` already suppresses
+    # everything the submission writes through the shared console (and the raw command outputs in
+    # `cluv.remote.run`, which check `console.quiet` too), so it is all this needs to do.
+    if parsable:
+        console.quiet = True
     submit_command = build_submit_command(
         cluster=cluster, job_script=job_script, sbatch_args=sbatch_args, program_args=program_args
     )
@@ -227,12 +237,15 @@ async def submit(
     job = first_running_row.job
     assert job is not None
 
-    console.print(
-        f"Successfully submitted job {first_running_row.job_id} on cluster {first_running_row.cluster}.\n"
-        f"Use `ssh {first_running_row.cluster} sacct -j {first_running_row.job_id}` to view its "
-        f"status, and `cluv sync {first_running_row.cluster}` to fetch results once it is complete.",
-        style="green",
-    )
+    if parsable:
+        print(f"{job.cluster}:{job.job_id}" if cluster == "first" else job.job_id)
+    else:
+        console.print(
+            f"Successfully submitted job {job.job_id} on cluster {job.cluster}.\n"
+            f"Use `ssh {job.cluster} sacct -j {job.job_id}` to view its status, and `cluv sync"
+            f" {job.cluster}` to fetch results once it is complete.",
+            style="green",
+        )
 
     save_job(job)
     return job

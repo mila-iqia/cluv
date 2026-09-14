@@ -196,12 +196,14 @@ async def run(
                 _stack_offset=_stacklevel
                 - 1,  # to show a link to the code calling this, instead of here.
             )
+        # `console.quiet` (set by `--quiet`, and by `--parsable` for `cluv submit`) suppresses
+        # these raw command outputs too, not just what is written through the console itself.
         if result.stdout:
-            if hide not in [True, "out", "stdout"]:
+            if hide not in [True, "out", "stdout"] and not console.quiet:
                 print(result.stdout)
             logger.debug(result.stdout)
         if result.stderr:
-            if hide not in [True, "err", "stderr"]:
+            if hide not in [True, "err", "stderr"] and not console.quiet:
                 print(result.stderr, file=sys.stderr)
             logger.debug(result.stderr)
     if proc.returncode != 0:

@@ -1,0 +1,22 @@
+Animation explaining the "cluv submit first" command
+
+Step 1 : syncing the project from the local machine on all the clusters
+Local machine --> Mila cluster
+Local machine --> Rorqual cluster
+Local machine --> Tamia cluster
+
+Step 2 : creating the concurrent jobs on each clusters
+Mila cluster --> Mila Job 1 (Waiting)
+Mila cluster --> Mila Job 2 (Failing)
+Mila cluster --> Mila Job 3 (Waiting)
+
+Rorqual cluster --> Rorqual Job 1 (Waiting)
+Rorqual cluster --> Rorqual Job 2 (Running)
+
+Tamia cluster --> Tamia Job 1 (Waiting)
+
+Step 3 : waiting for a job to start
+
+Step 4 : cancelling other jobs once one job starts
+
+Step 5 : syncing results back from the cluster to the local machine

@@ -1,0 +1,68 @@
+# The expensive tier: actually submit the ImageNet example on one cluster and wait for the job to
+# finish. A run costs a real GPU job, so it is never on the PR path - the per-cluster
+# `e2e-<cluster>.yaml` workflows call this one weekly and on demand.
+#
+# Why one workflow per cluster instead of one run covering all of them: GitHub's status badges are
+# per *workflow*, not per job, so a badge per cluster needs a workflow per cluster. The payoff is
+# that `docs/examples/imagenet-verified.md` needs no generated state - each badge reads its own
+# workflow's run history - so nothing has to be committed back to master to keep the page current.
+#
+# The cheap counterpart (`sbatch --test-only`, every configured cluster, nothing queued) runs on
+# every PR, in cluster-checks.yaml.
+name: ImageNet example, end to end
+
+on:
+  workflow_call:
+    inputs:
+      cluster:
+        description: "The cluster to submit the example to."
+        type: string
+        required: true
+      real_data:
+        description: "Train on the real ImageNet archives instead of fake data."
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  end_to_end:
+    runs-on: self-hosted
+    # Lives here rather than on the caller's job: a job that uses a reusable workflow can't set
+    # its own `timeout-minutes`.
+    timeout-minutes: 180
+    env:
+      # Makes this the one required cluster for this run: a missing SSH connection fails instead
+      # of skipping, and `skip_means_failure` in tests/conftest.py turns every other skip into a
+      # failure too. The run's only output is a pass/fail badge, so a skip must never be able to
+      # report as a pass.
+      CLUV_CI_CLUSTER: ${{ inputs.cluster }}
+      CLUV_CI_REAL_DATA: ${{ inputs.real_data && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Check out the branch (not just a commit) so the `git push` that `cluv sync` does can
+          # work on the self-hosted runner.
+          fetch-tags: true
+          fetch-depth: 0
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install dependencies
+        run: uv sync --frozen
+      - name: Run the ImageNet example on ${{ inputs.cluster }}
+        # -ra so the reason for a non-pass is readable without scrolling the whole log, which is
+        # the only place the detail lives now that the results page is just badges.
+        run: >
+          uv run pytest -v -ra --slow
+          "tests/test_examples.py::test_imagenet_example[${{ inputs.cluster }}]"
+      - name: Cancel any job left behind on ${{ inputs.cluster }}
+        # Scoped to this cluster: the other clusters' runs are concurrent and their jobs share
+        # this account and the same `cluv-ci*` name prefix, so an unscoped sweep would cancel a
+        # sibling run's job mid-training.
+        if: always()
+        run: uv run python .github/scripts/cancel_ci_jobs.py --cluster ${{ inputs.cluster }}

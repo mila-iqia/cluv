@@ -24,7 +24,7 @@ from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
 from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
-from cluv.remote import Remote
+from cluv.remote import Remote, control_socket_is_running
 from cluv.slurm import run_sacct
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -50,13 +50,54 @@ pytestmark = [
     pytest.mark.timeout(20),
 ]
 
-REQUIRED_CLUSTERS = ("mila", "tamia")
+# A per-cluster end-to-end workflow sets this to the one cluster its run exists to test (see
+# `.github/workflows/e2e-<cluster>.yaml`). That run publishes its result as a pass/fail badge and
+# nothing else, so the cluster becomes required - a missing connection has to fail rather than
+# skip - and `pytest_runtest_makereport` in `conftest.py` turns every other skip into a failure
+# too. A badge reading "passing" for a job that never ran is worse than no badge at all.
+DEDICATED_CLUSTER = os.environ.get("CLUV_CI_CLUSTER") or None
+REQUIRED_CLUSTERS = (DEDICATED_CLUSTER,) if DEDICATED_CLUSTER else ("mila", "tamia")
 ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)
 STATUS_SUPPORTED_CLUSTERS = {"mila", "tamia", "rorqual"}
 SUBMIT_SUPPORTED_CLUSTERS = {"mila", "rorqual"}
 # Mark all the tests here as 'slow', so they are only run when the --slow flag is passed to pytest,
 # specifically in the integration-tests CI step, which happens on a self-hosted runner that has
 # reusable SSH connections to those clusters.
+
+
+async def skip_if_cluster_is_not_testable(cluster: str) -> None:
+    """Skip (or fail) unless `cluster` is one we should be running tests against right now.
+
+    In self-hosted CI, only the `REQUIRED_CLUSTERS` are ever tested, and a missing connection to
+    one of them is a failure rather than a skip. On a dev machine, tests run against whichever
+    clusters happen to have an active SSH connection.
+
+    Used by the `cluster` fixture in `conftest.py`, and directly by tests that parametrize cluster
+    names themselves instead of going through that fixture - without this, a stray SSH connection
+    on the runner would let CI opportunistically (and expensively) submit jobs to any cluster.
+    """
+    if IN_SELF_HOSTED_GITHUB_CI:
+        if cluster not in REQUIRED_CLUSTERS:
+            pytest.skip(f"{cluster} is not a required cluster; skipping it in CI.")
+        if not await control_socket_is_running(cluster):
+            pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
+        return
+    if not await control_socket_is_running(cluster):
+        pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
+
+
+async def skip_unless_connected(cluster: str) -> None:
+    """Skip unless `cluster` has a live SSH connection, failing for the `REQUIRED_CLUSTERS` in CI.
+
+    Unlike `skip_if_cluster_is_not_testable`, this does *not* restrict CI to the required
+    clusters: it's for checks cheap enough to run against every configured cluster (currently
+    the `sbatch --test-only` one), where the only reason to skip is a missing connection.
+    """
+    if await control_socket_is_running(cluster):
+        return
+    if IN_SELF_HOSTED_GITHUB_CI and cluster in REQUIRED_CLUSTERS:
+        pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
+    pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
 
 
 @pytest.fixture(autouse=True)

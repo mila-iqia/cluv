@@ -40,6 +40,7 @@ dev = [
     "ruff",
     "pytest-skip-slow>=0.0.5",
     "torchvision>=0.25.0",
+    "pytest-xdist>=3.6.0",
 ]
 
 [tool.pytest.ini_options]
@@ -49,6 +50,7 @@ addopts = ["--doctest-modules"]
 asyncio_mode = "auto"
 markers = [
     "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",
+    "end_to_end: runs a full example on a cluster (a real GPU job, trained to completion), so it costs real compute (deselect with '-m not end_to_end')",
 ]
 
 [tool.uv]

@@ -50,7 +50,13 @@ pytestmark = [
     pytest.mark.timeout(20),
 ]
 
-REQUIRED_CLUSTERS = ("mila", "tamia")
+# A per-cluster end-to-end workflow sets this to the one cluster its run exists to test (see
+# `.github/workflows/e2e-<cluster>.yaml`). That run publishes its result as a pass/fail badge and
+# nothing else, so the cluster becomes required - a missing connection has to fail rather than
+# skip - and `pytest_runtest_makereport` in `conftest.py` turns every other skip into a failure
+# too. A badge reading "passing" for a job that never ran is worse than no badge at all.
+DEDICATED_CLUSTER = os.environ.get("CLUV_CI_CLUSTER") or None
+REQUIRED_CLUSTERS = (DEDICATED_CLUSTER,) if DEDICATED_CLUSTER else ("mila", "tamia")
 ALL_CLUSTERS = tuple(["mila"] + milatools.cli.init_command.DRAC_CLUSTERS)
 STATUS_SUPPORTED_CLUSTERS = {"mila", "tamia", "rorqual"}
 SUBMIT_SUPPORTED_CLUSTERS = {"mila", "rorqual"}

@@ -193,8 +193,8 @@ cluv submit narval new_job.sh   # uses new_job.sh, ignoring config
 ```
 
 If neither a CLI script nor a configured `job_script_path` exists for the target cluster, [`cluv
-submit`](../../commands.md) exits with an error. See the page ["Writing a job script"](job-scripts.md) for what the
-script should contain.
+submit`](../../commands.md) exits with an error. See the ["Writing a job script"](job-scripts.md)
+page for what the script should contain.
 
 Note that a per-cluster job script still has to exist **on your local machine**: [`cluv
 submit`](../../commands.md#cluv-submit) reads its header to detect an `#SBATCH --output` directive

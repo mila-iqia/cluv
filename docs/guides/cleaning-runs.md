@@ -79,7 +79,7 @@ cluv clean --force
 ## Typical workflow
 
 ```console
-cluv sync              # fetch results from all clusters
+cluv sync               # fetch results from all clusters
 rm -rf logs/12345       # you're done with this run, delete it locally
 cluv clean              # remove the matching folder from wherever it ran
 ```

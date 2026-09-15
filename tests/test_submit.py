@@ -1351,7 +1351,7 @@ async def test_submit_first_considers_current_cluster(
 
 
 async def test_submit_first_marks_unsynced_clusters_as_skipped(
-    monkeypatch: pytest.MonkeyPatch, cluv_project_dir: Path
+    monkeypatch: pytest.MonkeyPatch, project_dir: Path
 ) -> None:
     monkeypatch.setattr(
         cluv.cli.submit, ensure_clean_git_state.__name__, lambda **kwargs: "dummy_git_commit"
@@ -1399,7 +1399,7 @@ async def test_submit_first_marks_unsynced_clusters_as_skipped(
     )
     monkeypatch.setattr(cluv.cli.submit, cluv.cli.submit.Live.__name__, FakeLive)
 
-    job_script = cluv_project_dir / "my_script.sh"
+    job_script = project_dir / "my_script.sh"
     job_script.write_text("#!/bin/bash\necho Hello World\n")
 
     def fake_get_submissions(cluster: str, remote: Remote | None, **kwargs) -> list[Submission]:

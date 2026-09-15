@@ -1,6 +1,6 @@
-"""Regression test for a cache-clobbering race in `sync_task_function`.
+"""Regression test for a cache-clobbering race in `sync_per_cluster_part`.
 
-Each cluster's `sync_task_function` call used to read the whole on-disk cache once at the
+Each cluster's `sync_per_cluster_part` call used to read the whole on-disk cache once at the
 start, then repeatedly write that same stale snapshot back after each step. Since `sync()`
 runs every cluster's task concurrently, whichever cluster's task saved last would overwrite
 every other cluster's just-written state -- including `last_fetch_watermark`, which is
@@ -47,7 +47,7 @@ async def test_save_does_not_clobber_a_concurrently_written_cluster(
     bar_watermark = datetime(2026, 6, 1, tzinfo=timezone.utc)
 
     async def fake_fetch_results(remote, config, project_state):
-        # Simulate a sibling cluster's sync_task_function completing and writing its own
+        # Simulate a sibling cluster's sync_per_cluster_part completing and writing its own
         # state to disk while our own task is still in progress.
         cache = read_cache()
         cache.project_states["bar"] = ProjectStateOnCluster(last_fetch_watermark=bar_watermark)
@@ -58,9 +58,7 @@ async def test_save_does_not_clobber_a_concurrently_written_cluster(
 
     monkeypatch.setattr(sync_module, "fetch_results", fake_fetch_results)
 
-    await sync_module.sync_task_function(
-        report_progress=lambda **kwargs: None, remote=Remote(hostname="foo")
-    )
+    await sync_module.sync_per_cluster_part(Remote(hostname="foo"))
 
     cache = read_cache()
     assert cache.project_states["bar"].last_fetch_watermark == bar_watermark

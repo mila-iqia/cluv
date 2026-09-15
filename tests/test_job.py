@@ -1,15 +1,13 @@
 """Tests for `cluv.job` — `current_run_info()`/`RunInfo`/`get_run_id()`.
 
-No dedicated test file existed for this module before this design. The non-sweep tests
-below lock in *today's* behavior (plain job / packing / chunking `run_id` shapes) as
-regression coverage. The sweep-branch tests describe the behavior `current_run_info()`
-should have once it grows the new branch from `design/cluv-sweep.md` §2 — they are
-written TDD-first and are expected to fail until that branch is added (and, in the
-meantime, until `cluv.sweep`'s own stub functions are implemented — see
-`tests/test_sweep.py`), since `current_run_info()` doesn't yet call `cluv.sweep` at all.
+The non-sweep tests below lock in *today's* behavior (plain job / packing / chunking
+`run_id` shapes) as regression coverage. The sweep-branch tests describe the behavior
+`current_run_info()` has once it grows the sweep branch from `design/cluv_sweep.md` §2.
 """
 
 import sys
+import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -153,3 +151,46 @@ def test_current_run_info_sweep_same_combo_same_run_id_under_different_offset_pr
     assert info_second is not None
     assert info_first.run_id == info_second.run_id
     assert info_first.results_path == info_second.results_path
+
+
+# ---------------------------------------------------------------------------
+# regression coverage for SLURM_PROCID=0 being falsy (#197)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def in_a_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    """Make it look like we're a task of a Slurm job on the `mila` cluster."""
+    (tmp_path / "pyproject.toml").write_text(
+        textwrap.dedent(
+            """\
+            [tool.cluv]
+            results_path = "$SCRATCH/logs/example"
+            datasets_path = "$SCRATCH/datasets/example"
+
+            [tool.cluv.clusters.mila]
+            """
+        )
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SCRATCH", str(tmp_path / "scratch"))
+    monkeypatch.setenv("SLURM_JOB_ID", "1234")
+    monkeypatch.setenv("SLURM_PROCID", str(request.param))
+    # These are read into module-level constants when `cluv.job` is imported.
+    monkeypatch.setattr(cluv.job, "SLURM_JOB_ID", 1234)
+    monkeypatch.setattr(cluv.job, "SLURM_PROCID", request.param)
+    monkeypatch.setattr(cluv.job, "current_cluster", lambda: "mila")
+    monkeypatch.setattr(cluv.config, "current_cluster", lambda: "mila")
+
+
+@pytest.mark.parametrize("in_a_job", [0, 1, 2], indirect=True)
+def test_current_run_info_in_every_task(in_a_job: None, request: pytest.FixtureRequest) -> None:
+    """All the tasks of a job need to agree on the run id and results path.
+
+    Regression test: rank 0 used to get `None` here, because `SLURM_PROCID=0` is falsy.
+    """
+    run_info = current_run_info()
+    assert run_info is not None
+    assert run_info.cluster == "mila"
+    assert run_info.run_id == "mila_1234"
+    assert run_info.results_path.name == "mila_1234"

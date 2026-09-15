@@ -86,7 +86,7 @@ class CluvLauncher(Launcher):
         job_script: str | Path | None = None,
         autocommit: bool = False,
         vram_gb: int | None = None,  # Enables job packing!
-        chunking: bool = False,  # Enables job chunking (via job arrays!)
+        chunking: int | None = None,  # Enables job chunking (via job arrays!)
         ## Submitit arguments:
         account: str | None = None,
         array_parallelism: int = 256,
@@ -476,7 +476,7 @@ async def run_sweep(
     job_script: PurePosixPath | None,
     sbatch_args: dict[str, str | None],
     autocommit: bool,
-    chunking: bool,
+    chunking: int | None,
     packing: bool,
 ) -> list[JobInfo]:
 
@@ -519,7 +519,7 @@ async def run_sweep(
             # TODO: unsure about this one:
             array_job_id=job_id if chunking else None,
             doing_job_packing=packing,
-            doing_job_chunking=chunking,
+            doing_job_chunking=bool(chunking),
         )
 
         # The path where the remote results will be synced locally.
@@ -569,18 +569,19 @@ def _jobs_to_hydra_jobreturn_format(
     job_returns: list[JobReturn] = []
     for job in job_infos:
         for task_id, run in enumerate(job.tasks):
-            output_file = next(
-                (
-                    find_pyproject().parent
-                    / Path(get_cluv_config().results_symlink)
-                    / run.results_path.relative_to(local_results_dir)
-                ).glob("*.out"),
-                run.results_path,
-            )
+            # `run.results_path` is where `fetch_results` synced the run to in the local results
+            # dir, and the slurm output is the `*.out` file inside it. No need to route through
+            # the project's `results_symlink`: that symlink is only created on the clusters, not
+            # on the machine running the launcher, so globbing through it silently found nothing
+            # here (and fell back to the run dir itself, which isn't readable as a file).
+            output_file = next(run.results_path.glob("*.out"), run.results_path)
             try:
                 output_file = output_file.relative_to(Path.cwd())
             except ValueError:
                 pass
+            output_text = (
+                output_file.read_text() if output_file.is_file() else "<no output file found>"
+            )
 
             job_state = get_job_state(job)
             logger.info(f"Run {run.run_id} finished ({job_state}): Output: {output_file}")
@@ -594,7 +595,7 @@ def _jobs_to_hydra_jobreturn_format(
                         # Mimic the output produced by the submitit launcher in case of error, which includes the error file.
                         submitit.core.utils.FailedJobError(
                             f"Job (task={task_id}) failed during processing with trace:\n"
-                            f"----------------------\n{output_file.read_text()}\n"
+                            f"----------------------\n{output_text}\n"
                             "----------------------\n"
                             f"You can check full logs with 'job.stderr({task_id})' and 'job.stdout({task_id})'"
                             f"or at paths:\n  - {output_file}\n"

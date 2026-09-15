@@ -1,4 +1,4 @@
-"""Cancel every job CI submitted, on every cluster it might have submitted to.
+"""Cancel the jobs CI submitted, on one cluster or on every cluster it might have submitted to.
 
 The end-to-end tests each cancel their own job in a `finally` block, but a workflow that is
 cancelled (a newer push, a timeout, the run being stopped by hand) kills the pytest process
@@ -7,8 +7,14 @@ node, so an orphan is expensive - hence an `if: always()` step that sweeps them 
 
 Cancels jobs whose name starts with `cluv-ci` (see `job_name` in `tests/test_examples.py`), so it
 can't touch a researcher's own jobs on a shared account.
+
+Pass `--cluster` to sweep a single cluster. The per-cluster end-to-end workflows must, because
+they run concurrently and share one account: an unscoped sweep from the `mila` run would cancel
+the `nibi` run's job while it was still training, and CI jobs are submitted `--no-requeue`, so it
+would not come back.
 """
 
+import argparse
 import asyncio
 from pathlib import Path
 
@@ -45,7 +51,15 @@ async def cancel_on(cluster: str) -> None:
 async def main() -> None:
     config = load_cluv_config(REPO_ROOT / "examples" / "imagenet" / "pyproject.toml")
     assert config is not None
-    await asyncio.gather(*(cancel_on(cluster) for cluster in config.clusters_names))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--cluster",
+        choices=config.clusters_names,
+        help="Only sweep this cluster (default: every cluster the example is configured for).",
+    )
+    args = parser.parse_args()
+    clusters = [args.cluster] if args.cluster else config.clusters_names
+    await asyncio.gather(*(cancel_on(cluster) for cluster in clusters))
 
 
 if __name__ == "__main__":

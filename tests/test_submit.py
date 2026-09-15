@@ -1416,7 +1416,9 @@ async def test_submit_first_marks_unsynced_clusters_as_skipped(
             )
         ]
 
-    monkeypatch.setattr(cluv.cli.submit, cluv.cli.submit.get_submissions.__name__, fake_get_submissions)
+    monkeypatch.setattr(
+        cluv.cli.submit, cluv.cli.submit.get_submissions.__name__, fake_get_submissions
+    )
 
     async def fake_submit_to_cluster(
         cluster: str,
@@ -1457,7 +1459,9 @@ async def test_submit_first_marks_unsynced_clusters_as_skipped(
     async def fake_wait_for_first_running_job(job_submissions, *_args, **_kwargs):
         nonlocal observed_rows
         while True:
-            pending_rows = [row for row in job_submissions if row.state == "PENDING" and row.job_id]
+            pending_rows = [
+                row for row in job_submissions if row.state == "PENDING" and row.job_id
+            ]
             if pending_rows:
                 observed_rows = job_submissions
                 return pending_rows[0]

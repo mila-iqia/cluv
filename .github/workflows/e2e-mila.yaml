@@ -1,0 +1,37 @@
+# One workflow per cluster, so that each cluster gets its own status badge: GitHub's badges are
+# per workflow, not per job. Every actual step lives in the reusable workflow this calls.
+#
+# The badge on docs/examples/imagenet-verified.md reads this workflow's run history directly, so
+# there is no generated file to keep up to date and nothing to commit back to master.
+#
+# The set of these files is checked against the example's configured clusters and against the
+# badges on that page by tests/test_ci_workflows.py.
+name: ImageNet e2e (mila)
+
+on:
+  schedule:
+    # Mondays, 06:00 UTC: a fresh result waiting at the start of the week.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      real_data:
+        description: "Train on the real ImageNet archives instead of fake data (moves ~150GB if mila doesn't have them yet)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel a run in progress: it has a real job queued on mila, and a cancelled workflow
+  # can't clean up after itself as tidily as it can finish.
+  group: e2e-mila
+  cancel-in-progress: false
+
+jobs:
+  end_to_end:
+    uses: ./.github/workflows/_examples-end-to-end.yaml
+    with:
+      cluster: mila
+      # `inputs` is null on a scheduled run, so default it here rather than in the callee.
+      real_data: ${{ inputs.real_data || false }}

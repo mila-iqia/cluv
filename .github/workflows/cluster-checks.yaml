@@ -1,8 +1,8 @@
 # Cheap per-cluster checks: everything that needs a live SSH connection to a cluster but does
 # *not* submit a job that has to run to completion.
 #
-# The expensive counterpart (real jobs, run to completion) lives in examples-end-to-end.yaml and
-# is deliberately not on the PR path: see the `end_to_end` pytest marker.
+# The expensive counterpart (real jobs, run to completion) lives in the per-cluster
+# e2e-<cluster>.yaml workflows and is deliberately not on the PR path: see the `end_to_end` marker.
 name: Cluster checks
 
 on:

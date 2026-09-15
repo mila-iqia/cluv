@@ -1,6 +1,4 @@
 import asyncio
-import datetime
-import json
 import os
 import re
 import subprocess
@@ -99,14 +97,18 @@ async def test_hydra_example(
 # little compute as will actually exercise the distributed code path (rank 0 + rank-0-only logic).
 WHOLE_NODE_CLUSTERS = {"tamia"}
 
+# Every cluster the example claims to support, straight from its own config - so adding a cluster
+# to `examples/imagenet/pyproject.toml` gives it an end-to-end test, a CI workflow and a status
+# badge, rather than silently getting only the cheap `sbatch --test-only` check.
+# `tests/test_ci_workflows.py` is what holds those three in sync.
+IMAGENET_EXAMPLE_CLUSTERS = load_cluv_config(
+    Path(__file__).resolve().parents[1] / "examples/imagenet/pyproject.toml"
+).clusters_names
+
 
 @pytest.mark.slow
 @pytest.mark.end_to_end
-@pytest.mark.parametrize(
-    "cluster",
-    ["mila", "tamia", "rorqual", "fir", "nibi"],
-    indirect=True,
-)
+@pytest.mark.parametrize("cluster", IMAGENET_EXAMPLE_CLUSTERS, indirect=True)
 async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch) -> None:
     """End-to-end: submit the ImageNet example on a cluster with its own job script.
 
@@ -180,7 +182,6 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
 
         state = await wait_for_job_to_finish(remote, job.job_id)
         should_cancel_job = False  # it reached a terminal state, so there is nothing to cancel.
-        await record_run(remote, job.job_id, state, real_data=use_real_data)
         assert state.startswith("COMPLETED"), state
     finally:
         if should_cancel_job:
@@ -192,10 +193,6 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
             print(f"Cancelling job {job.job_id} on {remote.hostname}.")
             await remote.run(f"scancel {job.job_id}", warn=True, hide=True, display=True)
 
-
-IMAGENET_EXAMPLE_CLUSTERS = load_cluv_config(
-    Path(__file__).resolve().parents[1] / "examples/imagenet/pyproject.toml"
-).clusters_names
 
 # Trillium's login nodes wrap `sbatch` in a site submission filter that only accepts a whitelist of
 # options, and `--test-only` is not on it: it answers "ERROR:   option --test-only not recognized"
@@ -266,34 +263,6 @@ async def test_imagenet_job_script_is_accepted_by_slurm(
         # A successful dry run says when the job would start; anything else means `--test-only`
         # didn't do what we think it does on this cluster, and this test would be vacuous.
         assert "to start at" in output, f"Unexpected `sbatch --test-only` output:\n{output}"
-
-
-async def record_run(remote: Remote, job_id: int, state: str, real_data: bool) -> None:
-    """Write one line of "this example ran here, and here is the job to prove it" to disk.
-
-    Only does anything when `$CLUV_CI_RESULTS_DIR` is set, which the end-to-end workflow does.
-    `.github/scripts/summarize_example_runs.py` turns the files into the per-cluster table that
-    gets published, so that the "verified on" list in the example's README stops being something
-    a human has to remember to update.
-    """
-    results_dir = os.environ.get("CLUV_CI_RESULTS_DIR")
-    if not results_dir:
-        return
-    elapsed = str(
-        await run_sacct(remote, job_id, format="Elapsed", additional_args="--noconvert")
-    ).strip()
-    record = {
-        "cluster": remote.hostname,
-        "job_id": job_id,
-        "state": state,
-        "elapsed": elapsed.splitlines()[0] if elapsed else "?",
-        "real_data": real_data,
-        "commit": subprocess.getoutput("git rev-parse --short HEAD").strip(),
-        "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d"),
-    }
-    path = Path(results_dir) / f"imagenet-{remote.hostname}.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, indent=2))
 
 
 async def cancel_stale_jobs(remote: Remote, job_name: str) -> None:

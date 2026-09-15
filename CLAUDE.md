@@ -26,7 +26,12 @@ are also marked `end_to_end`:
   without queueing anything), `cluv login` / `status` / `sync` / `clean` against real clusters, and
   `test_submit`, which does submit one short job.
 - `uv run pytest --slow -m end_to_end` runs the imagenet and hydra examples for real, which costs a
-  GPU job per cluster; CI only runs it weekly or on demand (`examples-end-to-end.yaml`).
+  GPU job per cluster; CI only runs it weekly or on demand, as one workflow *per cluster*
+  (`.github/workflows/e2e-<cluster>.yaml`, all calling `_examples-end-to-end.yaml`). One workflow
+  per cluster is what lets each cluster have its own status badge on
+  `docs/examples/imagenet-verified.md`, since GitHub's badges are per workflow rather than per job.
+  Those runs set `$CLUV_CI_CLUSTER`, which makes that cluster required and turns any skip into a
+  failure: their only output is a pass/fail badge, so a skip must never report as a pass.
 
 ## Architecture
 

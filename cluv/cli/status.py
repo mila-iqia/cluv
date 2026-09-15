@@ -426,12 +426,7 @@ def _build_cluv_jobs_table(
     for job in list(reversed(cached_jobs))[:max_jobs]:
         info = live_info.get(job.job_id)
 
-        try:
-            submitted_str = (
-                datetime.fromisoformat(job.submitted_at).astimezone().strftime("%b %d %H:%M")
-            )
-        except (ValueError, TypeError):
-            submitted_str = job.submitted_at
+        submitted_str = job.submitted_at.astimezone().strftime("%b %d %H:%M")
 
         job_id = Text(str(job.job_id))
         state, wait_time, elapsed_time = "-", "-", "-"

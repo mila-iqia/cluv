@@ -1,9 +1,20 @@
+import re
 import subprocess
 import textwrap
 from pathlib import Path
 from typing import Literal
 
 import pytest
+
+# CPython 3.13+ colorizes uncaught-exception tracebacks (and honors FORCE_COLOR to force
+# this even when stderr isn't a tty), which breaks plain substring checks against captured
+# subprocess stderr. Strip ANSI escape codes before asserting so this is robust regardless
+# of the ambient environment's color settings.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", text)
 
 
 @pytest.mark.parametrize(
@@ -113,15 +124,19 @@ def test_hydra_launcher_is_discoverable(
     assert "hydra_plugins.hydra_submitit_launcher.submitit_launcher" in output
     assert "hydra_plugins.cluv.cluv_launcher" in output
 
-    error = subprocess.run(
-        "uv run python main.py -m hydra/launcher=cluv_mila",
-        shell=True,
-        text=True,
-        capture_output=True,
-    ).stderr
+    error = _strip_ansi(
+        subprocess.run(
+            "uv run python main.py -m hydra/launcher=cluv_mila",
+            shell=True,
+            text=True,
+            capture_output=True,
+        ).stderr
+    )
     assert f"RuntimeError: No cluv config in {pyproject_file} file." in error
 
-    error = subprocess.run("cluv init", capture_output=True, text=True, shell=True).stderr
+    error = _strip_ansi(
+        subprocess.run("cluv init", capture_output=True, text=True, shell=True).stderr
+    )
     assert (
         "RuntimeError: cluv init should be run in a directory under your home directory." in error
     )

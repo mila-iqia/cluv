@@ -17,6 +17,7 @@ from rich.live import Live
 
 from cluv.cache import Job, Submission, save_job
 from cluv.cli.submit_utils.chunking import apply_chunking
+from cluv.cli.submit_utils.vram import expand_for_vram
 from cluv.cli.sync import (
     get_cluster_to_remote,
     sync_common_part,
@@ -132,12 +133,16 @@ async def submit(
     program_args: list[str],
     autocommit: bool = False,
     chunking: int | None = None,
+    vram: str | None = None,
     _skip_sync: bool = False,
     sync_datasets: bool = True,
     parsable: bool = False,
 ) -> Job | None:
     """Submit a job to the given cluster (or all clusters if `cluster=="first"`),
     and return the Job object if successful.
+
+    When `vram` is set, one job is submitted per GPU type of each cluster that has at least
+    that much VRAM (including MIG slices), racing them the same way as multiple allocations.
 
     If `parsable` is True, print only the job ID (or '<cluster>:<job_id>' when `cluster`
     is 'first') to stdout, for programmatic use, instead of the usual human-readable summary.
@@ -156,18 +161,25 @@ async def submit(
     git_commit = ensure_clean_git_state(autocommit=autocommit, submit_command=submit_command)
     cluster_to_remote = await get_cluster_to_remote(cluster)
 
+    submissions_per_cluster = await asyncio.gather(
+        *(
+            get_submissions(
+                cluster_name,
+                remote,
+                job_script=job_script,
+                sbatch_args=sbatch_args,
+                program_args=program_args,
+                chunking=chunking,
+                vram=vram,
+                git_commit=git_commit,
+            )
+            for cluster_name, remote in cluster_to_remote.items()
+        )
+    )
     job_submissions = [
         SubmissionProgress(submission=submission)
-        for cluster_name, remote in cluster_to_remote.items()
-        for submission in get_submissions(
-            cluster_name,
-            remote,
-            job_script=job_script,
-            sbatch_args=sbatch_args,
-            program_args=program_args,
-            chunking=chunking,
-            git_commit=git_commit,
-        )
+        for submissions in submissions_per_cluster
+        for submission in submissions
     ]
 
     if not _skip_sync:
@@ -400,7 +412,7 @@ async def submit_to_cluster(
             raise result
 
 
-def get_submissions(
+async def get_submissions(
     cluster: str,
     remote: Remote | None,
     *,
@@ -409,8 +421,13 @@ def get_submissions(
     program_args: list[str],
     chunking: int | None,
     git_commit: str,
+    vram: str | None = None,
 ) -> list[Submission]:
     """Expand the possible job configurations for a cluster. Returns a list of `Submission` objects.
+
+    One `Submission` is produced per allocation configured for `cluster` (see
+    `[tool.cluv.clusters.<name>].sbatch_args`), times one per compatible GPU type when `vram`
+    is set (see `expand_for_vram`).
 
     Does *not* do the actual job submission with `sbatch`.
     """
@@ -444,27 +461,34 @@ def get_submissions(
         n_chunks, job_resources = apply_chunking(
             job_resources, job_script=job_script, chunking=chunking, env_vars=job_env_vars
         )
-        job_resources = add_cluv_sbatch_args(
-            job_resources, job_script=job_script, cluster=cluster, cluster_config=cluster_config
-        )
-        sbatch_command = get_sbatch_command(
-            env_vars=job_env_vars,
-            job_script=cluster_job_script_path,
-            sbatch_args=job_resources,
-            program_args=program_args,
-        )
-        submissions.append(
-            Submission(
-                cluster=cluster,
-                remote=remote,
+
+        for expanded_resources in await expand_for_vram(
+            cluster, remote, job_resources, job_script=job_script, vram=vram, env_vars=job_env_vars
+        ):
+            expanded_resources = add_cluv_sbatch_args(
+                expanded_resources,
                 job_script=job_script,
-                sbatch_args=job_resources,
-                program_args=program_args,
-                sbatch_command=sbatch_command,
-                n_chunks=n_chunks,
-                git_commit=git_commit,
+                cluster=cluster,
+                cluster_config=cluster_config,
             )
-        )
+            sbatch_command = get_sbatch_command(
+                env_vars=job_env_vars,
+                job_script=cluster_job_script_path,
+                sbatch_args=expanded_resources,
+                program_args=program_args,
+            )
+            submissions.append(
+                Submission(
+                    cluster=cluster,
+                    remote=remote,
+                    job_script=job_script,
+                    sbatch_args=expanded_resources,
+                    program_args=program_args,
+                    sbatch_command=sbatch_command,
+                    n_chunks=n_chunks,
+                    git_commit=git_commit,
+                )
+            )
     return submissions
 
 

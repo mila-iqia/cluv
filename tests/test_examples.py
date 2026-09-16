@@ -37,13 +37,6 @@ imagenet_example_clusters = load_cluv_config(
     REPO_ROOT / "examples" / "imagenet" / "pyproject.toml"
 ).clusters_names
 
-# example_root_to_clusters = {
-#     REPO_ROOT: repo_root_clusters,
-#     REPO_ROOT / "examples" / "pytorch-example": pytorch_example_clusters,
-#     REPO_ROOT / "examples" / "hydra_example": hydra_example_clusters,
-#     REPO_ROOT / "examples" / "imagenet": imagenet_example_clusters,
-# }
-
 current_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 
 
@@ -58,14 +51,13 @@ async def skip_unless_connected(cluster: str) -> None:
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    ("project_dir", "cluster", "job_script", "program_args"),
+    ("project_dir", "cluster", "job_script"),
     [
         *[
             pytest.param(
                 REPO_ROOT,
                 cluster,
                 job_script,
-                ["python", "--version"],
                 marks=[
                     pytest.mark.xfail(
                         cluster in ("rorqual", "fir", "nibi", "narval"),
@@ -92,7 +84,6 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "pytorch-example",
                 cluster,
                 job_script,
-                ["python", "main.py", "--help"],
                 marks=[
                     pytest.mark.xfail(
                         cluster in ("killarney", "rorqual", "fir", "nibi", "narval"),
@@ -109,7 +100,6 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "hydra_example",
                 cluster,
                 job_script,
-                ["python", "main.py", "--help"],
                 marks=[
                     pytest.mark.xfail(
                         cluster in ("rorqual", "fir", "nibi", "narval"),
@@ -123,7 +113,6 @@ async def skip_unless_connected(cluster: str) -> None:
                     ),
                     pytest.mark.xfail(
                         cluster in ("trillium",),
-                        reason="TODO: --mem is not allowed, and output would be written to /home which is read-only on the compute nodes.",
                         # SBATCH ERROR:
                         #  The --mem=... request is not allowed nor necessary on Trillium; all nodes have
                         #  the same amount of available memory (745 GiB) and each job get all the
@@ -138,6 +127,7 @@ async def skip_unless_connected(cluster: str) -> None:
                         # SBATCH ERROR:
                         #  Walltime must be at least 15 minutes (except on the debug partition)
                         #  (cluv/examples/hydra_example/scripts/safe_job.sh, line #5)
+                        reason="TODO: --mem is not allowed, and output would be written to /home which is read-only on the compute nodes.",
                         strict=True,
                     ),
                 ],
@@ -150,7 +140,6 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "imagenet",
                 cluster,
                 None,
-                ["python", "main.py", "--help"],
                 marks=[
                     pytest.mark.xfail(
                         cluster in ("killarney",),
@@ -168,25 +157,21 @@ async def skip_unless_connected(cluster: str) -> None:
         ],
     ],
     ids=lambda param: (
-        param
-        if isinstance(param, str)
-        else param  # "'" + " ".join(param) + "'"
-        if isinstance(param, list)
-        else "None"
-        if param is None
-        else PurePosixPath(param).name
+        param if isinstance(param, str) else "None" if param is None else PurePosixPath(param).name
     ),
 )
 async def test_example_would_work(
     project_dir: Path,
     cluster: str,
     job_script: Path | None,
-    program_args: list[str],
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Test that `sbatch --test-only` works for that project, cluster and (optional) job script."""
     await skip_unless_connected(cluster)
     monkeypatch.chdir(project_dir)
+
+    # The program args passed to the example job script don't really matter, the job is never actually submitted.
+    program_args = ["python", "--version"]
 
     # Avoid a full sync each time using the cache.
     # TODO: it seems to still be a bit slow, there are still lots of unnecessary ops even when everything

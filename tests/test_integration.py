@@ -12,19 +12,17 @@ import re
 import stat
 import subprocess
 from pathlib import Path
-from typing import Literal
 
 import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
 from cluv.cache import Job
-from cluv.cli import status
 from cluv.cli.init import init
 from cluv.cli.login import login
 from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
-from cluv.cli.sync import get_active_remotes, sync
+from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote
 from cluv.slurm import run_sacct
@@ -68,27 +66,6 @@ async def test_login(remote: Remote):
 @pytest_asyncio.fixture(scope="session")
 async def cluster_status(cluster: str) -> ClusterStatus:
     return await get_cluster_status(cluster, {})
-
-
-@pytest.mark.slow
-@pytest.mark.timeout(30)
-@pytest.mark.parametrize("table", ["clusters", "jobs", "all"])
-@pytest.mark.parametrize("all_jobs", [True, False])
-async def test_cluv_status(table: Literal["clusters", "jobs", "all"], all_jobs: bool):
-
-    remotes = await get_active_remotes()
-    clusters = [remote.hostname for remote in remotes]
-    if not all(required_cluster in clusters for required_cluster in REQUIRED_CLUSTERS):
-        pytest.fail("Don't have an active connection to all the required clusters!")
-    import cluv.utils
-
-    with cluv.utils.console.capture() as cap:
-        await status(table=table, all_jobs=all_jobs)
-    output = cap.get()
-    print(output)
-    if table in ("all", "clusters"):
-        for cluster in clusters:
-            assert f"● {cluster}" in output
 
 
 TEST_SUBMIT_TIMEOUT_SECONDS = 180

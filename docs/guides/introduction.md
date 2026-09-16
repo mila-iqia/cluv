@@ -26,7 +26,7 @@ These are the main goals of Cluv:
   one starts running first, and cancel the rest.
 - `cluv sync`: Fetch the results from the clusters where I ran jobs previously.
 - [`cluv run`](../commands.md#cluv-run)` mila -- ls logs`: Sync the project and run a command in the project dir on a cluster.
-- [`cluv clean`](../commands.md#cluv-clean): Once I've deleted a run's results locally, remove the matching results from the cluster(s) it ran on. See the ["Cleaning up run results on the clusters"](cleaning-runs.md).
+- [`cluv clean`](../commands.md#cluv-clean): Once I've deleted a run's results locally, remove the matching results from the cluster(s) it ran on. See the ["Cleaning up run results on the clusters"](cleaning-runs.md) page.
 
 ### Intuitive monitoring of jobs and cluster health across clusters
 - [`cluv status`](../commands.md#cluv-status): Show me an overview of all my clusters, including GPU availability, queue status, and job progress.
@@ -60,13 +60,3 @@ change:
     - As a consequence of this, **cluv is not supported on Windows machines**. This is because
       Windows SSH clients don't support the necessary features. Use WSL2 if on Windows.
 3. Your project is in a Git repository hosted on GitHub.
-
-
-## Useful assumptions
-
-These assumptions are useful to limit the initial scope and dev work on Cluv, but could be made more
-flexible in the future:
-
-### Project location
-- Your project is under `$HOME`, not `$SCRATCH`.
-- The project is located at the same relative path from `$HOME` to the project root on all clusters.

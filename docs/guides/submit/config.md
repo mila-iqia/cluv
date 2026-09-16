@@ -67,7 +67,7 @@ cluster and want `cluv` to try them all and keep whichever starts first. Typical
 - different partitions or walltime limits, when a shorter/smaller request tends to schedule sooner
 
 ```toml title="pyproject.toml"
-[tool.cluv.clusters.narval]
+[tool.cluv.clusters.fir]
 sbatch_args = [
     { account = "rrg-bengioy-ad" },
     { account = "def-bengioy" },
@@ -77,10 +77,10 @@ sbatch_args = [
 The equivalent array-of-tables syntax also works, and is nicer when each entry sets several flags:
 
 ```toml title="pyproject.toml"
-[[tool.cluv.clusters.narval.sbatch_args]]
+[[tool.cluv.clusters.fir.sbatch_args]]
 account = "rrg-bengioy-ad"
 
-[[tool.cluv.clusters.narval.sbatch_args]]
+[[tool.cluv.clusters.fir.sbatch_args]]
 account = "def-bengioy"
 time = "24:00:00"       # this allocation allows longer jobs
 ```
@@ -100,35 +100,28 @@ Each entry is merged on top of the global `[tool.cluv.sbatch_args]` independentl
 by every entry of a cluster are best kept in the global section (there is no per-cluster "shared"
 section: a `sbatch_args` list *replaces* the single-flag-set form).
 
-`cluv submit narval` then submits **one job per entry**, waits until one of them starts, and
+`cluv submit fir` then submits **one job per entry**, waits until one of them starts, and
 cancels the others - exactly what [`cluv submit first`](../../commands.md#cluv-submit) does across
 clusters. This is useful whenever you can't predict which configuration will be scheduled first: a
 `def-` allocation often starts sooner when the group has been using a lot of compute recently, and
 the same reasoning applies to a less-requested GPU type or a shorter walltime bucket.
 
 ```console
-$ cluv submit narval job.sh
-                                 Jobs submitted on the clusters
-┏━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ Cluster ┃ sbatch arguments                        ┃ Result                                       ┃
-┡━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
-│ narval  │ --account=rrg-bengioy-ad --time=3:00:00 │ bash --login -c 'sbatch --parsable           │
-│         │                                         │ --chdir=$HOME/my_project                     │
-│         │                                         │ --account=rrg-bengioy-ad --time=3:00:00      │
-│         │                                         │ $HOME/my_project/job.sh'                     │
-│         │                                         │ Job ID: 1234                                 │
-├─────────┼─────────────────────────────────────────┼──────────────────────────────────────────────┤
-│ narval  │ --account=def-bengioy --time=3:00:00    │ bash --login -c 'sbatch --parsable           │
-│         │                                         │ --chdir=$HOME/my_project                     │
-│         │                                         │ --account=def-bengioy --time=3:00:00         │
-│         │                                         │ $HOME/my_project/job.sh'                     │
-│         │                                         │ Job ID: 1235                                 │
-└─────────┴─────────────────────────────────────────┴──────────────────────────────────────────────┘
-Job 1235 on cluster narval is RUNNING. Cancelling the other jobs...
+$ cluv submit fir job.sh
+                                      Waiting for jobs to cancel...                                       
+╭─────────┬────────┬───────────┬────────────────────────────────────────────────────────────────╮
+│ Cluster │ Job ID │ Status    │ Command                                                        │
+├─────────┼────────┼───────────┼────────────────────────────────────────────────────────────────┤
+│ fir     │ 1234   │ RUNNING   │ bash --login -c '(...) --time=3:00:00 --account=def-bengioy    │
+│         │        │           │  '--output=$SCRATCH/logs/cluv/fir_%j/slurm-%j.out'             │
+│         │        │           │ '--chdir=$HOME/my_project'                                     │
+├─────────┼────────┼──--───────┼────────────────────────────────────────────────────────────────┤
+│ fir     │ 1235   │ CANCELLED │ bash --login -c '(...) --time=3:00:00 --account=rrg-bengioy-ad │
+│         │        │           │ '--output=$SCRATCH/logs/fir_%j/slurm-%j.out'                   │
+│         │        │           │ '--chdir=$HOME/my_project'                                     │
+╰─────────┴────────┴───────────┴────────────────────────────────────────────────────────────────╯
+Successfully submitted job 1234 on cluster fir.
 ```
-
-The "sbatch arguments" column only appears when a cluster has more than one configuration - it
-shows the full flag set of that entry (config + CLI), so you can tell which one a given job used.
 
 `cluv submit first` also takes every configuration of every cluster into account.
 

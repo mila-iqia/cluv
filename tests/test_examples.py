@@ -37,6 +37,15 @@ imagenet_example_clusters = load_cluv_config(
     REPO_ROOT / "examples" / "imagenet" / "pyproject.toml"
 ).clusters_names
 
+# NOTE: Might come in handy later:
+# example_root_to_clusters = {
+#     REPO_ROOT: repo_root_clusters,
+#     REPO_ROOT / "examples" / "pytorch-example": pytorch_example_clusters,
+#     REPO_ROOT / "examples" / "hydra_example": hydra_example_clusters,
+#     REPO_ROOT / "examples" / "imagenet": imagenet_example_clusters,
+# }
+
+
 current_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 
 
@@ -47,6 +56,10 @@ async def skip_unless_connected(cluster: str) -> None:
     if IN_SELF_HOSTED_GITHUB_CI and cluster in REQUIRED_CLUSTERS:
         pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
     pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
+
+
+# TODO: enable parallelizing this test based on the cluster fixture value. Skip unsupported clusters instead.
+# This can't directly be done, because the xfails are also based on the cluster value.
 
 
 @pytest.mark.slow
@@ -60,7 +73,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 job_script,
                 marks=[
                     pytest.mark.xfail(
-                        cluster in ("rorqual", "fir", "nibi", "narval"),
+                        cluster in ("fir", "nibi"),
                         reason="TODO: Multiple _cpu allocations, and account isn't specified in pyproject of cluv root.",
                         strict=True,
                     ),
@@ -86,7 +99,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 job_script,
                 marks=[
                     pytest.mark.xfail(
-                        cluster in ("killarney", "rorqual", "fir", "nibi", "narval"),
+                        cluster in ("killarney", "fir", "nibi"),
                         reason="TODO: Multiple (_cpu) allocations, and account isn't specified in the example's pyproject file.",
                         strict=True,
                     ),
@@ -102,7 +115,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 job_script,
                 marks=[
                     pytest.mark.xfail(
-                        cluster in ("rorqual", "fir", "nibi", "narval"),
+                        cluster in ("fir", "nibi"),
                         reason="TODO: multiple allocations",
                         strict=True,
                     ),
@@ -141,16 +154,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 cluster,
                 None,
                 marks=[
-                    pytest.mark.xfail(
-                        cluster in ("killarney",),
-                        reason="TODO: multiple allocations + Submitting jobs from directories residing in /home is not permitted.",
-                        strict=True,
-                    ),
-                    pytest.mark.xfail(
-                        cluster in ("rorqual", "fir", "nibi", "narval"),
-                        reason="TODO: multiple allocations",
-                        strict=True,
-                    ),
+                    # Should work everywhere!
                 ],
             )
             for cluster in imagenet_example_clusters
@@ -183,23 +187,6 @@ async def test_example_would_work(
         assert remote
     else:
         remote = (await sync([cluster], sync_datasets=False))[0]
-
-    cluster_config = load_cluv_config(project_dir / "pyproject.toml").get_cluster_config(cluster)
-
-    project_dir_on_cluster = cluster_config.project_dir or PurePosixPath(
-        "$HOME"
-    ) / project_dir.relative_to(Path.home())
-    # Side-step the issue with the project_dir not being in sbatch_command for now.
-    if job_script:
-        job_script_in_sbatch_command = project_dir_on_cluster / PurePosixPath(
-            job_script.relative_to(project_dir)
-        )
-    else:
-        job_script_in_sbatch_command = cluster_config.job_script_path
-        assert job_script_in_sbatch_command
-        if not job_script_in_sbatch_command.is_absolute():
-            job_script_in_sbatch_command = project_dir_on_cluster / job_script_in_sbatch_command
-        # The example should have job_script_path set, or the test should be configured correctly.
 
     submissions = get_submissions(
         cluster,

@@ -132,6 +132,9 @@ async def test_status_storage(cluster_status: ClusterStatus):
 TEST_SUBMIT_TIMEOUT_SECONDS = 180
 
 
+@pytest.mark.skipif(
+    not ON_DEV_MACHINE, reason="It takes too long to wait for resources and run this in the CI."
+)
 @pytest.mark.parametrize(
     "cluster",
     [

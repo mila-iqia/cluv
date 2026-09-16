@@ -1,6 +1,7 @@
 # cluv
 
-A powerful and lightweight CLI tool to sync and submit UV-based Python projects across HPC clusters.
+A powerful and lightweight CLI tool to sync UV-based Python projects and submit jobs across HPC
+clusters.
 
 This is a quick overview. For more information, check out the [introduction](guides/introduction.md).
 

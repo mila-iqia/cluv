@@ -11,8 +11,7 @@ cluv submit first scripts/job.sh -- python main.py --lr 0.01
 
 Queue times vary a lot between clusters (and between allocations on the same cluster) depending on
 who else is using them right now. If you don't especially care *where* a job runs, `cluv submit
-first` lets cluv figure out which cluster happens to be least busy at that moment, instead of you
-guessing and resubmitting elsewhere if the queue doesn't move.
+first` lets cluv figure out which cluster happens to be least busy at that moment.
 
 ## Which clusters are raced
 
@@ -34,7 +33,8 @@ configurations races four jobs at once.
 
 ## How the race works
 
-It follows these steps:
+The race between clusters is implemented in three steps:
+
 1. cluv builds a submission for every connected cluster (and every job configuration on each), and
 syncs the project to all of them.
 2. Every submission is sent to `sbatch`, and cluv polls the status of every job until one leaves the
@@ -60,7 +60,7 @@ Once a job is running, cluv reports which cluster it landed on (`narval` here) e
 for a normal single-cluster submission. You can then use `cluv sync` to fetch results from that
 cluster, once the job is done.
 
-!!! note   
+!!! note
       Cancelling the `cluv submit first` command (e.g. with Ctrl-C in your terminal) during the wait
       for a running job will cancel all submissions.
 

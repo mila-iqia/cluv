@@ -108,7 +108,7 @@ the same reasoning applies to a less-requested GPU type or a shorter walltime bu
 
 ```console
 $ cluv submit fir job.sh
-                                      Waiting for jobs to cancel...                                       
+                                      Waiting for jobs to cancel...
 ╭─────────┬────────┬───────────┬────────────────────────────────────────────────────────────────╮
 │ Cluster │ Job ID │ Status    │ Command                                                        │
 ├─────────┼────────┼───────────┼────────────────────────────────────────────────────────────────┤

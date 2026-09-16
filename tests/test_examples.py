@@ -292,7 +292,9 @@ async def wait_for_job_to_finish(remote: Remote, job_id: int, timeout_minutes: i
     state = "UNKNOWN"
     while time.time() < deadline:
         await asyncio.sleep(10)
-        sacct_output = (await run_sacct(remote, job_id)).strip().splitlines()
+        sacct_output = await run_sacct(remote, job_id)
+        assert isinstance(sacct_output, str)
+        sacct_output = sacct_output.strip().splitlines()
         if not sacct_output:
             continue  # the job hasn't shown up in the accounting database yet.
         state = clean_job_state(sacct_output[0])

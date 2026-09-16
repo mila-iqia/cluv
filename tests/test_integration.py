@@ -173,6 +173,7 @@ async def test_status_storage(cluster_status: ClusterStatus):
 TEST_SUBMIT_TIMEOUT_SECONDS = 180
 
 
+@pytest.mark.end_to_end
 @pytest.mark.parametrize(
     "cluster",
     [
@@ -196,6 +197,9 @@ async def test_submit(remote: Remote):
 
     NOTE: This may push the current branch to GitHub when run locally, but in
     GitHub Actions `cluv sync` skips `git push`.
+
+    TODO: Parametrize this test with the different job scripts created by cluv (safe_job.sh).
+    Maybe also move it to `test_examples`? or `test_submit`.
     """
     if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
         pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")

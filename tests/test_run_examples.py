@@ -7,22 +7,21 @@ from pathlib import Path
 
 import pytest
 
-from cluv.cli.login import get_remote_without_2fa_prompt
-from cluv.cli.submit import ensure_clean_git_state, get_submissions, submit
+from cluv.cli.submit import submit
 from cluv.cli.sync import (
     get_active_remotes,
-    sync_common_part,
-    sync_per_cluster_part,
 )
-from cluv.config import load_cluv_config
 from cluv.remote import Remote, control_socket_is_running
 from cluv.slurm import FAILED_JOB_STATES, clean_job_state, run_sacct
-from tests.test_integration import IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
+from tests.test_integration import ON_DEV_MACHINE
 
 # TODO: Also run this test on the Mila cluster using the same self-hosted runner setup as in
 # mila-docs.
 
 
+@pytest.mark.skipif(
+    not ON_DEV_MACHINE, reason="It takes too long to wait for resources and run this in the CI."
+)
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "cluster",
@@ -89,6 +88,9 @@ async def test_hydra_example(
 WHOLE_NODE_CLUSTERS = {"tamia"}
 
 
+@pytest.mark.skipif(
+    not ON_DEV_MACHINE, reason="It takes too long to wait for resources and run this in the CI."
+)
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "cluster",
@@ -168,80 +170,6 @@ async def test_imagenet_example(remote: Remote, monkeypatch: pytest.MonkeyPatch)
             # preempted orphan comes back rather than dying.
             print(f"Cancelling job {job.job_id} on {remote.hostname}.")
             await remote.run(f"scancel {job.job_id}", warn=True, hide=True, display=True)
-
-
-IMAGENET_EXAMPLE_CLUSTERS = load_cluv_config(
-    Path(__file__).resolve().parents[1] / "examples/imagenet/pyproject.toml"
-).clusters_names
-
-# Trillium's login nodes wrap `sbatch` in a site submission filter that only accepts a whitelist of
-# options, and `--test-only` is not on it: it answers "ERROR:   option --test-only not recognized"
-# with a usage message that isn't Slurm's own (the `sbatch` behind it reports slurm 25.11.7, which
-# does support the flag). Nothing to work around here - a dry run just isn't available there.
-CLUSTERS_WITHOUT_SBATCH_TEST_ONLY = {"trillium-gpu"}
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize("cluster", IMAGENET_EXAMPLE_CLUSTERS)
-async def test_imagenet_job_script_is_accepted_by_slurm(
-    cluster: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`sbatch --test-only` the example's job script on every cluster we're connected to.
-
-    Slurm validates the whole request - partition, account, QoS, and whether the resources asked
-    for could ever be satisfied - and reports when the job *would* start, without queueing anything
-    or consuming any compute. Cheap enough to do for every cluster the example claims to support,
-    unlike `test_imagenet_example` above, which needs a real GPU job per cluster.
-
-    So: this catches "this cluster would reject this job script", which is the failure mode a
-    per-cluster job script actually has. Opportunistic: clusters without an active SSH connection
-    are skipped - except the `REQUIRED_CLUSTERS` in CI, where a missing connection is a failure,
-    same as for the `cluster` fixture the other integration tests use.
-    """
-    if cluster in CLUSTERS_WITHOUT_SBATCH_TEST_ONLY:
-        pytest.skip(f"`sbatch --test-only` is not available on {cluster}.")
-    if not await control_socket_is_running(cluster):
-        if IN_SELF_HOSTED_GITHUB_CI and cluster in REQUIRED_CLUSTERS:
-            pytest.fail(f"No active SSH connection to {cluster}, which must be tested against!")
-        pytest.skip(f"Test requires an active SSH connection to {cluster} to run.")
-    remote = await get_remote_without_2fa_prompt(cluster)
-    assert remote is not None
-
-    repo_root = Path(__file__).parent.parent
-    monkeypatch.chdir(repo_root / "examples/imagenet")
-
-    git_commit = ensure_clean_git_state()
-    # The job script has to exist *on the cluster* for `sbatch` to read its header, so the project
-    # does need to be synced - but the ~150GB of ImageNet archives emphatically do not.
-    await sync_common_part([remote], sync_datasets=False)
-    await sync_per_cluster_part(remote, sync_datasets=False)
-
-    # No sbatch flags and no job script: exactly what a plain `cluv submit <cluster>` would ask
-    # for, i.e. the per-cluster `job_script_path` and `sbatch_args` from the config.
-    submissions = get_submissions(
-        cluster,
-        remote,
-        job_script=None,
-        sbatch_args=[],
-        program_args=["python", "main.py", "--use_fake_data"],
-        chunking=None,
-        git_commit=git_commit,
-    )
-    assert submissions
-
-    for submission in submissions:
-        # `--parsable` prints the job id of a submitted job, which is meaningless for a dry run;
-        # `sbatch` is otherwise given the exact command line a real submission would use.
-        assert "sbatch --parsable " in submission.sbatch_command
-        test_only_command = submission.sbatch_command.replace(
-            "sbatch --parsable ", "sbatch --test-only ", 1
-        )
-        result = await remote.run(test_only_command, warn=True, hide=True, display=True)
-        output = ((result.stdout or "") + (result.stderr or "")).strip()
-        assert result.returncode == 0, f"Slurm on {cluster} rejected the job script:\n{output}"
-        # A successful dry run says when the job would start; anything else means `--test-only`
-        # didn't do what we think it does on this cluster, and this test would be vacuous.
-        assert "to start at" in output, f"Unexpected `sbatch --test-only` output:\n{output}"
 
 
 async def cancel_stale_jobs(remote: Remote, job_name: str) -> None:

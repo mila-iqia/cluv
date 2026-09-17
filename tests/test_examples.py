@@ -203,7 +203,7 @@ async def test_example_would_work(
         # TODO: Need to move to the project root directory as part of the sbatch command!
 
         print(f"Running test command: {sbatch_command}")
-        result = await remote.run(sbatch_command, display=True, warn=False, hide=False)
+        result = await remote.run(sbatch_command, display=True, warn=True, hide=False)
         assert result.returncode == 0, (
             f"sbatch --test-only failed with return code {result.returncode}: {result.stderr}"
         )

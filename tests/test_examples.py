@@ -78,7 +78,7 @@ async def skip_unless_connected(cluster: str) -> None:
                         strict=True,
                     ),
                     pytest.mark.xfail(
-                        cluster in ("trillium",),
+                        cluster in ("trillium", "trillium-gpu"),
                         reason="TODO: job output can't be in $HOME, and --mem is not allowed.",
                         strict=True,
                     ),
@@ -125,7 +125,7 @@ async def skip_unless_connected(cluster: str) -> None:
                         strict=True,
                     ),
                     pytest.mark.xfail(
-                        cluster in ("trillium",),
+                        cluster in ("trillium", "trillium-gpu"),
                         # SBATCH ERROR:
                         #  The --mem=... request is not allowed nor necessary on Trillium; all nodes have
                         #  the same amount of available memory (745 GiB) and each job get all the

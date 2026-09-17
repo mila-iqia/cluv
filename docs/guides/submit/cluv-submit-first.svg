@@ -1,0 +1,263 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="440" viewBox="0 0 760 440" role="img" aria-labelledby="t d">
+  <title id="t">cluv submit first</title>
+  <desc id="d">Animation of cluv submit first: the project is synced from the local machine to the Mila, Rorqual and Tamia clusters, concurrent jobs are submitted on each cluster, the first job to start wins, all other jobs are cancelled, and results are synced back to the local machine.</desc>
+  <style>
+    .box  { fill: #eef3f8; stroke: #64748b; stroke-width: 1.2; }
+    .job  { fill: #f5ecdc; stroke: #64748b; stroke-width: 1.2; }
+    .edge { stroke: #8b98a7; stroke-width: 1.3; fill: none; }
+    .lbl  { fill: #1e293b; font-weight: 600; }
+    .mut  { fill: #7d8590; }
+    .dot  { opacity: 0; }
+    .gl   { opacity: 0; font-weight: 700; }
+    .cap  { opacity: 0; }
+    .sync { fill: #3b82f6; }
+    .sub  { fill: #e8912d; }
+    .can  { fill: #e05252; }
+    .res  { fill: #26a269; }
+
+    /* step 1: code sync, local -> clusters */
+    @keyframes mvSync {
+      0%, 2%    { opacity: 0; transform: translate(0, 0); }
+      4%        { opacity: 1; }
+      9%        { opacity: 1; }
+      11%, 100% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+    }
+    /* step 2: job submission, clusters -> jobs */
+    @keyframes mvJob {
+      0%, 15%   { opacity: 0; transform: translate(0, 0); }
+      17%       { opacity: 1; }
+      23%       { opacity: 1; }
+      25%, 100% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+    }
+    /* step 4: cancellation, clusters -> jobs */
+    @keyframes mvCancel {
+      0%, 55%   { opacity: 0; transform: translate(0, 0); }
+      57%       { opacity: 1; }
+      59%       { opacity: 1; }
+      61%, 100% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+    }
+    /* step 5: results back, winner cluster -> local */
+    @keyframes mvRet {
+      0%, 68%   { opacity: 0; transform: translate(0, 0); }
+      70%       { opacity: 1; }
+      76%       { opacity: 1; }
+      78%, 100% { opacity: 0; transform: translate(var(--dx), var(--dy)); }
+    }
+
+    /* job area (edges + labels) hidden during the sync step */
+    @keyframes grpIn {
+      0%, 14%   { opacity: 0; }
+      17%, 100% { opacity: 1; }
+    }
+
+    /* jobs: appear waiting, pulse while queued, then cancelled */
+    @keyframes jWait2Cancel {
+      0%, 24%   { opacity: 0; fill: #f5ecdc; }
+      27%, 30%  { opacity: 1; fill: #f5ecdc; }
+      34%       { fill: #fbeacd; }
+      38%       { fill: #f5ecdc; }
+      42%       { fill: #fbeacd; }
+      46%, 58%  { fill: #f5ecdc; }
+      61%, 95%  { fill: #e3e7ec; }
+      98%, 100% { fill: #f5ecdc; }
+    }
+    @keyframes jFail {
+      0%, 24%   { opacity: 0; fill: #f5ecdc; }
+      27%       { opacity: 1; }
+      30%       { fill: #f5ecdc; }
+      33%, 95%  { fill: #fadada; }
+      98%, 100% { fill: #f5ecdc; }
+    }
+    @keyframes jRun {
+      0%, 24%   { opacity: 0; fill: #f5ecdc; }
+      27%       { opacity: 1; }
+      34%       { fill: #fbeacd; }
+      38%       { fill: #f5ecdc; }
+      42%       { fill: #fbeacd; }
+      46%       { fill: #f5ecdc; }
+      51%, 95%  { fill: #d9efe2; }
+      98%, 100% { fill: #f5ecdc; }
+    }
+
+    @keyframes gCancel {
+      0%, 59%   { opacity: 0; }
+      61%, 95%  { opacity: 1; }
+      97%, 100% { opacity: 0; }
+    }
+    @keyframes gFail {
+      0%, 31%   { opacity: 0; }
+      33%, 95%  { opacity: 1; }
+      97%, 100% { opacity: 0; }
+    }
+    @keyframes gRun {
+      0%, 49%   { opacity: 0; }
+      51%, 95%  { opacity: 1; }
+      97%, 100% { opacity: 0; }
+    }
+
+    /* clusters: blue on sync, red on cancel (Mila/Tamia), green on win + results (Rorqual) */
+    @keyframes cluMT {
+      0%, 9%    { fill: #eef3f8; }
+      11%, 14%  { fill: #cfe2ff; }
+      16%, 57%  { fill: #eef3f8; }
+      59%, 62%  { fill: #fbdada; }
+      64%, 100% { fill: #eef3f8; }
+    }
+    @keyframes cluRor {
+      0%, 9%    { fill: #eef3f8; }
+      11%, 14%  { fill: #cfe2ff; }
+      16%, 50%  { fill: #eef3f8; }
+      52%, 57%  { fill: #d9efe2; }
+      59%, 68%  { fill: #eef3f8; }
+      70%, 77%  { fill: #d9efe2; }
+      79%, 100% { fill: #eef3f8; }
+    }
+    @keyframes hdF {
+      0%, 78%   { fill: #eef3f8; }
+      80%, 90%  { fill: #d9efe2; }
+      92%, 100% { fill: #eef3f8; }
+    }
+
+    /* step captions, one visible per step */
+    @keyframes cap1 { 0%, 1% { opacity: 0; } 3%, 12% { opacity: 1; } 14%, 100% { opacity: 0; } }
+    @keyframes cap2 { 0%, 15% { opacity: 0; } 17%, 29% { opacity: 1; } 31%, 100% { opacity: 0; } }
+    @keyframes cap3 { 0%, 33% { opacity: 0; } 35%, 50% { opacity: 1; } 52%, 100% { opacity: 0; } }
+    @keyframes cap4 { 0%, 54% { opacity: 0; } 56%, 64% { opacity: 1; } 66%, 100% { opacity: 0; } }
+    @keyframes cap5 { 0%, 67% { opacity: 0; } 69%, 90% { opacity: 1; } 92%, 100% { opacity: 0; } }
+
+    .pS  { animation: mvSync 14s linear infinite; }
+    .jgrp { animation: grpIn 14s linear infinite; }
+    .pJ  { animation: mvJob 14s linear infinite; }
+    .pC  { animation: mvCancel 14s linear infinite; }
+    .pR  { animation: mvRet 14s linear infinite; }
+    .jWC { animation: jWait2Cancel 14s linear infinite; }
+    .jF  { animation: jFail 14s linear infinite; }
+    .jR  { animation: jRun 14s linear infinite; }
+    .gC  { animation: gCancel 14s linear infinite; }
+    .gF  { animation: gFail 14s linear infinite; }
+    .gR  { animation: gRun 14s linear infinite; }
+    .cluMT  { animation: cluMT 14s linear infinite; }
+    .cluRor { animation: cluRor 14s linear infinite; }
+    .hd  { animation: hdF 14s linear infinite; }
+    .c1 { animation: cap1 14s linear infinite; }
+    .c2 { animation: cap2 14s linear infinite; }
+    .c3 { animation: cap3 14s linear infinite; }
+    .c4 { animation: cap4 14s linear infinite; }
+    .c5 { animation: cap5 14s linear infinite; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .dot, .gl { display: none; }
+      .cap2, .cap3, .cap4, .cap5 { display: none; }
+      .cap1 { opacity: 1; animation: none !important; }
+      .box, .job, .jgrp { animation: none !important; }
+    }
+  </style>
+
+  <text class="mut" x="20" y="26" font-family="ui-monospace, 'SF Mono', Menlo, monospace" font-size="13">cluv submit first</text>
+
+  <!-- edges -->
+  <g class="edge">
+    <line x1="380" y1="74"  x2="140" y2="150"/>
+    <line x1="380" y1="74"  x2="380" y2="150"/>
+    <line x1="380" y1="74"  x2="620" y2="150"/>
+    <g class="jgrp">
+      <line x1="140" y1="182" x2="92"  y2="260"/>
+      <line x1="140" y1="182" x2="140" y2="260"/>
+      <line x1="140" y1="182" x2="188" y2="260"/>
+      <line x1="380" y1="182" x2="356" y2="260"/>
+      <line x1="380" y1="182" x2="404" y2="260"/>
+      <line x1="620" y1="182" x2="620" y2="260"/>
+    </g>
+  </g>
+
+  <!-- nodes -->
+  <g font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+    <rect class="box hd" x="315" y="40" width="130" height="34" rx="6"/>
+    <text class="lbl" x="380" y="62" font-size="13.5" text-anchor="middle">Local machine</text>
+
+    <rect class="box cluMT"  x="90"  y="150" width="100" height="32" rx="6"/>
+    <text class="lbl" x="140" y="171" font-size="13" text-anchor="middle">Mila</text>
+    <rect class="box cluRor" x="330" y="150" width="100" height="32" rx="6"/>
+    <text class="lbl" x="380" y="171" font-size="13" text-anchor="middle">Rorqual</text>
+    <rect class="box cluMT"  x="570" y="150" width="100" height="32" rx="6"/>
+    <text class="lbl" x="620" y="171" font-size="13" text-anchor="middle">Tamia</text>
+
+    <!-- jobs -->
+    <rect class="job jWC" x="74"  y="260" width="36" height="28" rx="4"/>
+    <rect class="job jF"  x="122" y="260" width="36" height="28" rx="4"/>
+    <rect class="job jWC" x="170" y="260" width="36" height="28" rx="4"/>
+    <rect class="job jWC" x="338" y="260" width="36" height="28" rx="4"/>
+    <rect class="job jR"  x="386" y="260" width="36" height="28" rx="4"/>
+    <rect class="job jWC" x="602" y="260" width="36" height="28" rx="4"/>
+    <g class="jgrp" font-size="10" fill="#1e293b" text-anchor="middle">
+      <text x="92"  y="278">J1</text>
+      <text x="140" y="278">J2</text>
+      <text x="188" y="278">J3</text>
+      <text x="356" y="278">J1</text>
+      <text x="404" y="278">J2</text>
+      <text x="620" y="278">J1</text>
+    </g>
+    <!-- status glyphs -->
+    <g font-size="11" text-anchor="middle">
+      <text class="gl gC" x="110" y="259" fill="#c0392b">&#10007;</text>
+      <text class="gl gF" x="158" y="259" fill="#c0392b">&#10007;</text>
+      <text class="gl gC" x="206" y="259" fill="#c0392b">&#10007;</text>
+      <text class="gl gC" x="374" y="259" fill="#c0392b">&#10007;</text>
+      <text class="gl gR" x="422" y="259" fill="#26a269">&#9654;</text>
+      <text class="gl gC" x="638" y="259" fill="#c0392b">&#10007;</text>
+    </g>
+    <text class="gl gF" x="140" y="306" font-size="10.5" font-style="italic" fill="#c0392b" text-anchor="middle">invalid submission &#8594; rejected</text>
+
+    <!-- step captions -->
+    <g font-size="13.5" fill="#1e293b" text-anchor="middle">
+      <text class="cap cap1 c1" x="380" y="340">1 &#8212; Sync the project to Mila, Rorqual &amp; Tamia</text>
+      <text class="cap cap2 c2" x="380" y="340">2 &#8212; Submit concurrent jobs on every cluster</text>
+      <text class="cap cap3 c3" x="380" y="340">3 &#8212; Wait for the first job to start</text>
+      <text class="cap cap4 c4" x="380" y="340">4 &#8212; First job started &#8594; scancel all the others</text>
+      <text class="cap cap5 c5" x="380" y="340">5 &#8212; Sync results back to the local machine</text>
+    </g>
+
+    <!-- legend: message types row, job states row -->
+    <g font-size="12">
+      <circle class="sync" cx="118" cy="384" r="5"/>
+      <text class="mut" x="130" y="388">sync project</text>
+      <circle class="sub"  cx="252" cy="384" r="5"/>
+      <text class="mut" x="264" y="388">submit jobs</text>
+      <circle class="can"  cx="372" cy="384" r="5"/>
+      <text class="mut" x="384" y="388">cancel jobs</text>
+      <circle class="res"  cx="492" cy="384" r="5"/>
+      <text class="mut" x="504" y="388">sync results</text>
+
+      <rect class="job" x="150" y="404" width="14" height="12" rx="2"/>
+      <text class="mut" x="172" y="414">waiting</text>
+      <rect fill="#d9efe2" stroke="#64748b" stroke-width="1.2" x="270" y="404" width="14" height="12" rx="2"/>
+      <text class="mut" x="292" y="414">running</text>
+      <rect fill="#fadada" stroke="#64748b" stroke-width="1.2" x="390" y="404" width="14" height="12" rx="2"/>
+      <text class="mut" x="412" y="414">failed</text>
+      <rect fill="#e3e7ec" stroke="#64748b" stroke-width="1.2" x="490" y="404" width="14" height="12" rx="2"/>
+      <text class="mut" x="512" y="414">cancelled</text>
+    </g>
+  </g>
+
+  <!-- pulses -->
+  <g>
+    <circle class="dot sync pS" cx="380" cy="74" r="5" style="--dx:-240px; --dy:76px"/>
+    <circle class="dot sync pS" cx="380" cy="74" r="5" style="--dx:0px;    --dy:76px"/>
+    <circle class="dot sync pS" cx="380" cy="74" r="5" style="--dx:240px;  --dy:76px"/>
+
+    <circle class="dot sub pJ" cx="140" cy="182" r="5" style="--dx:-48px; --dy:78px"/>
+    <circle class="dot sub pJ" cx="140" cy="182" r="5" style="--dx:0px;   --dy:78px"/>
+    <circle class="dot sub pJ" cx="140" cy="182" r="5" style="--dx:48px;  --dy:78px"/>
+    <circle class="dot sub pJ" cx="380" cy="182" r="5" style="--dx:-24px; --dy:78px"/>
+    <circle class="dot sub pJ" cx="380" cy="182" r="5" style="--dx:24px;  --dy:78px"/>
+    <circle class="dot sub pJ" cx="620" cy="182" r="5" style="--dx:0px;   --dy:78px"/>
+
+    <circle class="dot can pC" cx="140" cy="182" r="5" style="--dx:-48px; --dy:78px"/>
+    <circle class="dot can pC" cx="140" cy="182" r="5" style="--dx:0px;   --dy:78px"/>
+    <circle class="dot can pC" cx="140" cy="182" r="5" style="--dx:48px;  --dy:78px"/>
+    <circle class="dot can pC" cx="380" cy="182" r="5" style="--dx:-24px; --dy:78px"/>
+    <circle class="dot can pC" cx="620" cy="182" r="5" style="--dx:0px;   --dy:78px"/>
+
+    <circle class="dot res pR" cx="380" cy="150" r="5" style="--dx:0px; --dy:-76px"/>
+  </g>
+</svg>

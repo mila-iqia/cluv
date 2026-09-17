@@ -99,7 +99,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 job_script,
                 marks=[
                     pytest.mark.xfail(
-                        cluster in ("killarney", "fir", "nibi"),
+                        cluster in ("killarney", "rorqual", "fir", "nibi"),
                         reason="TODO: Multiple (_cpu) allocations, and account isn't specified in the example's pyproject file.",
                         strict=True,
                     ),

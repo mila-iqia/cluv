@@ -59,24 +59,6 @@ SUBMIT_SUPPORTED_CLUSTERS = {"mila", "rorqual"}
 # reusable SSH connections to those clusters.
 
 
-@pytest.fixture(autouse=True)
-def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
-    """Mock the $HOME directory in a self-hosted runner, so that it is able to sync the project
-    in its _work folder with the actual project path on the cluster.
-
-    The folder structure goes like this:
-
-    <some_path>/action-runners/some_name/_work/cluv/cluv
-    """
-    # NOTE: The second part of this condition is used to debug the self-hosted tests by opening
-    # the _work folder and running tests there.
-    if IN_SELF_HOSTED_GITHUB_CI or "_work" in Path.cwd().parts:
-        work_folder = (
-            Path.cwd().parent.parent
-        )  # This should be the _work folder in the self-hosted runner
-        monkeypatch.setattr(Path, "home", lambda: work_folder)
-
-
 async def test_login(remote: Remote):
     assert (await login([remote.hostname])) == [remote]
 

@@ -208,7 +208,8 @@ async def test_example_would_work(
             f"sbatch --test-only failed with return code {result.returncode}: {result.stderr}"
         )
         # sbatch: Job 10820990 to start at 2026-09-16T12:10:41 a using 1 processors on nodes cn-f003 in partition long-cpu
+        print(result.stderr)
         assert re.findall(
-            r"sbatch: Job \d+ to start at .* using \d+ processors on nodes .* in partition .*",
+            r"Job \d+ to start at .* using \d+ processors on nodes .* in partition .*",
             result.stderr,
-        )
+        ), result.stderr

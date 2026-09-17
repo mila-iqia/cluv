@@ -436,6 +436,7 @@ def get_submissions(
     job_env_vars = get_job_env_vars(
         cluster=cluster, git_commit=git_commit, cluster_config=cluster_config
     )
+    project_dir_on_cluster = cluster_config.project_dir
     cluster_job_script_path = get_cluster_job_script_path(
         local_job_script_path=job_script, cluster=cluster, cluster_config=cluster_config
     )
@@ -452,6 +453,7 @@ def get_submissions(
             job_script=cluster_job_script_path,
             sbatch_args=job_resources,
             program_args=program_args,
+            project_dir_on_cluster=project_dir_on_cluster,
         )
         submissions.append(
             Submission(
@@ -610,6 +612,7 @@ def get_sbatch_command(
     sbatch_args: SbatchArgs,
     program_args: list[str],
     env_vars: dict[str, str],
+    project_dir_on_cluster: PurePosixPath | None = None,
 ) -> str:
     """Generate the command to submit the job via `sbatch` on the cluster."""
     if job_script.is_absolute():
@@ -642,8 +645,13 @@ def get_sbatch_command(
     # itself to expand. That only holds together because the whole inner command is quoted in one
     # go below - `shlex.join`'s quotes would otherwise close a hand-written `'...'` around it, and
     # an argument containing a space would break apart (POSIX single quotes don't nest).
+    if env_vars_prefix:
+        env_vars_prefix += "; "
+    cd_command = ""
+    if project_dir_on_cluster:
+        cd_command = f"cd {project_dir_on_cluster} && "
     inner_command = (
-        f"{env_vars_prefix} sbatch --parsable {' '.join(sbatch_flags)} {job_script} "
+        f"{env_vars_prefix}{cd_command}sbatch --parsable {' '.join(sbatch_flags)} {job_script} "
         f"{shlex.join(program_args)}"
     )
     return f"bash --login -c {shlex.quote(inner_command)}"

@@ -78,7 +78,7 @@ async def skip_unless_connected(cluster: str) -> None:
                         strict=True,
                     ),
                     pytest.mark.xfail(
-                        cluster in ("trillium",),
+                        cluster in ("trillium", "trillium-gpu"),
                         reason="TODO: job output can't be in $HOME, and --mem is not allowed.",
                         strict=True,
                     ),
@@ -99,7 +99,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 job_script,
                 marks=[
                     pytest.mark.xfail(
-                        cluster in ("killarney", "fir", "nibi"),
+                        cluster in ("killarney", "rorqual", "fir", "nibi"),
                         reason="TODO: Multiple (_cpu) allocations, and account isn't specified in the example's pyproject file.",
                         strict=True,
                     ),
@@ -125,7 +125,7 @@ async def skip_unless_connected(cluster: str) -> None:
                         strict=True,
                     ),
                     pytest.mark.xfail(
-                        cluster in ("trillium",),
+                        cluster in ("trillium", "trillium-gpu"),
                         # SBATCH ERROR:
                         #  The --mem=... request is not allowed nor necessary on Trillium; all nodes have
                         #  the same amount of available memory (745 GiB) and each job get all the
@@ -203,12 +203,13 @@ async def test_example_would_work(
         # TODO: Need to move to the project root directory as part of the sbatch command!
 
         print(f"Running test command: {sbatch_command}")
-        result = await remote.run(sbatch_command, display=True, warn=False, hide=False)
+        result = await remote.run(sbatch_command, display=True, warn=True, hide=False)
         assert result.returncode == 0, (
             f"sbatch --test-only failed with return code {result.returncode}: {result.stderr}"
         )
         # sbatch: Job 10820990 to start at 2026-09-16T12:10:41 a using 1 processors on nodes cn-f003 in partition long-cpu
+        print(result.stderr)
         assert re.findall(
-            r"sbatch: Job \d+ to start at .* using \d+ processors on nodes .* in partition .*",
+            r"Job \d+ to start at .* using \d+ processors on nodes .* in partition .*",
             result.stderr,
-        )
+        ), result.stderr

@@ -12,6 +12,24 @@ from cluv.remote import control_socket_is_running
 from tests.test_integration import ALL_CLUSTERS, IN_SELF_HOSTED_GITHUB_CI, REQUIRED_CLUSTERS
 
 
+@pytest.fixture(autouse=IN_SELF_HOSTED_GITHUB_CI or "_work" in Path.cwd().parts)
+def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
+    """Mock the $HOME directory in a self-hosted runner, so that it is able to sync the project
+    in its _work folder with the actual project path on the cluster.
+
+    The folder structure goes like this:
+
+    <some_path>/action-runners/some_name/_work/cluv/cluv
+    """
+    # NOTE: The second part of this condition is used to debug the self-hosted tests by opening
+    # the _work folder and running tests there.
+    assert "_work" in Path.cwd().parts
+    work_folder = (
+        Path.cwd().parent.parent
+    )  # This should be the _work folder in the self-hosted runner
+    monkeypatch.setattr(Path, "home", lambda: work_folder)
+
+
 @pytest.fixture
 def fake_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Fixture to set a fake SCRATCH environment variable if it's not already set."""

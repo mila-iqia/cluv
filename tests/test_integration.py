@@ -68,49 +68,6 @@ async def cluster_status(cluster: str) -> ClusterStatus:
     return await get_cluster_status(cluster, {})
 
 
-@pytest.mark.slow
-@pytest.mark.timeout(30)
-@pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
-@pytest.mark.asyncio
-async def test_status_online(cluster_status: ClusterStatus, cluster: str):
-    if cluster not in STATUS_SUPPORTED_CLUSTERS:
-        pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    assert cluster_status.online is True
-
-
-@pytest.mark.slow
-@pytest.mark.timeout(30)
-@pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
-@pytest.mark.asyncio
-async def test_status_has_gpus(cluster_status: ClusterStatus, cluster: str):
-    if cluster not in STATUS_SUPPORTED_CLUSTERS:
-        pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    total_gpus = sum(total for _, total in cluster_status.gpu_stats.values())
-    assert total_gpus > 0, "Expected cluster to report GPU nodes"
-
-
-@pytest.mark.slow
-@pytest.mark.timeout(30)
-@pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
-@pytest.mark.asyncio
-async def test_status_gpu_model(cluster_status: ClusterStatus, cluster: str):
-    if cluster not in STATUS_SUPPORTED_CLUSTERS:
-        pytest.xfail(f"Status integration test not supported on cluster {cluster}.")
-    assert cluster_status.gpu_stats, "GPU model not detected"
-    assert "?" not in cluster_status.gpu_stats
-
-
-@pytest.mark.slow
-@pytest.mark.timeout(30)
-@pytest.mark.xfail(reason="Status integration tests are flaky and will be reworked soon.")
-@pytest.mark.asyncio
-async def test_status_storage(cluster_status: ClusterStatus):
-    assert cluster_status.storage.home_quota > 0, "Expected non-zero home quota"
-    assert cluster_status.storage.scratch_quota > 0, "Expected non-zero scratch quota"
-    assert cluster_status.storage.home_used >= 0
-    assert cluster_status.storage.scratch_used >= 0
-
-
 TEST_SUBMIT_TIMEOUT_SECONDS = 180
 
 

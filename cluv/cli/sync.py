@@ -742,7 +742,7 @@ async def fetch_results(
             f"{results_path_here}/",
         ),
         warn=True,
-        hide=False,
+        hide="out",  # hide the stdout
     )
 
     remote_runs = await list_remote_run_dirs(remote, results_path_on_cluster)

@@ -73,6 +73,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 job_script,
                 None,
                 marks=[
+                    pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
                         cluster in ("fir", "nibi"),
                         reason="TODO: Multiple _cpu allocations, and account isn't specified in pyproject of cluv root.",
@@ -98,8 +99,9 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "pytorch-example",
                 cluster,
                 job_script,
-                ("--vram=10GB"),
+                vram,
                 marks=[
+                    pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
                         cluster in ("killarney", "rorqual", "fir", "nibi"),
                         reason="TODO: Multiple (_cpu) allocations, and account isn't specified in the example's pyproject file.",
@@ -107,6 +109,7 @@ async def skip_unless_connected(cluster: str) -> None:
                     ),
                 ],
             )
+            for vram in [None, "10GB"]
             for cluster in pytorch_example_clusters
             for job_script in (REPO_ROOT / "examples" / "pytorch-example" / "scripts").iterdir()
         ],
@@ -117,6 +120,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 job_script,
                 None,
                 marks=[
+                    pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
                         cluster in ("fir", "nibi"),
                         reason="TODO: multiple allocations",
@@ -159,6 +163,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 None,
                 marks=[
                     # Should work everywhere!
+                    pytest.mark.xdist_group(cluster),
                 ],
             )
             for cluster in imagenet_example_clusters
@@ -197,10 +202,11 @@ async def test_example_would_work(
         cluster,
         remote=remote,
         job_script=job_script,
-        sbatch_args=[vram_flag] if vram_flag else [],
+        sbatch_args=[],
         program_args=program_args,
         chunking=None,
         git_commit=current_commit,
+        vram=vram_flag,
     )
     for submission in submissions:
         sbatch_command = submission.sbatch_command

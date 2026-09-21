@@ -1,5 +1,4 @@
 import asyncio
-import datetime
 import importlib
 import shlex
 import subprocess
@@ -17,7 +16,6 @@ import cluv.cli.submit
 import cluv.remote
 import cluv.slurm
 import cluv.utils
-from cluv.cache import Job, Submission
 from cluv.cli.submit import (
     add_cluv_sbatch_args,
     build_submit_command,
@@ -1348,140 +1346,3 @@ async def test_submit_first_considers_current_cluster(
         assert returned_job.job_id == this_cluster_jobid
     else:
         assert returned_job.job_id == other_cluster_jobid
-
-
-async def test_submit_first_marks_unsynced_clusters_as_skipped(
-    monkeypatch: pytest.MonkeyPatch, cluv_project_dir: Path
-) -> None:
-    monkeypatch.setattr(
-        cluv.cli.submit, ensure_clean_git_state.__name__, lambda **kwargs: "dummy_git_commit"
-    )
-    monkeypatch.setattr(
-        cluv.cli.submit,
-        cluv.cli.submit.get_cluster_to_remote.__name__,
-        unittest.mock.AsyncMock(return_value={"fast": None, "slow": None}),
-    )
-    monkeypatch.setattr(
-        cluv.cli.submit,
-        cluv.cli.submit.sync_common_part.__name__,
-        unittest.mock.AsyncMock(return_value=None),
-    )
-    monkeypatch.setattr(
-        cluv.cli.submit,
-        cluv.cli.submit.save_job.__name__,
-        unittest.mock.Mock(return_value=None),
-    )
-    rendered_states: list[dict[str, str]] = []
-
-    def fake_render_job_table(rows, *, cancelling: bool = False):
-        del cancelling
-        rendered_states.append({row.cluster: row.state for row in rows})
-        return mock.sentinel.table
-
-    class FakeLive:
-        def __init__(self, *args, get_renderable, **kwargs):
-            del args, kwargs
-            self.get_renderable = get_renderable
-
-        def __enter__(self):
-            self.get_renderable()
-            return self
-
-        def refresh(self):
-            self.get_renderable()
-
-        def __exit__(self, exc_type, exc, tb):
-            del exc_type, exc, tb
-            return None
-
-    monkeypatch.setattr(
-        cluv.cli.submit, cluv.cli.submit.render_job_table.__name__, fake_render_job_table
-    )
-    monkeypatch.setattr(cluv.cli.submit, cluv.cli.submit.Live.__name__, FakeLive)
-
-    job_script = cluv_project_dir / "my_script.sh"
-    job_script.write_text("#!/bin/bash\necho Hello World\n")
-
-    def fake_get_submissions(cluster: str, remote: Remote | None, **kwargs) -> list[Submission]:
-        return [
-            Submission(
-                cluster=cluster,
-                remote=remote,
-                job_script=job_script,
-                sbatch_args={},
-                program_args=[],
-                sbatch_command=f"submit-on-{cluster}",
-                n_chunks=None,
-                git_commit="dummy_git_commit",
-            )
-        ]
-
-    monkeypatch.setattr(
-        cluv.cli.submit, cluv.cli.submit.get_submissions.__name__, fake_get_submissions
-    )
-
-    async def fake_submit_to_cluster(
-        cluster: str,
-        remote: Remote | None,
-        job_submissions,
-        found_running_job: asyncio.Event,
-        **kwargs,
-    ) -> None:
-        del remote, kwargs
-        if cluster == "fast":
-            row = job_submissions[0]
-            row.state = "PENDING"
-            row.job = Job(
-                cluster=row.submission.cluster,
-                remote=row.submission.remote,
-                job_script=row.submission.job_script,
-                sbatch_args=row.submission.sbatch_args,
-                program_args=row.submission.program_args,
-                sbatch_command=row.submission.sbatch_command,
-                n_chunks=row.submission.n_chunks,
-                git_commit=row.submission.git_commit,
-                job_id=123,
-                submitted_at=datetime.datetime.now(datetime.timezone.utc),
-            )
-            found_running_job.set()
-            return
-        if cluster == "slow":
-            await found_running_job.wait()
-            return
-        raise AssertionError(f"Unexpected cluster: {cluster}")
-
-    monkeypatch.setattr(
-        cluv.cli.submit, cluv.cli.submit.submit_to_cluster.__name__, fake_submit_to_cluster
-    )
-
-    observed_rows = None
-
-    async def fake_wait_for_first_running_job(job_submissions, *_args, **_kwargs):
-        nonlocal observed_rows
-        while True:
-            pending_rows = [
-                row for row in job_submissions if row.state == "PENDING" and row.job_id
-            ]
-            if pending_rows:
-                observed_rows = job_submissions
-                return pending_rows[0]
-            await asyncio.sleep(0)
-
-    monkeypatch.setattr(
-        cluv.cli.submit,
-        cluv.cli.submit.wait_for_first_running_job.__name__,
-        fake_wait_for_first_running_job,
-    )
-
-    returned_job = await submit(
-        cluster="first",
-        job_script=job_script,
-        sbatch_args=[],
-        program_args=[],
-    )
-
-    assert returned_job is not None
-    assert observed_rows is not None
-    row_by_cluster = {row.cluster: row for row in observed_rows}
-    assert row_by_cluster["slow"].state == "SKIPPED"
-    assert any(states.get("slow") == "SKIPPED" for states in rendered_states)

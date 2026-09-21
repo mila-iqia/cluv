@@ -103,6 +103,14 @@ async def skip_unless_connected(cluster: str) -> None:
                 marks=[
                     pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
+                        cluster == "mila" and vram is not None,
+                        reason=(
+                            "TODO: Mila cluster doesn't have floating H100 gpus, they are in a dedicated partition. "
+                            "Using --vram somehow adds --gpus=h100:1."
+                        ),
+                        strict=True,
+                    ),
+                    pytest.mark.xfail(
                         cluster in ("killarney", "rorqual", "fir", "nibi"),
                         reason="TODO: Multiple (_cpu) allocations, and account isn't specified in the example's pyproject file.",
                         strict=True,

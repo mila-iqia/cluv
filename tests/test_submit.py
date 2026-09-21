@@ -236,7 +236,7 @@ class TestGetSbatchCommand:
         assert sbatch_command == (
             "bash --login -c 'MY_VAR=1 SPECIAL_MILA_VAR=xyz "
             # Ugly, quite hard-coded.
-            f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster} "
+            f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster}; "
             "sbatch --parsable --account=my_account --mem=8G --job-name=cluv-my_script "
             f"--output={results_path}/{cluster}_%j/slurm-%j.out --chdir=$HOME/my_project "
             "--export=ALL "
@@ -345,7 +345,7 @@ class TestGetSbatchCommand:
         )
 
         assert sbatch_command == (
-            "bash --login -c 'MY_VAR=2 GIT_COMMIT=abecdef CLUV_CLUSTER=mila "
+            "bash --login -c 'MY_VAR=2 GIT_COMMIT=abecdef CLUV_CLUSTER=mila; "
             "sbatch --parsable --job-name=cluv-my_script "
             f"--output={results_path}/mila_%j/slurm-%j.out --chdir=$HOME/my_project --export=ALL "
             "$HOME/my_project/scripts/my_script.sh '"
@@ -491,7 +491,7 @@ class TestGetSbatchCommand:
         export_flag = next(f for f in sbatch_command.split() if f.startswith("--export="))
         assert export_flag == "--export=ALL"
         # `ALL` is only worth anything because the variables are on the submitting shell:
-        assert "WANDB_MODE=offline GIT_COMMIT=abc123 CLUV_CLUSTER=mila sbatch" in sbatch_command
+        assert "WANDB_MODE=offline GIT_COMMIT=abc123 CLUV_CLUSTER=mila; sbatch" in sbatch_command
 
     def test_caller_supplied_export_flag_is_replaced_by_cluvs_own(self, project_dir: Path) -> None:
         """A user-supplied `--export=...` is overwritten with cluv's `ALL`, not kept.

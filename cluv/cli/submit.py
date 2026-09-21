@@ -666,8 +666,10 @@ def get_sbatch_command(
     # itself to expand. That only holds together because the whole inner command is quoted in one
     # go below - `shlex.join`'s quotes would otherwise close a hand-written `'...'` around it, and
     # an argument containing a space would break apart (POSIX single quotes don't nest).
+    if env_vars_prefix:
+        env_vars_prefix += "; "
     inner_command = (
-        f"{env_vars_prefix} sbatch --parsable {' '.join(sbatch_flags)} {job_script} "
+        f"{env_vars_prefix}sbatch --parsable {' '.join(sbatch_flags)} {job_script} "
         f"{shlex.join(program_args)}"
     )
     return f"bash --login -c {shlex.quote(inner_command)}"

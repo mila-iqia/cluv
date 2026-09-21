@@ -111,6 +111,14 @@ async def skip_unless_connected(cluster: str) -> None:
                         strict=True,
                     ),
                     pytest.mark.xfail(
+                        cluster == "tamia" and vram is not None,
+                        reason=(
+                            "TODO: Tamia requires whole-node allocation for H100s, and doesn't have MIG. "
+                            "--vram adds --gpus=h100:1."
+                        ),
+                        strict=True,
+                    ),
+                    pytest.mark.xfail(
                         cluster in ("killarney", "rorqual", "fir", "nibi"),
                         reason="TODO: Multiple (_cpu) allocations, and account isn't specified in the example's pyproject file.",
                         strict=True,

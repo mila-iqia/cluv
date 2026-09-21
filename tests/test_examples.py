@@ -64,13 +64,14 @@ async def skip_unless_connected(cluster: str) -> None:
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    ("project_dir", "cluster", "job_script"),
+    ("project_dir", "cluster", "job_script", "vram_flag"),
     [
         *[
             pytest.param(
                 REPO_ROOT,
                 cluster,
                 job_script,
+                None,
                 marks=[
                     pytest.mark.xfail(
                         cluster in ("fir", "nibi"),
@@ -97,6 +98,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "pytorch-example",
                 cluster,
                 job_script,
+                ("--vram=10GB"),
                 marks=[
                     pytest.mark.xfail(
                         cluster in ("killarney", "rorqual", "fir", "nibi"),
@@ -113,6 +115,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "hydra_example",
                 cluster,
                 job_script,
+                None,
                 marks=[
                     pytest.mark.xfail(
                         cluster in ("fir", "nibi"),
@@ -153,6 +156,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "imagenet",
                 cluster,
                 None,
+                None,
                 marks=[
                     # Should work everywhere!
                 ],
@@ -168,6 +172,7 @@ async def test_example_would_work(
     project_dir: Path,
     cluster: str,
     job_script: Path | None,
+    vram_flag: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Test that `sbatch --test-only` works for that project, cluster and (optional) job script."""
@@ -188,11 +193,11 @@ async def test_example_would_work(
     else:
         remote = (await sync([cluster], sync_datasets=False))[0]
 
-    submissions = get_submissions(
+    submissions = await get_submissions(
         cluster,
         remote=remote,
         job_script=job_script,
-        sbatch_args=[],
+        sbatch_args=[vram_flag] if vram_flag else [],
         program_args=program_args,
         chunking=None,
         git_commit=current_commit,

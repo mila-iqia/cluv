@@ -416,10 +416,11 @@ async def run_scancel(jobs: list[SubmissionProgress]) -> None:
         return
     by_remote: dict[Remote | None, list[SubmissionProgress]] = {}
     for job in jobs:
-        by_remote.setdefault(job.submission.remote, []).append(job)
+        if job.job_id is not None:
+            by_remote.setdefault(job.submission.remote, []).append(job)
 
     async def cancel(remote: Remote | None, cluster_rows: list[SubmissionProgress]) -> None:
-        job_ids = [job.job_id for job in cluster_rows]
+        job_ids = [job.job_id for job in cluster_rows if job.job_id is not None]
         scancel_command = f"scancel {' '.join(map(str, job_ids))}"
         if remote is not None:
             await remote.get_output(scancel_command, hide=True)
@@ -427,7 +428,11 @@ async def run_scancel(jobs: list[SubmissionProgress]) -> None:
             await run(tuple(shlex.split(scancel_command)), hide=True)
 
     await asyncio.gather(
-        *(cancel(remote, cluster_rows) for remote, cluster_rows in by_remote.items())
+        *(
+            cancel(remote, cluster_rows)
+            for remote, cluster_rows in by_remote.items()
+            if cluster_rows
+        )
     )
 
 

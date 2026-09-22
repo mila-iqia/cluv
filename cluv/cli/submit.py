@@ -1,6 +1,8 @@
 import asyncio
+import collections
 import dataclasses
 import datetime
+import itertools
 import logging
 import os
 import re
@@ -27,7 +29,7 @@ from cluv.config import ClusterConfig, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.sbatch_args import SbatchArgs, sbatch_args_from_list, sbatch_args_to_list
 from cluv.slurm import FAILED_JOB_STATES, run_saccts
-from cluv.utils import console, group_by_cluster
+from cluv.utils import console, gather_dict, group_by_cluster
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,7 @@ class SubmissionProgress:
     submission: Submission
     state: JobState = "SYNCING"
     job: Job | None = None
-    error: str | None = None
+    error: JobSubmissionFailed | None = None
 
     @property
     def cluster(self) -> str:
@@ -96,7 +98,7 @@ def _short_command(submission: Submission) -> str:
 
 
 def render_job_table(
-    rows: list[SubmissionProgress], *, cancelling: bool = False
+    cluster_to_job_submissions: dict[str, list[SubmissionProgress]], *, cancelling: bool = False
 ) -> rich.table.Table:
     """Render the current state of every submission as a single table.
 
@@ -116,13 +118,15 @@ def render_job_table(
         title_style="bold cyan",
         expand=True,
     )
-    for row in rows:
-        table.add_row(
-            row.cluster,
-            str(row.job_id) if row.job_id is not None else "-",
-            rich.text.Text(row.state, style=_state_style(row.state)),
-            _short_command(row.submission),
-        )
+    for cluster_name, cluster_jobs in cluster_to_job_submissions.items():
+        for job_row in cluster_jobs:
+            assert job_row.cluster == cluster_name
+            table.add_row(
+                job_row.cluster,
+                str(job_row.job_id) if job_row.job_id is not None else "-",
+                rich.text.Text(job_row.state, style=_state_style(job_row.state)),
+                _short_command(job_row.submission),
+            )
     return table
 
 
@@ -161,9 +165,11 @@ async def submit(
     git_commit = ensure_clean_git_state(autocommit=autocommit, submit_command=submit_command)
     cluster_to_remote = await get_cluster_to_remote(cluster)
 
-    submissions_per_cluster = await asyncio.gather(
-        *(
-            get_submissions(
+    # Dict from cluster_name to *potential* job submissions.
+    # They get actually converted into `Jobs` later when we actually sbatch them.
+    cluster_to_submissions = await gather_dict(
+        {
+            cluster_name: get_submissions(
                 cluster_name,
                 remote,
                 job_script=job_script,
@@ -174,67 +180,54 @@ async def submit(
                 git_commit=git_commit,
             )
             for cluster_name, remote in cluster_to_remote.items()
-        )
+        }
     )
-    job_submissions = [
-        SubmissionProgress(submission=submission)
-        for submissions in submissions_per_cluster
-        for submission in submissions
-    ]
+    # Wrap the submissions in a mutable dataclass where we will modify the `state` and maybe set the `job` fields.
+    cluster_to_submissions = {
+        cluster_name: [SubmissionProgress(submission=submission) for submission in cluster_jobs]
+        for cluster_name, cluster_jobs in cluster_to_submissions.items()
+    }
 
     if not _skip_sync:
         remotes = [r for r in cluster_to_remote.values() if r]
         await sync_common_part(remotes, sync_datasets=sync_datasets)
 
     found_running_job = asyncio.Event()
-    tasks = [
-        asyncio.create_task(
-            submit_to_cluster(
-                cluster_name,
-                remote,
-                job_submissions=[
-                    job_submission
-                    for job_submission in job_submissions
-                    if job_submission.cluster == cluster_name
-                ],
-                found_running_job=found_running_job,
-                _skip_sync=_skip_sync,
-                sync_datasets=sync_datasets,
-            )
-        )
-        for cluster_name, remote in cluster_to_remote.items()
-    ]
 
     cancelling = False
 
     def _render() -> rich.table.Table:
-        return render_job_table(job_submissions, cancelling=cancelling)
+        return render_job_table(cluster_to_submissions, cancelling=cancelling)
 
     try:
         with Live(get_renderable=_render, console=console, refresh_per_second=1):
-            first_running_row = await wait_for_first_running_job(
-                job_submissions, cluster_to_remote, tasks, found_running_job
+            winning_job = await wait_for_first_running_job(
+                cluster_to_submissions,
+                cluster_to_remote=cluster_to_remote,
+                found_running_job=found_running_job,
+                _skip_sync=_skip_sync,
+                sync_datasets=sync_datasets,
             )
-            if first_running_row is None:
+            if winning_job is None:
                 console.log("All job submissions have failed! Exiting.")
                 return None
 
             cancelling = True
-            other_rows = [
-                row
-                for row in job_submissions
-                if row is not first_running_row and row.job_id is not None
+            other_jobs_to_cancel = [
+                job
+                for cluster, cluster_jobs in cluster_to_submissions.items()
+                for job in cluster_jobs
+                if job is not winning_job and job.job_id is not None
             ]
-            await wait_for_jobs_to_cancel(other_rows, cluster_to_remote)
+            await wait_for_jobs_to_cancel(other_jobs_to_cancel, cluster_to_remote)
     except (KeyboardInterrupt, asyncio.CancelledError):
-        # The user stopped `cluv submit` while jobs were still in flight -- cancel everything
-        # that got a job id so far instead of leaving them running unattended.
+        # The user stopped `cluv submit` while jobs were still in flight -- cancel everything.
         console.log("Interrupted by user. Cancelling all submitted jobs...")
-        submitted_rows = [row for row in job_submissions if row.job_id is not None]
-        await run_scancel(submitted_rows)
+        all_jobs = list(itertools.chain.from_iterable(cluster_to_submissions.values()))
+        await run_scancel(all_jobs)
         raise
 
-    job = first_running_row.job
+    job = winning_job.job
     assert job is not None
 
     if parsable:
@@ -252,13 +245,16 @@ async def submit(
 
 
 async def wait_for_first_running_job(
-    job_submissions: list[SubmissionProgress],
+    cluster_to_job_submissions: dict[str, list[SubmissionProgress]],
+    *,
     cluster_to_remote: dict[str, Remote | None],
-    tasks: list[asyncio.Task],
     found_running_job: asyncio.Event,
+    _skip_sync: bool,
+    sync_datasets: bool,
+    initial_delay: int = 10,
     max_wait_time_seconds: int = 60,
 ) -> SubmissionProgress | None:
-    """Poll `sacct` until one submitted job starts running, or every submission has failed.
+    """Poll `sacct` on each cluster until one submitted job starts running, or every submission has failed.
 
     Mutates `rows` in place with the latest known job id / state, so a live display can render
     them at any point during this wait. Sets `found_running_job` the moment a job starts, so
@@ -266,40 +262,96 @@ async def wait_for_first_running_job(
 
     Returns the row for the job that started, or None if every submission ended up failing.
     """
-    delay = 1
-    while True:
-        all_tasks_done = all(task.done() for task in tasks)
-        submitted = [row for row in job_submissions if row.job_id is not None]
+    # Need one remote for each cluster that has job submissions.
+    assert set(cluster_to_remote.keys()) >= set(cluster_to_job_submissions.keys())
 
-        by_cluster = group_by_cluster(submitted)
-
-        n_pending_jobs = 0
-        if by_cluster:
-            states_per_cluster = await asyncio.gather(
-                *(
-                    run_saccts(cluster_to_remote[cluster], [row.job_id for row in cluster_rows])
-                    for cluster, cluster_rows in by_cluster.items()
-                )
+    submission_tasks = {
+        cluster_name: asyncio.create_task(
+            submit_to_cluster(
+                cluster_name,
+                remote=cluster_to_remote[cluster_name],
+                job_submissions=cluster_job_submissions,
+                found_running_job=found_running_job,
+                _skip_sync=_skip_sync,
+                sync_datasets=sync_datasets,
             )
-            for cluster_rows, states in zip(by_cluster.values(), states_per_cluster):
-                for row, state in zip(cluster_rows, states):
-                    row.state = state
-                    if row.state.startswith(("RUNNING", "COMPLETED")):
-                        found_running_job.set()
-                        return row
-                    elif row.state.startswith(("PENDING")):
-                        n_pending_jobs += 1
-
-        # Skip the wait if only one job is pending (if only one job is submitted or all other jobs
-        # failed).
-        if all_tasks_done and n_pending_jobs == 1:
-            console.log("Only one job pending. Skipping wait for a running job.")
-            return next(row for row in submitted if row.state.startswith("PENDING"))
-
-        all_failed = bool(submitted) and all(
-            row.state.startswith(tuple(FAILED_JOB_STATES)) for row in submitted
         )
-        if all_tasks_done and (not submitted or all_failed):
+        for cluster_name, cluster_job_submissions in cluster_to_job_submissions.items()
+    }
+
+    delay = initial_delay
+    while True:
+        cluster_to_jobs = {
+            cluster_name: task.result()
+            for cluster_name, task in submission_tasks.items()
+            if task.done()
+        }
+        _cluster_to_failed_submissions = {
+            cluster_name: [
+                job_submission
+                for job_submission in cluster_to_job_submissions[cluster_name]
+                if job_submission.error is not None  # it also can't be in the dict above.
+            ]
+            for cluster_name in cluster_to_job_submissions.keys()
+        }
+        sync_and_sbatch_done_everywhere = all(task.done() for task in submission_tasks.values())
+        if sync_and_sbatch_done_everywhere and not any(cluster_to_jobs.values()):
+            n_job_submissions = sum(map(len, cluster_to_job_submissions.values()))
+            console.print(f"Submitted {n_job_submissions} jobs but none succeeded!", style="red")
+            return None
+
+        cluster_to_job_ids = {
+            cluster_name: [job.job_id for job in cluster_jobs if job.job_id is not None]
+            for cluster_name, cluster_jobs in cluster_to_jobs.items()
+        }
+        # TODO: Check out using `squeue --only-job-state`
+        cluster_to_job_states = await gather_dict(
+            {
+                cluster: run_saccts(
+                    cluster_to_remote[cluster],
+                    job_ids,
+                )
+                for cluster, job_ids in cluster_to_job_ids.items()
+            }
+        )
+
+        # Update all the job states by modifying the `state` attribute of each tracked job submission.
+        # TODO: We should probably setup an actual Enum for the Slurm job states, they are cumbersome to handle.
+        state_to_jobs = collections.defaultdict[str, list[SubmissionProgress]](list)
+        for cluster_name, cluster_jobs in cluster_to_jobs.items():
+            cluster_job_states = cluster_to_job_states[cluster_name]
+            for job_submission, state in zip(cluster_jobs, cluster_job_states):
+                job_submission.state = state
+                first_word_of_state = state.strip().split()[0]
+                state_to_jobs[first_word_of_state].append(job_submission)
+
+        # If there is any job that is RUNNING or COMPLETED, set the event and return that job.
+        if started_jobs := (state_to_jobs.get("COMPLETED") or state_to_jobs.get("RUNNING")):
+            found_running_job.set()
+            logger.debug(f"Found {len(started_jobs)} running (or completed) jobs.")
+            return started_jobs[0]
+
+        # Early exit (skip the wait) if we're only be waiting on one job to start.
+        # In other words: if only one job is in the PENDING state, skip the wait.
+        logger.debug(
+            "Job states: %s",
+            {k: [(job.cluster, job.job_id) for job in v] for k, v in state_to_jobs.items()},
+        )
+
+        if (
+            sync_and_sbatch_done_everywhere
+            and (pending_jobs := state_to_jobs.get("PENDING"))
+            and len(pending_jobs) == 1
+        ):
+            console.log("Only one job pending. Skipping wait for a running job.")
+            return pending_jobs[0]
+
+        all_failed = bool(state_to_jobs) and all(
+            state.startswith(tuple(FAILED_JOB_STATES)) and jobs
+            for state, jobs in state_to_jobs.items()
+        )
+        if sync_and_sbatch_done_everywhere and all_failed:
+            console.log("All jobs have failed!")
             return None
 
         await asyncio.sleep(delay)
@@ -310,27 +362,38 @@ async def wait_for_jobs_to_cancel(
     job_submissions: list[SubmissionProgress],
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
+    initial_delay: int = 1,
 ) -> None:
     """Cancel every (already-submitted) job in `rows`, and wait until they're all done."""
     to_cancel = [
         job for job in job_submissions if not job.state.startswith(("CANCELLED", "COMPLETED"))
     ]
+
     if not to_cancel:
         return
 
     await run_scancel(to_cancel)
 
-    delay = 1
+    delay = initial_delay
     while to_cancel:
         by_cluster = group_by_cluster(to_cancel)
-        states_per_cluster = await asyncio.gather(
-            *(
-                run_saccts(cluster_to_remote[cluster], [row.job_id for row in cluster_rows])
-                for cluster, cluster_rows in by_cluster.items()
-            )
+        cluster_to_job_ids = {
+            cluster: [job.job_id for job in cluster_jobs if job.job_id is not None]
+            for cluster, cluster_jobs in by_cluster.items()
+        }
+        cluster_to_states = await gather_dict(
+            {
+                cluster: run_saccts(cluster_to_remote[cluster], job_ids)
+                for cluster, job_ids in cluster_to_job_ids.items()
+            }
         )
-        for cluster_rows, states in zip(by_cluster.values(), states_per_cluster):
-            for row, state in zip(cluster_rows, states):
+        for cluster, states in cluster_to_states.items():
+            job_ids = cluster_to_job_ids[cluster]
+            jobs = [
+                next(job for job in by_cluster[cluster] if job.job_id == job_id)
+                for job_id in job_ids
+            ]
+            for row, state in zip(jobs, states):
                 if state.startswith("CANCELLED") or state == "FAILED":
                     # "CANCELLED by <uid>", and a stray "FAILED" job step on some clusters
                     # (while the rest of the job is "CANCELLED"), both just mean cancelled.
@@ -347,16 +410,16 @@ async def wait_for_jobs_to_cancel(
     console.log(f"Cancelled {len(job_submissions)} job submission(s).")
 
 
-async def run_scancel(rows: list[SubmissionProgress]) -> None:
+async def run_scancel(jobs: list[SubmissionProgress]) -> None:
     """Cancel the (already-submitted) jobs behind `rows`, grouped by remote."""
-    if not rows:
+    if not jobs:
         return
     by_remote: dict[Remote | None, list[SubmissionProgress]] = {}
-    for row in rows:
-        by_remote.setdefault(row.submission.remote, []).append(row)
+    for job in jobs:
+        by_remote.setdefault(job.submission.remote, []).append(job)
 
     async def cancel(remote: Remote | None, cluster_rows: list[SubmissionProgress]) -> None:
-        job_ids = [row.job_id for row in cluster_rows]
+        job_ids = [job.job_id for job in cluster_rows]
         scancel_command = f"scancel {' '.join(map(str, job_ids))}"
         if remote is not None:
             await remote.get_output(scancel_command, hide=True)
@@ -375,8 +438,25 @@ async def submit_to_cluster(
     found_running_job: asyncio.Event,
     _skip_sync: bool = False,
     sync_datasets: bool = True,
-) -> None:
-    """Sync then submit every submission for one cluster, in parallel."""
+) -> list[SubmissionProgress]:
+    """Sync then submit every submission for one cluster, in parallel.
+
+    NOTE: This modifies the job submissions in-place.
+
+    Returns the job submissions that were successfully submitted and now have a job id.
+    """
+    if found_running_job.is_set():
+        # If a job has already started on another cluster, we don't need to submit more jobs.
+        # NOTE: (@lebrice) I'm not sure if this case can be encountered in practice, given my limited
+        # knowledge of how asyncio actually works.
+        console.log(
+            f"Skipping syncing with cluster {cluster} because a job "
+            f"has already started on another cluster."
+        )
+        for job_submission in job_submissions:
+            job_submission.state = "SKIPPED"
+        return []
+
     if not _skip_sync:
         await sync_per_cluster_part(remote, sync_datasets=sync_datasets)
 
@@ -386,12 +466,12 @@ async def submit_to_cluster(
             f"Skipping submission of jobs to cluster {cluster} because a job "
             f"has already started on another cluster."
         )
-        for row in job_submissions:
-            row.state = "SKIPPED"
-        return
+        for job_submission in job_submissions:
+            job_submission.state = "SKIPPED"
+        return []
 
-    for row in job_submissions:
-        row.state = "SUBMITTING"
+    for job_submission in job_submissions:
+        job_submission.state = "SUBMITTING"
 
     results = await asyncio.gather(
         *(submit_job(row.submission) for row in job_submissions),
@@ -399,17 +479,21 @@ async def submit_to_cluster(
     )
 
     assert len(results) == len(job_submissions)
-    for row, result in zip(job_submissions, results):
+    successful_job_submissions: list[SubmissionProgress] = []
+    for job_submission, result in zip(job_submissions, results):
         if isinstance(result, Job):
-            row.job = result
-            row.state = "PENDING"
+            job_submission.job = result
+            job_submission.state = "PENDING"
+            successful_job_submissions.append(job_submission)
         elif isinstance(result, JobSubmissionFailed):
-            row.error = str(result)
-            row.state = "FAILED"
+            job_submission.error = result
+            job_submission.state = "FAILED"
             console.log(f"[red]{result}[/red]")
         else:
             assert isinstance(result, BaseException)
+            logger.error(f"Unexpected exception: {result}")
             raise result
+    return successful_job_submissions
 
 
 async def get_submissions(

@@ -10,7 +10,7 @@ import cluv.config
 import cluv.remote
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars
-from cluv.remote import control_socket_is_running
+from cluv.remote import Remote, control_socket_is_running
 from tests.test_integration import (
     ALL_CLUSTERS,
     IN_SELF_HOSTED_GITHUB_CI,
@@ -161,15 +161,19 @@ logger = logging.getLogger(__name__)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         # Add the `pytest.mark.xdist_group(cluster)` if the test is marked with pytest.mark.integration or pytest.mark.slow.
-        cluster_param = None
-        if hasattr(item, "callspec"):
-            assert isinstance(item, pytest.Function)
-            cluster_param = item.callspec.params.get("cluster")
+        if not isinstance(item, pytest.Function):
+            continue
         xdist_group = item.get_closest_marker("xdist_group")
-        if (
-            xdist_group is None
-            and cluster_param is not None
-            and (item.get_closest_marker("integration") or item.get_closest_marker("slow"))
-        ):
+        if xdist_group is not None:
+            continue
+        # Only add xdist_group for integration or slow tests
+        if not (item.get_closest_marker("integration") or item.get_closest_marker("slow")):
+            continue
+        # If the test uses a `cluster` argument in its signature, group by that value.
+        if isinstance(cluster_param := item.callspec.params.get("cluster"), str):
             logger.debug(f"Adding xdist_group({cluster_param}) to {item.nodeid}")
             item.add_marker(pytest.mark.xdist_group(cluster_param))
+        # If the test doesn't use `cluster`, but uses `remote`, then group by the remote's hostname.
+        elif isinstance(remote_param := item.callspec.params.get("remote"), Remote):
+            logger.debug(f"Adding xdist_group({remote_param.hostname}) to {item.nodeid}")
+            item.add_marker(pytest.mark.xdist_group(remote_param.hostname))

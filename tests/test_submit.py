@@ -1187,6 +1187,7 @@ async def test_submit_cancels_in_flight_jobs_when_interrupted(
     mock_runs["cluv.cli.submit_utils.vram"].assert_not_awaited()
     fake_wait_for_first_running_job.assert_awaited_once()
     mock_run_scancel.assert_awaited_once()
+    assert mock_run_scancel.await_args is not None
     (cancelled_rows,) = mock_run_scancel.await_args.args
     assert [row.job_id for row in cancelled_rows] == [jobid]
 

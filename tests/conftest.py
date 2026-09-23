@@ -161,8 +161,9 @@ logger = logging.getLogger(__name__)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
         # Add the `pytest.mark.xdist_group(cluster)` if the test is marked with pytest.mark.integration or pytest.mark.slow.
-        if not isinstance(item, pytest.Function):
+        if not hasattr(item, "callspec"):
             continue
+        assert isinstance(item, pytest.Function), type(item)
         xdist_group = item.get_closest_marker("xdist_group")
         if xdist_group is not None:
             continue

@@ -105,7 +105,7 @@ class TestGpuVramGb:
         assert gpu_vram_gb("v100") == 16.0
 
     def test_unknown_gpu_type(self):
-        assert gpu_vram_gb("b200") is None
+        assert gpu_vram_gb("foobar5000") is None
 
 
 class TestParseGpuTypes:

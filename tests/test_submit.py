@@ -750,6 +750,7 @@ class TestEnsureCleanGitState:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         messages: list[tuple[str, dict]] = []
+        monkeypatch.setenv("SKIP_CLEAN_GIT_CHECK", "0")  # in case it is set in the dev test env.
 
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
@@ -1174,7 +1175,8 @@ async def test_submit_cancels_in_flight_jobs_when_interrupted(
             job_script=job_script,
             sbatch_args=[],
             program_args=[],
-            vram="5GB",
+            # vram="5GB",
+            vram=None,
             chunking=None,
             _skip_sync=True,
         )

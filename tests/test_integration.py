@@ -79,12 +79,15 @@ TEST_SUBMIT_TIMEOUT_SECONDS = 180
 @pytest.mark.parametrize(
     "cluster",
     [
-        "mila",
+        pytest.param("mila", marks=[pytest.mark.xdist_group("mila")]),
         pytest.param(
             "rorqual",
-            marks=pytest.mark.xfail(
-                reason="Rorqual might take a long time for the job to actually run."
-            ),
+            marks=[
+                pytest.mark.xdist_group("rorqual"),
+                pytest.mark.xfail(
+                    reason="Rorqual might take a long time for the job to actually run."
+                ),
+            ],
         ),
     ],
     indirect=True,

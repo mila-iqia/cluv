@@ -48,6 +48,7 @@ VRAM_GB_BY_MODEL: dict[str, float] = {
     "t4": 16,
     "v100": 16,
     "v100l": 32,
+    "b200": 180,  # From https://docs.alliancecan.ca/wiki/Trillium
 }
 
 # SbatchArgs keys in the "gpus"-like family (value is "[<type>:]<count>").

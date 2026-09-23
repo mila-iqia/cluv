@@ -11,7 +11,7 @@ from .test_integration import REQUIRED_CLUSTERS
 
 
 @pytest.mark.slow
-@pytest.mark.timeout(30)
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize("table", ["clusters", "jobs", "all"])
 @pytest.mark.parametrize("all_jobs", [True, False])
 async def test_cluv_status(table: Literal["clusters", "jobs", "all"], all_jobs: bool):

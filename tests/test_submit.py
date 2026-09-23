@@ -42,7 +42,6 @@ from cluv.config import (
 from cluv.remote import Remote
 from cluv.sbatch_args import SbatchArgs
 from cluv.utils import console, current_cluster
-from tests.test_integration import IN_GITHUB_CLOUD_CI
 
 # `cluv/cli/__init__.py` does `from .sync import sync`, which overwrites the `sync` attribute of
 # the `cluv.cli` package with that function -- so plain attribute access (`cluv.cli.sync.foo`)
@@ -1281,19 +1280,30 @@ async def test_submit_races_the_allocations_of_a_cluster(
     assert cancelled == [rrg_job_id]
 
 
+@pytest.fixture()
+def fixed_ssh_options(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest):
+    """Mocks the function that returns the SSH options to use for a host so it always gives an empty result.
+
+    The output of that function normally depends on the content of the local ~/.ssh/config.
+    A dev machine that has run `mila init` already sets ControlMaster/ControlPath, so cluv adds no options,
+    while a cloud CI runner has no ssh config at all and gets `-oControlMaster=auto -oControlPath=...`
+    inserted before the hostname. Pretend there is no ssh config, so unit tests see the same
+    command everywhere.
+    """
+    # This fixture shouldn't be used by integration tests that connect for real and need the ControlPath
+    # of the actual ssh config to reuse the existing connection (otherwise every command would prompt for 2FA).
+    assert request.node.get_closest_marker("integration") is None, (
+        "This fixture shouldn't be used by integration tests."
+    )
+
+    monkeypatch.setattr(
+        cluv.remote, cluv.remote._get_ssh_options_for_host.__name__, lambda hostname: ()
+    )
+
+
 @pytest.mark.parametrize(
     "runs_first_on_current_cluster",
-    [
-        True,
-        pytest.param(
-            False,
-            marks=pytest.mark.xfail(
-                IN_GITHUB_CLOUD_CI,
-                reason="This test doesn't work in the GitHub Cloud CI, not sure why.",
-                strict=True,
-            ),
-        ),
-    ],
+    [True, False],
     ids=["current_cluster_runs_first", "other_cluster_runs_first"],
 )
 async def test_submit_first_considers_current_cluster(
@@ -1301,6 +1311,7 @@ async def test_submit_first_considers_current_cluster(
     mock_current_cluster: str,
     cluv_project_dir: Path,
     runs_first_on_current_cluster: bool,
+    fixed_ssh_options: None,
 ) -> None:
     """Test that `submit(cluster="first", ...)` also considers the current cluster as an option.
 
@@ -1339,6 +1350,7 @@ async def test_submit_first_considers_current_cluster(
                 program_and_args, returncode=0, stdout=stdout, stderr=""
             )
 
+        parts = full_command.split()
         print(f"Running command: {full_command}")
         # `sbatch` resolves env vars in the cluster's results_path through a login shell before
         # putting it in `--output` (see `get_sbatch_command` for why it can't be left to the
@@ -1347,7 +1359,7 @@ async def test_submit_first_considers_current_cluster(
             return _result("/scratch/testuser/logs/my_project")
         if full_command.startswith("bash --login -c '") and "sbatch --parsable" in full_command:
             return _result(str(this_cluster_jobid))
-        if full_command.startswith(f"ssh {other_cluster}") and "sbatch --parsable" in full_command:
+        if "ssh" in parts and other_cluster in parts and "sbatch --parsable" in full_command:
             return _result(str(other_cluster_jobid))
 
         # Querying for the job's state:
@@ -1358,8 +1370,10 @@ async def test_submit_first_considers_current_cluster(
             if this_cluster_wait_time > 0:
                 return _result("PENDING")
             return _result("RUNNING")
-        if full_command.startswith(
-            f"ssh {other_cluster} 'sacct -j {other_cluster_jobid} --format=State"
+        if (
+            "ssh" in parts
+            and other_cluster in parts
+            and f"sacct -j {other_cluster_jobid} --format=State" in full_command
         ):
             other_cluster_wait_time -= 1
             if scancel_received_on_other_cluster:
@@ -1371,7 +1385,9 @@ async def test_submit_first_considers_current_cluster(
         # Cancelling once the jobs are running.
         if (
             runs_first_on_current_cluster
-            and full_command == f"ssh {other_cluster} 'scancel {other_cluster_jobid}'"
+            and "ssh" in parts
+            and other_cluster in parts
+            and f"scancel {other_cluster_jobid}" in full_command
         ):
             scancel_received_on_other_cluster = True
             return _result("")

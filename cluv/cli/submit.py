@@ -72,7 +72,7 @@ class SubmissionProgress(Generic[JobSubmission]):
     log_path: Path
     """Where this submission's `sbatch` output will be written."""
     state: JobState = "SYNCING"
-    error: JobSubmissionFailed | None = None
+    error: ClusterSyncFailed | JobSubmissionFailed | None = None
 
     @property
     def cluster(self) -> str:
@@ -500,6 +500,8 @@ async def sync_and_submit_jobs_to_cluster(
         except Exception as exc:
             console.log(f"Failed to sync with cluster {cluster}: {exc}")
             for job_submission in job_submissions:
+                # todo: Not sure if this is the right way to do this.
+                job_submission.error = ClusterSyncFailed().with_traceback(exc.__traceback__)
                 job_submission.state = "FAILED (unable to sync)"
             raise ClusterSyncFailed() from exc
 

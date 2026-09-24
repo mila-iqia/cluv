@@ -9,8 +9,10 @@ import re
 import shlex
 import subprocess
 import sys
+import typing
 from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
+from typing import Generic, TypeVar
 
 import rich.box
 import rich.table
@@ -28,7 +30,7 @@ from cluv.cli.sync import (
 from cluv.config import ClusterConfig, find_pyproject, get_cluv_config
 from cluv.remote import Remote, run
 from cluv.sbatch_args import SbatchArgs, sbatch_args_from_list, sbatch_args_to_list
-from cluv.slurm import FAILED_JOB_STATES, run_saccts
+from cluv.slurm import FAILED_JOB_STATES, get_job_states_with_sacct
 from cluv.utils import console, gather_dict, group_by_cluster
 
 logger = logging.getLogger(__name__)
@@ -45,9 +47,12 @@ class JobSubmissionFailed(Exception):
     """Raised when a job submission fails."""
 
 
+JobSubmission = TypeVar("JobSubmission", Submission, Job)
+
+
 @dataclasses.dataclass
-class SubmissionProgress:
-    """Live, mutable tracking of one `Submission`'s progress.
+class SubmissionProgress(Generic[JobSubmission]):
+    """Live, mutable tracking of one `Submission`'s progress into becoming a `Job`.
 
     Tracks a submission from before it's even synced (``state="SYNCING"``, no `job` yet),
     through submission (``job`` known, state polled from `sacct`), to running and, possibly,
@@ -60,18 +65,21 @@ class SubmissionProgress:
     per console, so that would fuse several such lists together instead of replacing this one).
     """
 
-    submission: Submission
+    job: JobSubmission
     state: JobState = "SYNCING"
-    job: Job | None = None
     error: JobSubmissionFailed | None = None
 
     @property
     def cluster(self) -> str:
-        return self.submission.cluster
+        return self.job.cluster
 
     @property
     def job_id(self) -> int | None:
-        return self.job.job_id if self.job is not None else None
+        return self.job.job_id if isinstance(self.job, Job) else None
+
+
+def has_job(submission_progress: SubmissionProgress) -> typing.TypeIs[SubmissionProgress[Job]]:
+    return isinstance(submission_progress.job, Job)
 
 
 def _state_style(state: JobState) -> str:
@@ -125,7 +133,7 @@ def render_job_table(
                 job_row.cluster,
                 str(job_row.job_id) if job_row.job_id is not None else "-",
                 rich.text.Text(job_row.state, style=_state_style(job_row.state)),
-                _short_command(job_row.submission),
+                _short_command(job_row.job),
             )
     return table
 
@@ -184,7 +192,7 @@ async def submit(
     )
     # Wrap the submissions in a mutable dataclass where we will modify the `state` and maybe set the `job` fields.
     cluster_to_submissions = {
-        cluster_name: [SubmissionProgress(submission=submission) for submission in cluster_jobs]
+        cluster_name: [SubmissionProgress(job=submission) for submission in cluster_jobs]
         for cluster_name, cluster_jobs in cluster_to_submissions.items()
     }
 
@@ -245,7 +253,7 @@ async def submit(
 
 
 async def wait_for_first_running_job(
-    cluster_to_job_submissions: dict[str, list[SubmissionProgress]],
+    cluster_to_job_submissions: dict[str, list[SubmissionProgress[Submission]]],
     *,
     cluster_to_remote: dict[str, Remote | None],
     found_running_job: asyncio.Event,
@@ -253,7 +261,7 @@ async def wait_for_first_running_job(
     sync_datasets: bool,
     initial_delay: int = 10,
     max_wait_time_seconds: int = 60,
-) -> SubmissionProgress | None:
+) -> SubmissionProgress[Job] | None:
     """Poll `sacct` on each cluster until one submitted job starts running, or every submission has failed.
 
     Mutates `rows` in place with the latest known job id / state, so a live display can render
@@ -267,7 +275,7 @@ async def wait_for_first_running_job(
 
     submission_tasks = {
         cluster_name: asyncio.create_task(
-            submit_to_cluster(
+            sync_and_submit_jobs_to_cluster(
                 cluster_name,
                 remote=cluster_to_remote[cluster_name],
                 job_submissions=cluster_job_submissions,
@@ -280,59 +288,42 @@ async def wait_for_first_running_job(
     }
 
     delay = initial_delay
+
+    cluster_to_queued_jobs: dict[str, list[SubmissionProgress[Job]]] = {}
+
     while True:
-        cluster_to_jobs: dict[str, list[SubmissionProgress]] = {}
         for cluster_name, task in submission_tasks.items():
-            if task.done():
+            if cluster_name not in cluster_to_queued_jobs and task.done():
                 try:
-                    cluster_to_jobs[cluster_name] = task.result()
+                    cluster_to_queued_jobs[cluster_name] = task.result()
                 except JobSubmissionFailed as exc:
                     console.print(f"Unable to submit jobs on {cluster_name}: {exc}", style="red")
-                    cluster_to_jobs[cluster_name] = []
+                    cluster_to_queued_jobs[cluster_name] = []
                 except Exception as exc:
                     console.print(
                         f"Unable to sync or submit jobs on {cluster_name}: {exc}", style="red"
                     )
-                    cluster_to_jobs[cluster_name] = []
+                    cluster_to_queued_jobs[cluster_name] = []
 
-        _cluster_to_failed_submissions = {
-            cluster_name: [
-                job_submission
-                for job_submission in cluster_to_job_submissions[cluster_name]
-                if job_submission.error is not None  # it also can't be in the dict above.
-            ]
-            for cluster_name in cluster_to_job_submissions.keys()
-        }
         sync_and_sbatch_done_everywhere = all(task.done() for task in submission_tasks.values())
-        if sync_and_sbatch_done_everywhere and not any(cluster_to_jobs.values()):
+        if sync_and_sbatch_done_everywhere and not any(cluster_to_queued_jobs.values()):
             n_job_submissions = sum(map(len, cluster_to_job_submissions.values()))
             console.print(f"Submitted {n_job_submissions} jobs but none succeeded!", style="red")
             return None
 
-        cluster_to_job_ids = {
-            cluster_name: [job.job_id for job in cluster_jobs if job.job_id is not None]
-            for cluster_name, cluster_jobs in cluster_to_jobs.items()
-        }
-        # TODO: Check out using `squeue --only-job-state`
-        cluster_to_job_states = await gather_dict(
-            {
-                cluster: run_saccts(
-                    cluster_to_remote[cluster],
-                    job_ids,
-                )
-                for cluster, job_ids in cluster_to_job_ids.items()
-            }
+        await asyncio.gather(
+            *[
+                update_job_states_with_sacct(cluster_to_remote[cluster], cluster_jobs)
+                for cluster, cluster_jobs in cluster_to_queued_jobs.items()
+            ]
         )
 
         # Update all the job states by modifying the `state` attribute of each tracked job submission.
         # TODO: We should probably setup an actual Enum for the Slurm job states, they are cumbersome to handle.
-        state_to_jobs = collections.defaultdict[str, list[SubmissionProgress]](list)
-        for cluster_name, cluster_jobs in cluster_to_jobs.items():
-            cluster_job_states = cluster_to_job_states[cluster_name]
-            for job_submission, state in zip(cluster_jobs, cluster_job_states):
-                job_submission.state = state
-                first_word_of_state = state.strip().split()[0]
-                state_to_jobs[first_word_of_state].append(job_submission)
+        state_to_jobs = collections.defaultdict[str, list[SubmissionProgress[Job]]](list)
+        for cluster_name, cluster_jobs in cluster_to_queued_jobs.items():
+            for job in cluster_jobs:
+                state_to_jobs[job.state].append(job)
 
         # If there is any job that is RUNNING or COMPLETED, set the event and return that job.
         if started_jobs := (state_to_jobs.get("COMPLETED") or state_to_jobs.get("RUNNING")):
@@ -367,6 +358,14 @@ async def wait_for_first_running_job(
         delay = min(delay * 2, max_wait_time_seconds)
 
 
+async def update_job_states_with_sacct(
+    remote: Remote | None, jobs: list[SubmissionProgress[Job]]
+) -> None:
+    job_states = await get_job_states_with_sacct(remote, [job.job.job_id for job in jobs])
+    for job, state in zip(jobs, job_states):
+        job.state = state.strip().split()[0]  # keep only the first word of the state?
+
+
 async def wait_for_jobs_to_cancel(
     job_submissions: list[SubmissionProgress],
     cluster_to_remote: dict[str, Remote | None],
@@ -393,7 +392,7 @@ async def wait_for_jobs_to_cancel(
                 logging.debug(f"Error running scancel for job {job.job_id}: {err}")
         job_states = await gather_dict(
             {
-                cluster: run_saccts(cluster_to_remote[cluster], cluster_job_ids)
+                cluster: get_job_states_with_sacct(cluster_to_remote[cluster], cluster_job_ids)
                 for cluster, cluster_job_ids in cluster_to_job_ids.items()
             }
         )
@@ -417,7 +416,7 @@ async def run_scancel(jobs: list[SubmissionProgress]) -> None:
     by_remote: dict[Remote | None, list[SubmissionProgress]] = {}
     for job in jobs:
         if job.job_id is not None:
-            by_remote.setdefault(job.submission.remote, []).append(job)
+            by_remote.setdefault(job.job.remote, []).append(job)
 
     async def cancel(remote: Remote | None, cluster_rows: list[SubmissionProgress]) -> None:
         job_ids = [job.job_id for job in cluster_rows if job.job_id is not None]
@@ -437,14 +436,14 @@ async def run_scancel(jobs: list[SubmissionProgress]) -> None:
     )
 
 
-async def submit_to_cluster(
+async def sync_and_submit_jobs_to_cluster(
     cluster: str,
     remote: Remote | None,
-    job_submissions: list[SubmissionProgress],
+    job_submissions: list[SubmissionProgress[Submission]],
     found_running_job: asyncio.Event,
     _skip_sync: bool = False,
     sync_datasets: bool = True,
-) -> list[SubmissionProgress]:
+) -> list[SubmissionProgress[Job]]:
     """Sync then submit every submission for one cluster, in parallel.
 
     NOTE: This modifies the job submissions in-place.
@@ -480,16 +479,17 @@ async def submit_to_cluster(
         job_submission.state = "SUBMITTING"
 
     results = await asyncio.gather(
-        *(submit_job(row.submission) for row in job_submissions),
+        *(submit_job(row.job) for row in job_submissions),
         return_exceptions=True,
     )
 
     assert len(results) == len(job_submissions)
-    successful_job_submissions: list[SubmissionProgress] = []
+    successful_job_submissions: list[SubmissionProgress[Job]] = []
     for job_submission, result in zip(job_submissions, results):
         if isinstance(result, Job):
             job_submission.job = result
             job_submission.state = "PENDING"
+            assert has_job(job_submission)
             successful_job_submissions.append(job_submission)
         elif isinstance(result, JobSubmissionFailed):
             job_submission.error = result

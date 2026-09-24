@@ -1136,7 +1136,7 @@ async def test_submit_cancels_in_flight_jobs_when_interrupted(
                 _skip_sync=True,
                 sync_datasets=False,
             )
-            _states = await cluv.slurm.run_saccts(
+            _states = await cluv.slurm.get_job_states_with_sacct(
                 mock_remote,
                 [
                     job.job_id

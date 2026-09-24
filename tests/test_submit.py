@@ -29,7 +29,7 @@ from cluv.cli.submit import (
     get_submissions,
     merge_sbatch_args,
     submit,
-    submit_to_cluster,
+    sync_and_submit_jobs_to_cluster,
     wait_for_first_running_job,
 )
 from cluv.cli.submit_utils.chunking import CHUNK_SIZE, apply_chunking
@@ -982,7 +982,7 @@ async def test_can_submit_on_current_cluster(
             )
         if full_command.startswith(f"sacct -j {jobid}"):
             return subprocess.CompletedProcess(
-                program_and_args, returncode=0, stdout="RUNNING", stderr=""
+                program_and_args, returncode=0, stdout=f"{jobid}|RUNNING", stderr=""
             )
         raise AssertionError(f"Unexpected command: {full_command}")
 
@@ -1039,7 +1039,7 @@ async def test_parsable_prints_only_the_job_id_on_stdout(
             )
         if full_command.startswith(f"sacct -j {jobid}"):
             return subprocess.CompletedProcess(
-                program_and_args, returncode=0, stdout="RUNNING", stderr=""
+                program_and_args, returncode=0, stdout=f"{jobid}|RUNNING", stderr=""
             )
         raise AssertionError(f"Unexpected command: {full_command}")
 
@@ -1100,7 +1100,7 @@ async def test_submit_cancels_in_flight_jobs_when_interrupted(
         full_command = shlex.join(program_and_args)
         if f"sacct -j {jobid}" in full_command:
             return subprocess.CompletedProcess(
-                program_and_args, returncode=0, stdout="PENDING", stderr=""
+                program_and_args, returncode=0, stdout=f"{jobid}|PENDING", stderr=""
             )
         if "sbatch --parsable" in full_command:
             return subprocess.CompletedProcess(
@@ -1128,7 +1128,7 @@ async def test_submit_cancels_in_flight_jobs_when_interrupted(
         # Let the concurrently-scheduled submission task actually run and get a job id
         # before "the user hits Ctrl+C" -- otherwise nothing would be in flight to cancel.
         for _ in range(50):
-            _successful_submissions = await submit_to_cluster(
+            _successful_submissions = await sync_and_submit_jobs_to_cluster(
                 cluster=mock_current_cluster,
                 remote=mock_remote,
                 job_submissions=cluster_to_job_submissions[mock_current_cluster],
@@ -1241,7 +1241,7 @@ async def test_submit_races_the_allocations_of_a_cluster(
                 return _result(str(rrg_job_id))
             assert "--account=def-bengioy" in full_command
             return _result(str(def_job_id))
-        if full_command.startswith("sacct -j") and "--format=State" in full_command:
+        if full_command.startswith("sacct -j") and "--format=JobID,State" in full_command:
             # `sacct` calls are batched: one call per cluster, covering every job id still
             # being watched on it, joined by commas.
             ids = [
@@ -1250,10 +1250,12 @@ async def test_submit_races_the_allocations_of_a_cluster(
             states = []
             for job_id in ids:
                 if job_id == rrg_job_id:
-                    states.append("CANCELLED" if rrg_job_id in cancelled else "PENDING")
+                    states.append(
+                        f"{job_id}|CANCELLED" if rrg_job_id in cancelled else f"{job_id}|PENDING"
+                    )
                 else:
                     assert job_id == def_job_id
-                    states.append("RUNNING")
+                    states.append(f"{job_id}|RUNNING")
             return _result("\n".join(states))
         if full_command == f"scancel {rrg_job_id}":
             cancelled.append(rrg_job_id)
@@ -1365,24 +1367,24 @@ async def test_submit_first_considers_current_cluster(
             return _result(str(other_cluster_jobid))
 
         # Querying for the job's state:
-        if full_command.startswith(f"sacct -j {this_cluster_jobid} --format=State"):
+        if full_command.startswith(f"sacct -j {this_cluster_jobid} --format=JobID,State"):
             this_cluster_wait_time -= 1
             if scancel_received_on_this_cluster:
-                return _result("CANCELLED")
+                return _result(f"{this_cluster_jobid}|CANCELLED")
             if this_cluster_wait_time > 0:
-                return _result("PENDING")
-            return _result("RUNNING")
+                return _result(f"{this_cluster_jobid}|PENDING")
+            return _result(f"{this_cluster_jobid}|RUNNING")
         if (
             "ssh" in parts
             and other_cluster in parts
-            and f"sacct -j {other_cluster_jobid} --format=State" in full_command
+            and f"sacct -j {other_cluster_jobid} --format=JobID,State" in full_command
         ):
             other_cluster_wait_time -= 1
             if scancel_received_on_other_cluster:
-                return _result("CANCELLED")
+                return _result(f"{other_cluster_jobid}|CANCELLED")
             if other_cluster_wait_time > 0:
-                return _result("PENDING")
-            return _result("RUNNING")
+                return _result(f"{other_cluster_jobid}|PENDING")
+            return _result(f"{other_cluster_jobid}|RUNNING")
 
         # Cancelling once the jobs are running.
         if (

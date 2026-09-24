@@ -78,7 +78,7 @@ class SubmissionProgress(Generic[JobSubmission]):
         return self.job.job_id if isinstance(self.job, Job) else None
 
 
-def has_job(submission_progress: SubmissionProgress) -> typing.TypeIs[SubmissionProgress[Job]]:
+def has_job(submission_progress: SubmissionProgress) -> typing.TypeGuard[SubmissionProgress[Job]]:
     return isinstance(submission_progress.job, Job)
 
 
@@ -225,7 +225,7 @@ async def submit(
                 job
                 for cluster, cluster_jobs in cluster_to_submissions.items()
                 for job in cluster_jobs
-                if job is not winning_job and job.job_id is not None
+                if job is not winning_job and has_job(job)
             ]
             await wait_for_jobs_to_cancel(other_jobs_to_cancel, cluster_to_remote)
     except (KeyboardInterrupt, asyncio.CancelledError):

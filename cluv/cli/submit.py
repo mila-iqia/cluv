@@ -237,6 +237,10 @@ async def submit(
                 for job_submission in cluster_jobs
                 if job_submission is not winning_job and has_job(job_submission)
             ]
+            if jobs_to_cancel:
+                console.log("Jobs to cancel:")
+                for job in jobs_to_cancel:
+                    console.log(f"  {job.job_id} on {job.cluster}")
             await wait_for_jobs_to_cancel(jobs_to_cancel, cluster_to_remote)
             live.refresh()
     except (KeyboardInterrupt, asyncio.CancelledError):

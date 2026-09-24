@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import shlex
+import typing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -87,23 +88,34 @@ def parse_slurm_time(time: str) -> timedelta:
     return timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
 
 
+@typing.overload
+async def run_saccts(remote: Remote | None, jobs: list[int]) -> list[str]: ...
+@typing.overload
+async def run_saccts(remote: Remote | None, jobs: list[int | None]) -> list[str | None]: ...
+
+
 async def run_saccts(
     remote: Remote | None,
     jobs: list[int] | list[int | None],
-    format: str = "State",
-) -> list[str]:
+) -> list[str] | list[str | None]:
     """Run sacct on the given job id(s) and return the output as a list of lines."""
     if not jobs:
         return []
     jobs = [job for job in jobs if job is not None]
     jobs_str = ",".join(str(job) for job in jobs)
-    sacct_command = f"sacct -j {jobs_str} --format={format} --parsable2 --noheader --allocations"
+    sacct_command = (
+        f"sacct -j {jobs_str} --format=JobID,State --parsable2 --noheader --allocations"
+    )
     if remote:
         output = await remote.get_output(sacct_command, hide=True)
     else:
         result = await run(tuple(shlex.split(sacct_command)), hide=True)
         output = result.stdout.strip()
-    return output.splitlines()
+    jobid_to_state: dict[int, str] = {}
+    for line in output.splitlines():
+        job_id_str, _, state = line.strip().partition("|")
+        jobid_to_state[int(job_id_str)] = state
+    return [jobid_to_state[job_id] if job_id is not None else None for job_id in jobs]
 
 
 async def run_sacct(

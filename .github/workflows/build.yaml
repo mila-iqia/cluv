@@ -104,7 +104,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
       - name: Run all tests
-        run: uv run pytest -v --slow --cov=cluv --cov-report=xml --cov-append
+        run: uv run pytest -v --slow --cov=cluv --cov-report=xml --cov-append -n auto
       - name: Store coverage report as an artifact
         uses: actions/upload-artifact@v4
         with:

@@ -72,6 +72,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 cluster,
                 job_script,
                 marks=[
+                    pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
                         cluster in ("fir", "nibi"),
                         reason="TODO: Multiple _cpu allocations, and account isn't specified in pyproject of cluv root.",
@@ -98,6 +99,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 cluster,
                 job_script,
                 marks=[
+                    pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
                         cluster in ("killarney", "rorqual", "fir", "nibi"),
                         reason="TODO: Multiple (_cpu) allocations, and account isn't specified in the example's pyproject file.",
@@ -114,6 +116,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 cluster,
                 job_script,
                 marks=[
+                    pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
                         cluster in ("fir", "nibi"),
                         reason="TODO: multiple allocations",
@@ -155,6 +158,7 @@ async def skip_unless_connected(cluster: str) -> None:
                 None,
                 marks=[
                     # Should work everywhere!
+                    pytest.mark.xdist_group(cluster),
                 ],
             )
             for cluster in imagenet_example_clusters

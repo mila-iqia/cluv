@@ -17,6 +17,9 @@ from tests.test_integration import ON_DEV_MACHINE
 
 # TODO: Also run this test on the Mila cluster using the same self-hosted runner setup as in
 # mila-docs.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("USE_COMPUTE", "0") != "1", reason="Tests use actual compute."
+)
 
 
 @pytest.mark.skipif(

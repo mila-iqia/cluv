@@ -78,7 +78,7 @@ class SubmissionProgress(Generic[JobSubmission]):
         return self.job.job_id if isinstance(self.job, Job) else None
 
 
-def has_job(submission_progress: SubmissionProgress) -> typing.TypeIs[SubmissionProgress[Job]]:
+def has_job(submission_progress: SubmissionProgress) -> typing.TypeGuard[SubmissionProgress[Job]]:
     return isinstance(submission_progress.job, Job)
 
 
@@ -226,13 +226,14 @@ async def submit(
                         job.state = "SKIPPED"
 
             cancelling = True
-            other_jobs_to_cancel = [
-                job
-                for cluster, cluster_jobs in cluster_to_job_submissions.items()
-                for job in cluster_jobs
-                if job is not winning_job and has_job(job)
+
+            jobs_to_cancel = [
+                job_submission
+                for _cluster, cluster_jobs in cluster_to_job_submissions.items()
+                for job_submission in cluster_jobs
+                if job_submission is not winning_job and has_job(job_submission)
             ]
-            await wait_for_jobs_to_cancel(other_jobs_to_cancel, cluster_to_remote)
+            await wait_for_jobs_to_cancel(jobs_to_cancel, cluster_to_remote)
             live.refresh()
     except (KeyboardInterrupt, asyncio.CancelledError):
         # The user stopped `cluv submit` while jobs were still in flight -- cancel everything.
@@ -373,7 +374,7 @@ async def update_job_states_with_sacct(
 
 
 async def wait_for_jobs_to_cancel(
-    job_submissions: list[SubmissionProgress],
+    job_submissions: list[SubmissionProgress[Job]],
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
     initial_delay: int = 1,

@@ -40,12 +40,13 @@ dev = [
     "ruff",
     "pytest-skip-slow>=0.0.5",
     "torchvision>=0.25.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["cluv", "tests"]
 norecursedirs = [".venv"]
-addopts = ["--doctest-modules"]
+addopts = ["--doctest-modules", "--dist=loadgroup"]
 asyncio_mode = "auto"
 markers = [
     "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",

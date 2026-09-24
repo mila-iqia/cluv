@@ -217,13 +217,17 @@ async def submit(
         return render_job_table(job_submissions, cancelling=cancelling)
 
     try:
-        with Live(get_renderable=_render, console=console, refresh_per_second=1):
+        with Live(get_renderable=_render, console=console, refresh_per_second=1) as live:
             first_running_row = await wait_for_first_running_job(
                 job_submissions, cluster_to_remote, tasks, found_running_job
             )
             if first_running_row is None:
                 console.log("All job submissions have failed! Exiting.")
                 return None
+
+            for row in job_submissions:
+                if row is not first_running_row and row.job_id is None and row.state == "SYNCING":
+                    row.state = "SKIPPED"
 
             cancelling = True
             other_rows = [
@@ -232,6 +236,7 @@ async def submit(
                 if row is not first_running_row and row.job_id is not None
             ]
             await wait_for_jobs_to_cancel(other_rows, cluster_to_remote)
+            live.refresh()
     except (KeyboardInterrupt, asyncio.CancelledError):
         # The user stopped `cluv submit` while jobs were still in flight -- cancel everything
         # that got a job id so far instead of leaving them running unattended.

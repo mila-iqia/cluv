@@ -78,7 +78,7 @@ class SubmissionProgress(Generic[JobSubmission]):
         return self.job.job_id if isinstance(self.job, Job) else None
 
 
-def has_job(submission_progress: SubmissionProgress) -> typing.TypeGuard[SubmissionProgress[Job]]:
+def has_job(submission_progress: SubmissionProgress) -> typing.TypeIs[SubmissionProgress[Job]]:
     return isinstance(submission_progress.job, Job)
 
 
@@ -175,7 +175,7 @@ async def submit(
 
     # Dict from cluster_name to *potential* job submissions.
     # They get actually converted into `Jobs` later when we actually sbatch them.
-    cluster_to_submissions = await gather_dict(
+    _cluster_to_submissions = await gather_dict(
         {
             cluster_name: get_submissions(
                 cluster_name,
@@ -191,9 +191,9 @@ async def submit(
         }
     )
     # Wrap the submissions in a mutable dataclass where we will modify the `state` and maybe set the `job` fields.
-    cluster_to_submissions = {
+    cluster_to_job_submissions = {
         cluster_name: [SubmissionProgress(job=submission) for submission in cluster_jobs]
-        for cluster_name, cluster_jobs in cluster_to_submissions.items()
+        for cluster_name, cluster_jobs in _cluster_to_submissions.items()
     }
 
     if not _skip_sync:
@@ -205,12 +205,12 @@ async def submit(
     cancelling = False
 
     def _render() -> rich.table.Table:
-        return render_job_table(cluster_to_submissions, cancelling=cancelling)
+        return render_job_table(cluster_to_job_submissions, cancelling=cancelling)
 
     try:
-        with Live(get_renderable=_render, console=console, refresh_per_second=1):
+        with Live(get_renderable=_render, console=console, refresh_per_second=1) as live:
             winning_job = await wait_for_first_running_job(
-                cluster_to_submissions,
+                cluster_to_job_submissions,
                 cluster_to_remote=cluster_to_remote,
                 found_running_job=found_running_job,
                 _skip_sync=_skip_sync,
@@ -220,18 +220,24 @@ async def submit(
                 console.log("All job submissions have failed! Exiting.")
                 return None
 
+            for cluster, cluster_jobs in cluster_to_job_submissions.items():
+                for job in cluster_jobs:
+                    if job is not winning_job and not has_job(job) and job.state == "SYNCING":
+                        job.state = "SKIPPED"
+
             cancelling = True
             other_jobs_to_cancel = [
                 job
-                for cluster, cluster_jobs in cluster_to_submissions.items()
+                for cluster, cluster_jobs in cluster_to_job_submissions.items()
                 for job in cluster_jobs
                 if job is not winning_job and has_job(job)
             ]
             await wait_for_jobs_to_cancel(other_jobs_to_cancel, cluster_to_remote)
+            live.refresh()
     except (KeyboardInterrupt, asyncio.CancelledError):
         # The user stopped `cluv submit` while jobs were still in flight -- cancel everything.
         console.log("Interrupted by user. Cancelling all submitted jobs...")
-        all_jobs = list(itertools.chain.from_iterable(cluster_to_submissions.values()))
+        all_jobs = list(itertools.chain.from_iterable(cluster_to_job_submissions.values()))
         await run_scancel(all_jobs)
         raise
 

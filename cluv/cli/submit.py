@@ -43,6 +43,10 @@ raise_on_command_error = ContextVar("raise_on_command_error", default=False)
 JobState = str
 
 
+class ClusterSyncFailed(Exception):
+    """Raised when syncing with a cluster fails."""
+
+
 class JobSubmissionFailed(Exception):
     """Raised when a job submission fails."""
 
@@ -301,14 +305,18 @@ async def wait_for_first_running_job(
     while True:
         for cluster_name, task in submission_tasks.items():
             if cluster_name not in cluster_to_queued_jobs and task.done():
+                # TODO: IF one job submission fails, but others were successful, then we will receive only one job.
                 try:
                     cluster_to_queued_jobs[cluster_name] = task.result()
-                except JobSubmissionFailed as exc:
-                    console.print(f"Unable to submit jobs on {cluster_name}: {exc}", style="red")
+                except ClusterSyncFailed as exc:
+                    console.print(
+                        f"Unable to sync with cluster {cluster_name}: {exc}", style="red"
+                    )
                     cluster_to_queued_jobs[cluster_name] = []
                 except Exception as exc:
                     console.print(
-                        f"Unable to sync or submit jobs on {cluster_name}: {exc}", style="red"
+                        f"Unknown exception when attempting to sync or submit jobs on {cluster_name}: {exc}",
+                        style="red",
                     )
                     cluster_to_queued_jobs[cluster_name] = []
 
@@ -470,7 +478,13 @@ async def sync_and_submit_jobs_to_cluster(
         return []
 
     if not _skip_sync:
-        await sync_per_cluster_part(remote, sync_datasets=sync_datasets)
+        try:
+            await sync_per_cluster_part(remote, sync_datasets=sync_datasets)
+        except Exception as exc:
+            console.log(f"Failed to sync with cluster {cluster}: {exc}")
+            for job_submission in job_submissions:
+                job_submission.state = "FAILED (unable to sync)"
+            raise ClusterSyncFailed() from exc
 
     if found_running_job.is_set():
         # If a job has already started on another cluster, we don't need to submit more jobs.

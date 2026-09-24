@@ -281,11 +281,20 @@ async def wait_for_first_running_job(
 
     delay = initial_delay
     while True:
-        cluster_to_jobs = {
-            cluster_name: task.result()
-            for cluster_name, task in submission_tasks.items()
-            if task.done()
-        }
+        cluster_to_jobs: dict[str, list[SubmissionProgress]] = {}
+        for cluster_name, task in submission_tasks.items():
+            if task.done():
+                try:
+                    cluster_to_jobs[cluster_name] = task.result()
+                except JobSubmissionFailed as exc:
+                    console.print(f"Unable to submit jobs on {cluster_name}: {exc}", style="red")
+                    cluster_to_jobs[cluster_name] = []
+                except Exception as exc:
+                    console.print(
+                        f"Unable to sync or submit jobs on {cluster_name}: {exc}", style="red"
+                    )
+                    cluster_to_jobs[cluster_name] = []
+
         _cluster_to_failed_submissions = {
             cluster_name: [
                 job_submission
@@ -365,49 +374,40 @@ async def wait_for_jobs_to_cancel(
     initial_delay: int = 1,
 ) -> None:
     """Cancel every (already-submitted) job in `rows`, and wait until they're all done."""
-    to_cancel = [
-        job for job in job_submissions if not job.state.startswith(("CANCELLED", "COMPLETED"))
-    ]
+    cluster_to_job_submissions = group_by_cluster(job_submissions)
 
-    if not to_cancel:
-        return
-
-    await run_scancel(to_cancel)
-
+    assert all(job.job_id is not None for job in job_submissions)
+    cluster_to_job_ids = {
+        cluster: [job.job_id for job in cluster_jobs if job.job_id is not None]
+        for cluster, cluster_jobs in cluster_to_job_submissions.items()
+    }
     delay = initial_delay
-    while to_cancel:
-        by_cluster = group_by_cluster(to_cancel)
-        cluster_to_job_ids = {
-            cluster: [job.job_id for job in cluster_jobs if job.job_id is not None]
-            for cluster, cluster_jobs in by_cluster.items()
-        }
-        cluster_to_states = await gather_dict(
+
+    while not all(
+        job.state.startswith(("CANCELLED", "COMPLETED", "FAILED")) for job in job_submissions
+    ):
+        for job in job_submissions:
+            try:
+                await run_scancel([job])
+            except Exception as err:
+                logging.debug(f"Error running scancel for job {job.job_id}: {err}")
+        job_states = await gather_dict(
             {
-                cluster: run_saccts(cluster_to_remote[cluster], job_ids)
-                for cluster, job_ids in cluster_to_job_ids.items()
+                cluster: run_saccts(cluster_to_remote[cluster], cluster_job_ids)
+                for cluster, cluster_job_ids in cluster_to_job_ids.items()
             }
         )
-        for cluster, states in cluster_to_states.items():
-            job_ids = cluster_to_job_ids[cluster]
-            jobs = [
-                next(job for job in by_cluster[cluster] if job.job_id == job_id)
-                for job_id in job_ids
-            ]
-            for row, state in zip(jobs, states):
-                if state.startswith("CANCELLED") or state == "FAILED":
-                    # "CANCELLED by <uid>", and a stray "FAILED" job step on some clusters
-                    # (while the rest of the job is "CANCELLED"), both just mean cancelled.
-                    state = "CANCELLED"
-                row.state = state
+        for cluster, cluster_jobs in cluster_to_job_submissions.items():
+            for job, state in zip(cluster_jobs, job_states[cluster]):
+                job.state = state.strip().split()[0]  # keep only the first word of the state.
 
-        to_cancel = [
-            row for row in to_cancel if not row.state.startswith(("CANCELLED", "COMPLETED"))
-        ]
-        if to_cancel:
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, max_wait_time_seconds)
-
+        await asyncio.sleep(delay)
+        delay = min(delay * 2, max_wait_time_seconds)
     console.log(f"Cancelled {len(job_submissions)} job submission(s).")
+    for job_submission in job_submissions:
+        console.log(
+            f"Job {job_submission.job_id} on custer {job_submission.cluster} that was in state: {job_submission.state}"
+        )
 
 
 async def run_scancel(jobs: list[SubmissionProgress]) -> None:
@@ -432,7 +432,8 @@ async def run_scancel(jobs: list[SubmissionProgress]) -> None:
             cancel(remote, cluster_rows)
             for remote, cluster_rows in by_remote.items()
             if cluster_rows
-        )
+        ),
+        return_exceptions=True,  # so we don't stop all the cancels if one fails.
     )
 
 

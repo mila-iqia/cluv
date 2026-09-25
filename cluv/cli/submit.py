@@ -237,7 +237,7 @@ async def submit(
                 console.log("All job submissions have failed! Exiting.")
                 return None
 
-            for cluster, cluster_jobs in cluster_to_job_submissions.items():
+            for _cluster, cluster_jobs in cluster_to_job_submissions.items():
                 for job in cluster_jobs:
                     if job is not winning_job and not has_job(job) and job.state == "SYNCING":
                         job.state = "SKIPPED"

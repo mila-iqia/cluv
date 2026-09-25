@@ -54,13 +54,18 @@ env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
 datasets_path = "$HOME/datasets/cifar10"
 results_path = "$HOME/logs/pytorch_example"
+# Killarney refuses to run jobs whose submission directory is under /home
+# ("Submitting jobs from directories residing in /home is not permitted"), so the project lives on
+# $SCRATCH there instead of the default $HOME location.
+project_dir = "$SCRATCH/repos/cluv/examples/pytorch-example"
+
 
 [tool.cluv.clusters.vulcan]
 datasets_path = "$HOME/datasets/cifar10"
 results_path = "$HOME/logs/pytorch_example"
 
 [tool.cluv.clusters.rorqual]
-env = { SBATCH_ACCOUNT = "rrg-bengioy-ad" }
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.fir]
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
@@ -70,14 +75,19 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 sbatch_args = { account = "rrg-bengioy-ad" }
 
-# TODO: There are issues with the job output script being created in $HOME. Once #87 is implemented,
-# uncomment these to also submit on Trillium and Trillium-gpu.
-# See also: #61
-# [tool.cluv.clusters.trillium]
-# env = {SBATCH_TIMELIMIT="00:15:00"}
+[tool.cluv.clusters.trillium]
+sbatch_args = { time = "00:15:00" }
+# $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
+# location is rejected ("Job output requested to be written to a filesystem not available on
+# compute nodes"). Keep the project on $SCRATCH instead.
+project_dir = "$SCRATCH/repos/cluv/examples/pytorch-example"
 
-# [tool.cluv.clusters.trillium-gpu]
-# env = {SBATCH_GPUS_PER_NODE="1", SBATCH_ACCOUNT="rrg-bengioy-ad"}
+[tool.cluv.clusters.trillium-gpu]
+sbatch_args = { gpus-per-node = "1", account = "rrg-bengioy-ad" }
+# $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
+# location is rejected ("Job output requested to be written to a filesystem not available on
+# compute nodes"). Keep the project on $SCRATCH instead.
+project_dir = "$SCRATCH/repos/cluv/examples/pytorch-example"
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.

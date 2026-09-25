@@ -60,27 +60,28 @@ results_path = "$SCRATCH/logs/hydra_example"
 # For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
 datasets_path = "$HOME/datasets/cifar10"
 results_path = "$HOME/logs/hydra_example"
+project_dir = "$SCRATCH/repos/cluv/examples/hydra_example"
 
 [tool.cluv.clusters.vulcan]
 
 [tool.cluv.clusters.rorqual]
-[tool.cluv.clusters.rorqual.sbatch_args]
-account = "rrg-bengioy-ad"
+sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.fir]
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 
 [tool.cluv.clusters.nibi]
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
-[tool.cluv.clusters.nibi.sbatch_args]
-account = "rrg-bengioy-ad"
+sbatch_args = { account = "rrg-bengioy-ad" }
 
-[tool.cluv.clusters.trillium.sbatch_args]
-account = "rrg-bengioy-ad"
+[tool.cluv.clusters.trillium]
+sbatch_args = { account = "rrg-bengioy-ad" }
+project_dir = "$SCRATCH/repos/cluv/examples/hydra_example"
 
-[tool.cluv.clusters.trillium-gpu.sbatch_args]
-account = "rrg-bengioy-ad"
+[tool.cluv.clusters.trillium-gpu]
+sbatch_args = { account = "rrg-bengioy-ad" }
+project_dir = "$SCRATCH/repos/cluv/examples/hydra_example"
 
-[tool.cluv.clusters.narval.sbatch_args]
+[tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.
-account = "def-bengioy"
+sbatch_args = { account = "def-bengioy" }

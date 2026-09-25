@@ -89,7 +89,7 @@ def has_job(submission_progress: SubmissionProgress) -> typing.TypeGuard[Submiss
 
 
 def _state_style(state: JobState) -> str:
-    if state.startswith(("RUNNING", "COMPLETED", "CANCELLED")):
+    if state.startswith(("RUNNING", "COMPLETED", "CANCELLED", "SKIPPED")):
         return "green"
     if state.startswith(("SYNCING", "SUBMITTING", "PENDING", "UNKNOWN")):
         return "yellow"

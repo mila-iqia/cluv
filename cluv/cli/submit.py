@@ -366,6 +366,10 @@ async def wait_for_first_running_job(
             delay = min(delay * 2, max_wait_time_seconds)
     finally:
         sync_and_submit.cancel()
+        # Retrieve the gather's `CancelledError`, otherwise asyncio complains that it was never
+        # retrieved when the future gets garbage-collected.
+        with contextlib.suppress(asyncio.CancelledError):
+            await sync_and_submit
 
 
 async def update_job_states_with_sacct(

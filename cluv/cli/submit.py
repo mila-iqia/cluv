@@ -361,7 +361,10 @@ async def wait_for_first_running_job(
         if started_jobs := (state_to_jobs.get("COMPLETED") or state_to_jobs.get("RUNNING")):
             found_running_job.set()
             logger.debug(f"Found {len(started_jobs)} running (or completed) jobs.")
-            return started_jobs[0]
+            winning_job = started_jobs[0]
+            for task in submission_tasks.values():
+                task.cancel()
+            return winning_job
 
         # Early exit (skip the wait) if we're only be waiting on one job to start.
         # In other words: if only one job is in the PENDING state, skip the wait.
@@ -376,7 +379,10 @@ async def wait_for_first_running_job(
             and len(pending_jobs) == 1
         ):
             console.log("Only one job pending. Skipping wait for a running job.")
-            return pending_jobs[0]
+            winning_job = pending_jobs[0]
+            for task in submission_tasks.values():
+                task.cancel()
+            return winning_job
 
         all_failed = bool(state_to_jobs) and all(
             state.startswith(tuple(FAILED_JOB_STATES)) and jobs
@@ -384,6 +390,8 @@ async def wait_for_first_running_job(
         )
         if sync_and_sbatch_done_everywhere and all_failed:
             console.log("All jobs have failed!")
+            for task in submission_tasks.values():
+                task.cancel()
             return None
 
         await asyncio.sleep(delay)

@@ -46,7 +46,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["cluv", "tests"]
 norecursedirs = [".venv"]
-addopts = ["--doctest-modules", "--dist=loadgroup"]
+addopts = ["--doctest-modules", "--dist=loadgroup", "--numprocesses=auto"]
 asyncio_mode = "auto"
 markers = [
     "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",

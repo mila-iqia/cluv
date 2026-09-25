@@ -114,7 +114,7 @@ def _command_and_log_cell(row: SubmissionProgress) -> rich.text.Text:
     terminals that support it) on its own line below."""
     cell = rich.text.Text(_short_command(row.job))
     cell.append("\nlog: ", style="dim")
-    cell.append(str(row.log_path), style="dim")
+    cell.append(str(row.log_path), style=f"dim link file://{row.log_path}")
     return cell
 
 
@@ -147,7 +147,6 @@ def render_job_table(
                 str(job_row.job_id) if job_row.job_id is not None else "-",
                 rich.text.Text(job_row.state, style=_state_style(job_row.state)),
                 _command_and_log_cell(job_row),
-                _short_command(job_row.job),
             )
     return table
 

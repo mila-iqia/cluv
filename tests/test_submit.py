@@ -960,7 +960,7 @@ async def test_can_submit_on_current_cluster(
             return subprocess.CompletedProcess(
                 program_and_args, returncode=0, stdout=f"{jobid}", stderr=""
             )
-        if full_command.startswith(f"sacct -j {jobid}"):
+        if f"sacct -j {jobid}" in full_command:
             return subprocess.CompletedProcess(
                 program_and_args, returncode=0, stdout=f"{jobid}|RUNNING", stderr=""
             )
@@ -1017,7 +1017,7 @@ async def test_parsable_prints_only_the_job_id_on_stdout(
             return subprocess.CompletedProcess(
                 program_and_args, returncode=0, stdout=f"{jobid}", stderr=""
             )
-        if full_command.startswith(f"sacct -j {jobid}"):
+        if f"sacct -j {jobid}" in full_command:
             return subprocess.CompletedProcess(
                 program_and_args, returncode=0, stdout=f"{jobid}|RUNNING", stderr=""
             )
@@ -1219,7 +1219,7 @@ async def test_submit_races_the_allocations_of_a_cluster(
                 return _result(str(rrg_job_id))
             assert "--account=def-bengioy" in full_command
             return _result(str(def_job_id))
-        if full_command.startswith("sacct -j") and "--format=JobID,State" in full_command:
+        if "sacct -j" in full_command and "--format=JobID,State" in full_command:
             # `sacct` calls are batched: one call per cluster, covering every job id still
             # being watched on it, joined by commas.
             ids = [
@@ -1345,7 +1345,7 @@ async def test_submit_first_considers_current_cluster(
             return _result(str(other_cluster_jobid))
 
         # Querying for the job's state:
-        if full_command.startswith(f"sacct -j {this_cluster_jobid} --format=JobID,State"):
+        if f"sacct -j {this_cluster_jobid} --format=JobID,State" in full_command:
             this_cluster_wait_time -= 1
             if scancel_received_on_this_cluster:
                 return _result(f"{this_cluster_jobid}|CANCELLED")

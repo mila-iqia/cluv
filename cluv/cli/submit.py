@@ -1,5 +1,4 @@
 import asyncio
-import collections
 import dataclasses
 import datetime
 import itertools
@@ -292,17 +291,19 @@ async def wait_for_first_running_job(
 ) -> SubmissionProgress[Job] | None:
     """Poll `sacct` on each cluster until one submitted job starts running, or every submission has failed.
 
-    Mutates `rows` in place with the latest known job id / state, so a live display can render
-    them at any point during this wait. Sets `found_running_job` the moment a job starts, so
-    that clusters which haven't submitted their own jobs yet can skip doing so.
+    Mutates the job submissions in place with the latest known job id / state, so a live display
+    can render them at any point during this wait. Sets `found_running_job` the moment a job starts,
+    so that clusters which haven't submitted their own jobs yet can skip doing so.
 
-    Returns the row for the job that started, or None if every submission ended up failing.
+    Returns the submission for the job that started, or None if every submission ended up failing.
     """
     # Need one remote for each cluster that has job submissions.
     assert set(cluster_to_remote.keys()) >= set(cluster_to_job_submissions.keys())
+    all_submissions = list(itertools.chain.from_iterable(cluster_to_job_submissions.values()))
 
-    submission_tasks = {
-        cluster_name: asyncio.create_task(
+    # Errors are reported (and stored on the submissions) by `sync_and_submit_jobs_to_cluster`.
+    sync_and_submit = asyncio.gather(
+        *(
             sync_and_submit_jobs_to_cluster(
                 cluster_name,
                 remote=cluster_to_remote[cluster_name],
@@ -311,91 +312,49 @@ async def wait_for_first_running_job(
                 _skip_sync=_skip_sync,
                 sync_datasets=sync_datasets,
             )
-        )
-        for cluster_name, cluster_job_submissions in cluster_to_job_submissions.items()
-    }
-
+            for cluster_name, cluster_job_submissions in cluster_to_job_submissions.items()
+        ),
+        return_exceptions=True,
+    )
     delay = initial_delay
+    try:
+        while True:
+            # Read both before awaiting, so no job can get submitted in between.
+            submitted_everywhere = sync_and_submit.done()
+            queued_jobs = [s for s in all_submissions if has_job(s)]
 
-    cluster_to_queued_jobs: dict[str, list[SubmissionProgress[Job]]] = {}
+            await asyncio.gather(
+                *(
+                    update_job_states_with_sacct(cluster_to_remote[cluster], cluster_jobs)
+                    for cluster, cluster_jobs in group_by_cluster(queued_jobs).items()
+                )
+            )
+            logger.debug("Job states: %s", {(j.cluster, j.job_id): j.state for j in queued_jobs})
 
-    while True:
-        for cluster_name, task in submission_tasks.items():
-            if cluster_name not in cluster_to_queued_jobs and task.done():
-                # TODO: IF one job submission fails, but others were successful, then we will receive only one job.
-                try:
-                    cluster_to_queued_jobs[cluster_name] = task.result()
-                except ClusterSyncFailed as exc:
+            if started_jobs := (
+                [j for j in queued_jobs if j.state == "COMPLETED"]
+                or [j for j in queued_jobs if j.state == "RUNNING"]
+            ):
+                found_running_job.set()
+                logger.debug(f"Found {len(started_jobs)} running (or completed) jobs.")
+                return started_jobs[0]
+
+            if submitted_everywhere:
+                if all(j.state.startswith(tuple(FAILED_JOB_STATES)) for j in queued_jobs):
                     console.print(
-                        f"Unable to sync with cluster {cluster_name}: {exc}", style="red"
+                        f"Submitted {len(all_submissions)} jobs but none succeeded!", style="red"
                     )
-                    cluster_to_queued_jobs[cluster_name] = []
-                except Exception as exc:
-                    console.print(
-                        f"Unknown exception when attempting to sync or submit jobs on {cluster_name}: {exc}",
-                        style="red",
-                    )
-                    cluster_to_queued_jobs[cluster_name] = []
+                    return None
+                # Skip the wait if we'd only be waiting on one job to start.
+                pending_jobs = [j for j in queued_jobs if j.state == "PENDING"]
+                if len(pending_jobs) == 1:
+                    console.log("Only one job pending. Skipping wait for a running job.")
+                    return pending_jobs[0]
 
-        sync_and_sbatch_done_everywhere = all(task.done() for task in submission_tasks.values())
-        if sync_and_sbatch_done_everywhere and not any(cluster_to_queued_jobs.values()):
-            n_job_submissions = sum(map(len, cluster_to_job_submissions.values()))
-            console.print(f"Submitted {n_job_submissions} jobs but none succeeded!", style="red")
-            return None
-
-        await asyncio.gather(
-            *[
-                update_job_states_with_sacct(cluster_to_remote[cluster], cluster_jobs)
-                for cluster, cluster_jobs in cluster_to_queued_jobs.items()
-            ]
-        )
-
-        # Update all the job states by modifying the `state` attribute of each tracked job submission.
-        # TODO: We should probably setup an actual Enum for the Slurm job states, they are cumbersome to handle.
-        state_to_jobs = collections.defaultdict[str, list[SubmissionProgress[Job]]](list)
-        for cluster_name, cluster_jobs in cluster_to_queued_jobs.items():
-            for job in cluster_jobs:
-                state_to_jobs[job.state].append(job)
-
-        # If there is any job that is RUNNING or COMPLETED, set the event and return that job.
-        if started_jobs := (state_to_jobs.get("COMPLETED") or state_to_jobs.get("RUNNING")):
-            found_running_job.set()
-            logger.debug(f"Found {len(started_jobs)} running (or completed) jobs.")
-            winning_job = started_jobs[0]
-            for task in submission_tasks.values():
-                task.cancel()
-            return winning_job
-
-        # Early exit (skip the wait) if we're only be waiting on one job to start.
-        # In other words: if only one job is in the PENDING state, skip the wait.
-        logger.debug(
-            "Job states: %s",
-            {k: [(job.cluster, job.job_id) for job in v] for k, v in state_to_jobs.items()},
-        )
-
-        if (
-            sync_and_sbatch_done_everywhere
-            and (pending_jobs := state_to_jobs.get("PENDING"))
-            and len(pending_jobs) == 1
-        ):
-            console.log("Only one job pending. Skipping wait for a running job.")
-            winning_job = pending_jobs[0]
-            for task in submission_tasks.values():
-                task.cancel()
-            return winning_job
-
-        all_failed = bool(state_to_jobs) and all(
-            state.startswith(tuple(FAILED_JOB_STATES)) and jobs
-            for state, jobs in state_to_jobs.items()
-        )
-        if sync_and_sbatch_done_everywhere and all_failed:
-            console.log("All jobs have failed!")
-            for task in submission_tasks.values():
-                task.cancel()
-            return None
-
-        await asyncio.sleep(delay)
-        delay = min(delay * 2, max_wait_time_seconds)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, max_wait_time_seconds)
+    finally:
+        sync_and_submit.cancel()
 
 
 async def update_job_states_with_sacct(

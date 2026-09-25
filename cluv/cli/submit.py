@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import dataclasses
 import datetime
 import itertools
@@ -8,6 +9,7 @@ import re
 import shlex
 import subprocess
 import sys
+import traceback
 import typing
 from contextvars import ContextVar
 from pathlib import Path, PurePosixPath
@@ -26,10 +28,10 @@ from cluv.cli.sync import (
     sync_per_cluster_part,
 )
 from cluv.config import ClusterConfig, find_pyproject, get_cluv_config
-from cluv.remote import Remote, run
+from cluv.remote import Remote, command_log_files, run
 from cluv.sbatch_args import SbatchArgs, sbatch_args_from_list, sbatch_args_to_list
 from cluv.slurm import FAILED_JOB_STATES, run_saccts
-from cluv.utils import console, gather_dict, group_by_cluster
+from cluv.utils import console, gather_dict, group_by_cluster, set_context
 
 logger = logging.getLogger(__name__)
 
@@ -210,10 +212,20 @@ async def submit(
         ]
         for cluster_name, cluster_jobs in _cluster_to_submissions.items()
     }
+    # Create the log files right away, so the links in the jobs table always point somewhere.
+    all_log_paths = tuple(
+        row.log_path for rows in cluster_to_job_submissions.values() for row in rows
+    )
+    for rows in cluster_to_job_submissions.values():
+        for row in rows:
+            row.log_path.write_text(
+                f"cluster: {row.cluster}\ncommand: {row.job.sbatch_command}\n\n--- sync ---\n"
+            )
 
     if not _skip_sync:
         remotes = [r for r in cluster_to_remote.values() if r]
-        await sync_common_part(remotes, sync_datasets=sync_datasets)
+        with logging_commands_to(all_log_paths):
+            await sync_common_part(remotes, sync_datasets=sync_datasets)
 
     found_running_job = asyncio.Event()
 
@@ -462,7 +474,8 @@ async def sync_and_submit_jobs_to_cluster(
 
     if not _skip_sync:
         try:
-            await sync_per_cluster_part(remote, sync_datasets=sync_datasets)
+            with logging_commands_to(tuple(row.log_path for row in job_submissions)):
+                await sync_per_cluster_part(remote, sync_datasets=sync_datasets)
         except Exception as exc:
             console.log(f"Failed to sync with cluster {cluster}: {exc}")
             for job_submission in job_submissions:
@@ -810,6 +823,20 @@ async def submit_job(submission: Submission, log_path: Path) -> Job:
     )
 
 
+@contextlib.contextmanager
+def logging_commands_to(log_paths: tuple[Path, ...]):
+    """Append the commands run in this context (and their outputs) to `log_paths`, as well as
+    the traceback of any exception raised."""
+    try:
+        with set_context(command_log_files, log_paths):
+            yield
+    except Exception:
+        for log_path in log_paths:
+            with log_path.open("a") as f:
+                f.write(traceback.format_exc())
+        raise
+
+
 def write_submission_log(
     log_path: Path,
     submission: Submission,
@@ -818,12 +845,12 @@ def write_submission_log(
     error: str | None,
     result: subprocess.CompletedProcess[str],
 ) -> None:
-    """Write the outcome of one `sbatch` call to `log_path`, so it can be found on its own even
+    """Append the outcome of one `sbatch` call to `log_path`, so it can be found on its own even
     when many submissions' console output is interleaved.
     """
     lines = [
-        f"cluster: {submission.cluster}",
-        f"command: {submission.sbatch_command}",
+        "",
+        "--- submission ---",
         f"status: {'FAILED' if error is not None else 'SUBMITTED'}",
         f"job_id: {job_id if job_id is not None else '-'}",
         f"returncode: {result.returncode}",
@@ -833,7 +860,8 @@ def write_submission_log(
         "--- stderr ---",
         result.stderr,
     ]
-    log_path.write_text("\n".join(lines))
+    with log_path.open("a") as f:
+        f.write("\n".join(lines))
 
 
 def build_submit_command(

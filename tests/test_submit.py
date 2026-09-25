@@ -26,6 +26,7 @@ from cluv.cli.submit import (
     get_job_env_vars,
     get_sbatch_command,
     get_submissions,
+    logging_commands_to,
     merge_sbatch_args,
     submit,
     sync_and_submit_jobs_to_cluster,
@@ -691,6 +692,13 @@ class TestSubmitCliParsing:
                 "parsable": False,
             }
         )
+
+
+async def test_failed_sync_commands_are_logged(tmp_path: Path) -> None:
+    log_path = tmp_path / "log.txt"
+    with pytest.raises(subprocess.CalledProcessError), logging_commands_to((log_path,)):
+        await cluv.remote.run(("false",))
+    assert log_path.read_text().startswith("$ false\n(exited with 1)\nTraceback")
 
 
 class TestBuildSubmitCommand:

@@ -103,9 +103,7 @@ async def run_saccts(
         return []
     jobs = [job for job in jobs if job is not None]
     jobs_str = ",".join(str(job) for job in jobs)
-    sacct_command = (
-        f"sacct -j {jobs_str} --format=JobID,State --parsable2 --noheader --allocations"
-    )
+    sacct_command = f"bash --login -c 'sacct -j {jobs_str} --format=JobID,State --parsable2 --noheader --allocations'"
     if remote:
         output = await remote.get_output(sacct_command, hide=True)
     else:

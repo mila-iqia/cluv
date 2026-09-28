@@ -135,7 +135,6 @@ env = { SCRATCH = "$HOME/scratch" }
 
 [tool.cluv.sbatch_args]
 # sbatch flags applied on all clusters. CLI-supplied flags take precedence.
-time = "3:00:00"
 requeue = true
 
 ###  --------------   Clusters Config   --------------  ###

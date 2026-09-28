@@ -57,9 +57,6 @@ results_path = "$SCRATCH/logs/hydra_example"
 [tool.cluv.clusters.tamia]
 
 [tool.cluv.clusters.killarney]
-# For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
-datasets_path = "$HOME/datasets/cifar10"
-results_path = "$HOME/logs/hydra_example"
 project_dir = "$SCRATCH/repos/cluv/examples/hydra_example"
 
 [tool.cluv.clusters.vulcan]

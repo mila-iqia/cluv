@@ -50,9 +50,6 @@ env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 [tool.cluv.clusters.tamia]
 
 [tool.cluv.clusters.killarney]
-# For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
-datasets_path = "$HOME/datasets/cifar10"
-results_path = "$HOME/logs/pytorch_example"
 # Killarney refuses to run jobs whose submission directory is under /home
 # ("Submitting jobs from directories residing in /home is not permitted"), so the project lives on
 # $SCRATCH there instead of the default $HOME location.
@@ -60,8 +57,6 @@ project_dir = "$SCRATCH/repos/cluv/examples/pytorch-example"
 
 
 [tool.cluv.clusters.vulcan]
-datasets_path = "$HOME/datasets/cifar10"
-results_path = "$HOME/logs/pytorch_example"
 
 [tool.cluv.clusters.rorqual]
 sbatch_args = { account = "rrg-bengioy-ad" }

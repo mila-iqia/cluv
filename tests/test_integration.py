@@ -168,6 +168,47 @@ async def test_submit(remote: Remote):
             await remote.run(f"scancel {job_id}", warn=True, hide=True, display=True)
 
 
+@pytest.mark.slow
+@pytest.mark.timeout(TEST_SUBMIT_TIMEOUT_SECONDS)
+async def test_submit_held_job(remote: Remote):
+    """End-to-end sync and submit, without having to wait for resources.
+
+    A held job stays PENDING, so `submit` returns as soon as it sees that it's the only job
+    pending, which makes this fast enough to run in the CI (unlike `test_submit`).
+    """
+    if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
+        pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
+
+    job = await submit(
+        cluster=remote.hostname,
+        job_script=Path("scripts/job.sh"),
+        sbatch_args=["--hold", "--time=00:01:00"],
+        program_args=["python", "--version"],
+    )
+    assert isinstance(job, Job)
+    try:
+        assert job.cluster == remote.hostname
+        assert await run_sacct(remote, job.job_id) == "PENDING"
+    finally:
+        await remote.run(f"scancel {job.job_id}", warn=True, hide=True, display=True)
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(TEST_SUBMIT_TIMEOUT_SECONDS)
+async def test_submit_rejected_by_sbatch(remote: Remote):
+    """`submit` returns None when sbatch rejects the job on the cluster."""
+    if remote.hostname not in SUBMIT_SUPPORTED_CLUSTERS:
+        pytest.xfail(f"Submit integration test not supported on cluster {remote.hostname}.")
+
+    job = await submit(
+        cluster=remote.hostname,
+        job_script=Path("scripts/job.sh"),
+        sbatch_args=["--partition=cluv-does-not-exist", "--time=00:01:00"],
+        program_args=["python", "--version"],
+    )
+    assert job is None
+
+
 @pytest.fixture
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)  # Set the home directory to tmp_path

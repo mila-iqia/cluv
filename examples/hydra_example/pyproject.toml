@@ -76,7 +76,8 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 project_dir = "$SCRATCH/repos/cluv/examples/hydra_example"
 
 [tool.cluv.clusters.trillium-gpu]
-sbatch_args = { account = "rrg-bengioy-ad" }
+# Unset --mem, since GPU jobs on Trillium always get 186GiB of memory.
+sbatch_args = { gpus-per-node = "1", account = "rrg-bengioy-ad", mem = '' }
 project_dir = "$SCRATCH/repos/cluv/examples/hydra_example"
 
 [tool.cluv.clusters.narval]

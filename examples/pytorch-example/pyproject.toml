@@ -77,10 +77,8 @@ sbatch_args = { time = "00:15:00" }
 project_dir = "$SCRATCH/repos/cluv/examples/pytorch-example"
 
 [tool.cluv.clusters.trillium-gpu]
-sbatch_args = { gpus-per-node = "1", account = "rrg-bengioy-ad" }
-# $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
-# location is rejected ("Job output requested to be written to a filesystem not available on
-# compute nodes"). Keep the project on $SCRATCH instead.
+# Unset --mem, since GPU jobs on Trillium always get 186GiB of memory.
+sbatch_args = { time = "00:15:00", gpus-per-node = "1", account = "rrg-bengioy-ad", mem = '' }
 project_dir = "$SCRATCH/repos/cluv/examples/pytorch-example"
 
 [tool.cluv.clusters.narval]

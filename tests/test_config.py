@@ -417,3 +417,36 @@ ALREADY_IN_ENV = "new-value"
     assert cfg.local.env == {"FOO": "$BAR/baz", "ALREADY_IN_ENV": "new-value"}
     assert os.environ["FOO"] == "$BAR/baz"
     assert os.environ["ALREADY_IN_ENV"] == "new-value"
+
+
+# ---------------------------------------------------------------------------
+# CLUV_REPO_DIR env var
+# ---------------------------------------------------------------------------
+
+
+class TestRepoDirEnvVar:
+    MINIMAL = '[tool.cluv]\nresults_path = "logs"\n'
+
+    @pytest.fixture(autouse=True)
+    def repo(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        (tmp_path / ".git").mkdir()
+        monkeypatch.setenv("CLUV_REPO_DIR", "$HOME/repos/cluv")
+        return tmp_path
+
+    def test_repo_root_project(self, repo: Path) -> None:
+        cfg = load_cluv_config(write_pyproject(repo, self.MINIMAL))
+        assert cfg.project_dir == "$HOME/repos/cluv"
+
+    def test_subproject(self, repo: Path) -> None:
+        (subproject := repo / "examples" / "foo").mkdir(parents=True)
+        cfg = load_cluv_config(write_pyproject(subproject, self.MINIMAL))
+        assert cfg.project_dir == "$HOME/repos/cluv/examples/foo"
+
+    def test_configured_project_dir_wins(self, repo: Path) -> None:
+        p = write_pyproject(repo, self.MINIMAL + 'project_dir = "$SCRATCH/foo"\n')
+        assert load_cluv_config(p).project_dir == "$SCRATCH/foo"
+
+    def test_not_in_a_git_repo(self, repo: Path) -> None:
+        (repo / ".git").rmdir()
+        with pytest.raises(RuntimeError, match="isn't in a git repo"):
+            load_cluv_config(write_pyproject(repo, self.MINIMAL))

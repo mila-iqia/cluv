@@ -64,14 +64,16 @@ async def skip_unless_connected(cluster: str) -> None:
 
 @pytest.mark.slow
 @pytest.mark.parametrize(
-    ("project_dir", "cluster", "job_script"),
+    ("project_dir", "cluster", "job_script", "vram_flag"),
     [
         *[
             pytest.param(
                 REPO_ROOT,
                 cluster,
                 job_script,
+                None,
                 marks=[
+                    pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
                         cluster in ("fir", "nibi"),
                         reason="TODO: Multiple _cpu allocations, and account isn't specified in pyproject of cluv root.",
@@ -97,14 +99,35 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "pytorch-example",
                 cluster,
                 job_script,
+                vram,
                 marks=[
+                    pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
-                        cluster in ("killarney", "fir", "nibi"),
+                        cluster == "mila" and vram is not None,
+                        reason=(
+                            "TODO: Mila cluster doesn't have floating H100 gpus, they are in a dedicated partition. "
+                            "Using --vram somehow adds --gpus=h100:1."
+                        ),
+                        strict=True,
+                    ),
+                    pytest.mark.xfail(
+                        cluster == "tamia" and vram is not None,
+                        reason=(
+                            "TODO: Tamia requires whole-node allocation for H100s, and doesn't have MIG. "
+                            "--vram adds --gpus=h100:1."
+                        ),
+                        strict=True,
+                    ),
+                    pytest.mark.xfail(
+                        # Fir + --vram seems to work, specifically.
+                        (cluster in ("killarney", "fir", "nibi") and vram is None)
+                        or (cluster in ("killarney", "nibi") and vram is not None),
                         reason="TODO: Multiple (_cpu) allocations, and account isn't specified in the example's pyproject file.",
                         strict=True,
                     ),
                 ],
             )
+            for vram in [None, "10GB"]
             for cluster in pytorch_example_clusters
             for job_script in (REPO_ROOT / "examples" / "pytorch-example" / "scripts").iterdir()
         ],
@@ -113,7 +136,9 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "hydra_example",
                 cluster,
                 job_script,
+                None,
                 marks=[
+                    pytest.mark.xdist_group(cluster),
                     pytest.mark.xfail(
                         cluster in ("fir", "nibi"),
                         reason="TODO: multiple allocations",
@@ -153,8 +178,10 @@ async def skip_unless_connected(cluster: str) -> None:
                 REPO_ROOT / "examples" / "imagenet",
                 cluster,
                 None,
+                None,
                 marks=[
                     # Should work everywhere!
+                    pytest.mark.xdist_group(cluster),
                 ],
             )
             for cluster in imagenet_example_clusters
@@ -168,6 +195,7 @@ async def test_example_would_work(
     project_dir: Path,
     cluster: str,
     job_script: Path | None,
+    vram_flag: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ):
     """Test that `sbatch --test-only` works for that project, cluster and (optional) job script."""
@@ -188,7 +216,7 @@ async def test_example_would_work(
     else:
         remote = (await sync([cluster], sync_datasets=False))[0]
 
-    submissions = get_submissions(
+    submissions = await get_submissions(
         cluster,
         remote=remote,
         job_script=job_script,
@@ -196,6 +224,7 @@ async def test_example_would_work(
         program_args=program_args,
         chunking=None,
         git_commit=current_commit,
+        vram=vram_flag,
     )
     for submission in submissions:
         sbatch_command = submission.sbatch_command

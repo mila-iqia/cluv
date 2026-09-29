@@ -14,6 +14,7 @@ import cluv.__main__ as cluv_main
 import cluv.cli.init
 import cluv.cli.submit
 import cluv.cli.submit_utils
+import cluv.cli.submit_utils.vram
 import cluv.remote
 import cluv.slurm
 import cluv.utils
@@ -180,7 +181,7 @@ async def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
             ),
         ),
     )
-    submissions = get_submissions(
+    submissions = await get_submissions(
         cluster=cluster,
         remote=unittest.mock.AsyncMock(Remote, hostname=cluster),
         chunking=chunking,
@@ -572,6 +573,7 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
                 "sync_datasets": True,
                 "parsable": False,
             }
@@ -594,6 +596,28 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
+                "sync_datasets": True,
+                "parsable": False,
+            }
+        )
+
+    def test_vram_is_not_passed_along_to_sbatch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "--gpus=1", "--vram=10GB", "--", "python", "main.py"])
+
+        mock_submit.assert_called_once_with(
+            **{
+                "cluster": "tamia",
+                "job_script": None,
+                "sbatch_args": ["--gpus=1"],
+                "program_args": ["python", "main.py"],
+                "autocommit": False,
+                "chunking": None,
+                "vram": "10GB",
                 "sync_datasets": True,
                 "parsable": False,
             }
@@ -619,6 +643,7 @@ class TestSubmitCliParsing:
                 "program_args": [],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
                 "sync_datasets": True,
                 "parsable": False,
             }
@@ -639,6 +664,7 @@ class TestSubmitCliParsing:
                 "program_args": ["python", "main.py"],
                 "autocommit": False,
                 "chunking": None,
+                "vram": None,
                 "sync_datasets": True,
                 "parsable": True,
             }
@@ -664,6 +690,7 @@ class TestSubmitCliParsing:
                 "program_args": ["sleep", "10"],
                 "autocommit": False,
                 "chunking": 6,
+                "vram": None,
                 "sync_datasets": True,
                 "parsable": False,
             }
@@ -688,6 +715,7 @@ class TestSubmitCliParsing:
                 "program_args": ["sleep", "10"],
                 "autocommit": False,
                 "chunking": CHUNK_SIZE,
+                "vram": None,
                 "sync_datasets": True,
                 "parsable": False,
             }
@@ -1097,7 +1125,7 @@ async def test_submit_cancels_in_flight_jobs_when_interrupted(
 
     run_name = cluv.remote.run.__name__
     mock_runs: dict[str, unittest.mock.AsyncMock] = {}
-    for module in (cluv.remote, cluv.slurm, cluv.cli.submit):
+    for module in (cluv.remote, cluv.slurm, cluv.cli.submit, cluv.cli.submit_utils.vram):
         monkeypatch.setattr(module, run_name, mock_run := unittest.mock.AsyncMock(wraps=fake_run))
         mock_runs[module.__name__] = mock_run
     found_running_job = asyncio.Event()
@@ -1116,7 +1144,7 @@ async def test_submit_cancels_in_flight_jobs_when_interrupted(
                 _skip_sync=True,
                 sync_datasets=False,
             )
-            _states = await cluv.slurm.run_saccts(
+            _states = await cluv.slurm.get_job_states_with_sacct(
                 mock_remote,
                 [
                     job.job_id
@@ -1155,6 +1183,8 @@ async def test_submit_cancels_in_flight_jobs_when_interrupted(
             job_script=job_script,
             sbatch_args=[],
             program_args=[],
+            # vram="5GB",
+            vram=None,
             chunking=None,
             _skip_sync=True,
         )

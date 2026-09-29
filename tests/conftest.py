@@ -4,12 +4,10 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 
-import cluv.cli.clean
-import cluv.cli.submit
 import cluv.config
 import cluv.remote
 from cluv.cli.login import get_remote_without_2fa_prompt
-from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars
+from cluv.config import get_cluv_config, set_local_env_vars
 from cluv.remote import Remote, control_socket_is_running
 from tests.test_integration import (
     ALL_CLUSTERS,
@@ -17,26 +15,6 @@ from tests.test_integration import (
     ON_DEV_MACHINE,
     REQUIRED_CLUSTERS,
 )
-
-
-@pytest.fixture(
-    autouse=IN_SELF_HOSTED_GITHUB_CI or (ON_DEV_MACHINE and "_work" in Path.cwd().parts)
-)
-def mock_home_in_selfhosted_runner(monkeypatch: pytest.MonkeyPatch):
-    """Mock the $HOME directory in a self-hosted runner, so that it is able to sync the project
-    in its _work folder with the actual project path on the cluster.
-
-    The folder structure goes like this:
-
-    <some_path>/action-runners/some_name/_work/cluv/cluv
-    """
-    # NOTE: The second part of this condition is used to debug the self-hosted tests by opening
-    # the _work folder and running tests there.
-    assert "_work" in Path.cwd().parts
-    work_folder = (
-        Path.cwd().parent.parent
-    )  # This should be the _work folder in the self-hosted runner
-    monkeypatch.setattr(Path, "home", lambda: work_folder)
 
 
 @pytest.fixture
@@ -63,45 +41,30 @@ def fake_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture(autouse=True)
 def reset_cluv_config():
     """Reset the cluv config before each test to avoid state leakage."""
-    from cluv.config import get_cluv_config
 
     get_cluv_config.cache_clear()
 
 
-@pytest.fixture(autouse=IN_SELF_HOSTED_GITHUB_CI)
-def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
-    monkeypatch: pytest.MonkeyPatch, reset_cluv_config: None, request: pytest.FixtureRequest
+@pytest.fixture(
+    # NOTE: The second part of this condition is used to debug the self-hosted tests by opening
+    # the _work folder and running tests there.
+    autouse=IN_SELF_HOSTED_GITHUB_CI or (ON_DEV_MACHINE and "_work" in Path.cwd().parts)
+)
+def use_normal_repo_dir_on_clusters_in_selfhosted_runner(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ):
     """The self-hosted runner is running from ~/action-runners/.../_work/cluv/cluv.
 
-    Patch the output of `get_cluv_config` while in the tests, so that it always uses a project_dir that is
-    "normal", like ~/repos/cluv and ~/repos/cluv/examples/<example_name> instead of replicating entire
-    action-runners/.../_work/cluv on the cluster.
+    Set `CLUV_REPO_DIR` so that the projects get a "normal" project_dir on the clusters, like
+    ~/repos/cluv and ~/repos/cluv/examples/<example_name>, instead of a path derived from the
+    runner's checkout. Being an env var, this also applies to `cluv` running in subprocesses.
 
     As a consequence of this, the ~/repos/cluv path on the clusters might be changed by the test runners.
     This is kind-of to be expected though, and is not different than doing a `cluv sync` ourselves.
     """
-
-    # Only do this mocking if the test that is going to be run is marked with @pytest.mark.integration.
-    if request.node.get_closest_marker("integration") is None:
-        return  # don't patch get_cluv_config to not interfere with unit tests.
-
-    def mock_get_cluv_config() -> cluv.config.CluvConfig:
-        config = get_cluv_config()
-        if config.project_dir is None:
-            project_dir = find_pyproject().parent
-            if project_dir.name == "cluv":
-                monkeypatch.setattr(config, "project_dir", "$HOME/repos/cluv")
-            else:
-                assert project_dir.parent.name == "examples"
-                monkeypatch.setattr(
-                    config, "project_dir", f"$HOME/repos/cluv/examples/{project_dir.name}"
-                )
-        return config
-
-    monkeypatch.setattr(cluv.config, get_cluv_config.__name__, mock_get_cluv_config)
-    monkeypatch.setattr(cluv.cli.submit, get_cluv_config.__name__, mock_get_cluv_config)
-    monkeypatch.setattr(cluv.cli.clean, get_cluv_config.__name__, mock_get_cluv_config)
+    # Only for integration tests, to not interfere with the config values in unit tests.
+    if request.node.get_closest_marker("integration") is not None:
+        monkeypatch.setenv("CLUV_REPO_DIR", "$HOME/repos/cluv")
 
 
 @pytest_asyncio.fixture(scope="session", params=ALL_CLUSTERS)

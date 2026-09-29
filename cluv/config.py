@@ -237,8 +237,25 @@ def load_cluv_config(pyproject_path: Path) -> CluvConfig:
 
     if current_cluster() is None:
         set_local_env_vars(cluv.get("local", {}).get("env", {}))
+    if (repo_dir := os.environ.get("CLUV_REPO_DIR")) and "project_dir" not in cluv:
+        cluv["project_dir"] = _project_dir_in_repo(repo_dir, pyproject_path.parent)
     config = CluvConfig.model_validate(cluv, extra="forbid")
     return config
+
+
+def _project_dir_in_repo(repo_dir: str, local_project_dir: Path) -> str:
+    """The project's dir on the clusters when its git repo is cloned at `repo_dir` there.
+
+    For example, `examples/foo` in a repo cloned at `$HOME/repos/cluv` gives
+    `$HOME/repos/cluv/examples/foo`. Used for the `CLUV_REPO_DIR` env var, which the self-hosted
+    CI runner sets so its checkout (in `.../_work/cluv/cluv`) isn't replicated under that path on
+    the clusters.
+    """
+    local_project_dir = local_project_dir.resolve()
+    for folder in (local_project_dir, *local_project_dir.parents):
+        if (folder / ".git").exists():
+            return str(PurePosixPath(repo_dir) / local_project_dir.relative_to(folder).as_posix())
+    raise RuntimeError(f"CLUV_REPO_DIR is set, but {local_project_dir} isn't in a git repo.")
 
 
 def current_cluster_config() -> ClusterConfig[Path] | None:

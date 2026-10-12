@@ -120,8 +120,8 @@ async def skip_unless_connected(cluster: str) -> None:
                     ),
                     pytest.mark.xfail(
                         # Fir + --vram seems to work, specifically.
-                        (cluster in ("killarney", "rorqual", "fir", "nibi") and vram is None)
-                        or (cluster in ("killarney", "rorqual", "nibi") and vram is not None),
+                        (cluster in ("killarney", "fir", "nibi") and vram is None)
+                        or (cluster in ("killarney", "nibi") and vram is not None),
                         reason="TODO: Multiple (_cpu) allocations, and account isn't specified in the example's pyproject file.",
                         strict=True,
                     ),

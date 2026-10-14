@@ -8,6 +8,7 @@ nav:
   - Home: index.md
   - Hydra launcher: hydra-launcher.md
   - Commands: commands.md
+  - Troubleshooting: troubleshooting.md
   - Guides:
       - Introduction: guides/introduction.md
       - Syncing datasets: guides/syncing-datasets.md

@@ -533,6 +533,28 @@ async def sync_and_submit_jobs_to_cluster(
     return successful_job_submissions
 
 
+def get_local_job_script(
+    job_script: Path | None, cluster: str, cluster_config: ClusterConfig
+) -> Path:
+    if job_script is None:
+        if cluster_config.job_script_path is None:
+            raise ValueError(
+                f"No job script specified for cluster {cluster!r}, and no default job script "
+                f"path set in the config."
+            )
+
+        job_script = Path(os.path.expandvars(str(cluster_config.job_script_path)))
+
+    if not job_script.exists():
+        raise ValueError(
+            f"The job script ({job_script}) does not exist on this machine. Even though it "
+            f"can be customized per cluster, it needs to exist locally, since cluv needs to "
+            f"read its header to infer sbatch defaults."
+        )
+
+    return job_script
+
+
 async def get_submissions(
     cluster: str,
     remote: Remote | None,
@@ -557,27 +579,21 @@ async def get_submissions(
     cluster_config = config.get_cluster_config(cluster)
     job_resources_options = cluster_config.sbatch_args
 
-    if job_script is None:
-        if cluster_config.job_script_path is None:
-            raise ValueError(
-                f"No job script specified for cluster {cluster!r}, and no default job script "
-                f"path set in the config."
-            )
-        job_script = Path(os.path.expandvars(str(cluster_config.job_script_path)))
-    if not job_script.exists():
-        raise ValueError(
-            f"The job script ({job_script}) does not exist on this machine. Even though it "
-            f"can be customized per cluster, it needs to exist locally, since cluv needs to "
-            f"read its header to infer sbatch defaults."
-        )
-
+    # Get job vars
     job_env_vars = get_job_env_vars(
         cluster=cluster, git_commit=git_commit, cluster_config=cluster_config
     )
-    project_dir_on_cluster = cluster_config.project_dir
-    cluster_job_script_path = get_cluster_job_script_path(
-        local_job_script_path=job_script, cluster=cluster, cluster_config=cluster_config
+
+    # Get local job script
+    local_job_script_path = get_local_job_script(
+        job_script, cluster=cluster, cluster_config=cluster_config
     )
+
+    # Get the job script path on the remote cluster
+    cluster_job_script_path = get_cluster_job_script_path(
+        local_job_script_path=local_job_script_path, cluster=cluster, cluster_config=cluster_config
+    )
+
     for job_resources in job_resources_options:
         job_resources = merge_sbatch_args(from_config=job_resources, from_cli=sbatch_args)
         n_chunks, job_resources = apply_chunking(
@@ -585,11 +601,16 @@ async def get_submissions(
         )
 
         for expanded_resources in await expand_for_vram(
-            cluster, remote, job_resources, job_script=job_script, vram=vram, env_vars=job_env_vars
+            cluster,
+            remote,
+            job_resources,
+            job_script=local_job_script_path,
+            vram=vram,
+            env_vars=job_env_vars,
         ):
             expanded_resources = add_cluv_sbatch_args(
                 expanded_resources,
-                job_script=job_script,
+                job_script=local_job_script_path,
                 cluster=cluster,
                 cluster_config=cluster_config,
             )
@@ -598,13 +619,13 @@ async def get_submissions(
                 job_script=cluster_job_script_path,
                 sbatch_args=expanded_resources,
                 program_args=program_args,
-                project_dir_on_cluster=project_dir_on_cluster,
+                project_dir_on_cluster=cluster_config.project_dir,
             )
             submissions.append(
                 Submission(
                     cluster=cluster,
                     remote=remote,
-                    job_script=job_script,
+                    job_script=local_job_script_path,
                     sbatch_args=expanded_resources,
                     program_args=program_args,
                     sbatch_command=sbatch_command,
@@ -618,7 +639,12 @@ async def get_submissions(
 def get_cluster_job_script_path(
     local_job_script_path: Path, cluster: str, cluster_config: ClusterConfig
 ) -> PurePosixPath:
-    if cluster_config.job_script_path:
+    # Only when the script itself comes from the config (no script was passed to `cluv submit`)
+    # is the configured path used as-is on the cluster. One passed on the command line is
+    # resolved relative to the project dir below, like any other local script would be.
+    if cluster_config.job_script_path and local_job_script_path == Path(
+        os.path.expandvars(str(cluster_config.job_script_path))
+    ):
         return cluster_config.job_script_path
 
     local_project_dir = find_pyproject().parent

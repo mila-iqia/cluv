@@ -597,7 +597,10 @@ async def get_submissions(
     for job_resources in job_resources_options:
         job_resources = merge_sbatch_args(from_config=job_resources, from_cli=sbatch_args)
         n_chunks, job_resources = apply_chunking(
-            job_resources, job_script=job_script, chunking=chunking, env_vars=job_env_vars
+            job_resources,
+            job_script=local_job_script_path,
+            chunking=chunking,
+            env_vars=job_env_vars,
         )
 
         for expanded_resources in await expand_for_vram(

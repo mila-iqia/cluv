@@ -26,6 +26,7 @@ from cluv.cli.submit import (
     ensure_clean_git_state,
     get_cluster_job_script_path,
     get_job_env_vars,
+    get_local_job_script,
     get_sbatch_command,
     get_submissions,
     logging_commands_to,
@@ -675,6 +676,57 @@ class TestJobScriptOverridesConfig:
         # The configured path is used as-is on the cluster (here: relative to the project there).
         assert "scripts/rorqual_job.sh" in submissions[0].sbatch_command
         assert "my_project/scripts/rorqual_job.sh" not in submissions[0].sbatch_command
+
+
+class TestGetLocalJobScript:
+    @staticmethod
+    def _config(project_dir: Path, job_script_path: str | None = None):
+        default_line = f'job_script_path = "{job_script_path}"\n' if job_script_path else ""
+        (project_dir / "pyproject.toml").write_text(
+            f'[tool.cluv]\nresults_path = "results"\n{default_line}[tool.cluv.clusters.mila]\n'
+        )
+        return get_cluv_config().get_cluster_config("mila")
+
+    def test_passed_script_is_returned_as_is(self, project_dir: Path) -> None:
+        cluster_config = self._config(project_dir, job_script_path="scripts/config_job.sh")
+        passed_script = project_dir / "scripts" / "passed_job.sh"
+        passed_script.parent.mkdir()
+        passed_script.touch()
+
+        assert (
+            get_local_job_script(passed_script, cluster="mila", cluster_config=cluster_config)
+            == passed_script
+        )
+
+    def test_config_default_is_used_and_expanded_when_none_is_passed(
+        self, project_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MY_SCRIPTS", "scripts")
+        cluster_config = self._config(project_dir, job_script_path="$MY_SCRIPTS/job.sh")
+        (project_dir / "scripts").mkdir()
+        (project_dir / "scripts" / "job.sh").touch()
+
+        assert get_local_job_script(None, cluster="mila", cluster_config=cluster_config) == Path(
+            "scripts/job.sh"
+        )
+
+    def test_raises_when_no_script_is_passed_and_none_is_configured(
+        self, project_dir: Path
+    ) -> None:
+        cluster_config = self._config(project_dir)
+        with pytest.raises(ValueError, match="No job script specified for cluster 'mila'"):
+            get_local_job_script(None, cluster="mila", cluster_config=cluster_config)
+
+    def test_raises_when_passed_script_does_not_exist_locally(self, project_dir: Path) -> None:
+        cluster_config = self._config(project_dir)
+        missing_script = project_dir / "scripts" / "missing_job.sh"
+        with pytest.raises(ValueError, match="does not exist on this machine"):
+            get_local_job_script(missing_script, cluster="mila", cluster_config=cluster_config)
+
+    def test_raises_when_config_default_does_not_exist_locally(self, project_dir: Path) -> None:
+        cluster_config = self._config(project_dir, job_script_path="scripts/missing_job.sh")
+        with pytest.raises(ValueError, match="does not exist on this machine"):
+            get_local_job_script(None, cluster="mila", cluster_config=cluster_config)
 
 
 class TestSubmitCliParsing:

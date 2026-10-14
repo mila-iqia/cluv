@@ -533,28 +533,6 @@ async def sync_and_submit_jobs_to_cluster(
     return successful_job_submissions
 
 
-def get_local_job_script(
-    job_script: Path | None, cluster: str, cluster_config: ClusterConfig
-) -> Path:
-    if job_script is None:
-        if cluster_config.job_script_path is None:
-            raise ValueError(
-                f"No job script specified for cluster {cluster!r}, and no default job script "
-                f"path set in the config."
-            )
-
-        job_script = Path(os.path.expandvars(str(cluster_config.job_script_path)))
-
-    if not job_script.exists():
-        raise ValueError(
-            f"The job script ({job_script}) does not exist on this machine. Even though it "
-            f"can be customized per cluster, it needs to exist locally, since cluv needs to "
-            f"read its header to infer sbatch defaults."
-        )
-
-    return job_script
-
-
 async def get_submissions(
     cluster: str,
     remote: Remote | None,
@@ -637,6 +615,28 @@ async def get_submissions(
                 )
             )
     return submissions
+
+
+def get_local_job_script(
+    job_script: Path | None, cluster: str, cluster_config: ClusterConfig
+) -> Path:
+    if job_script is None:
+        if cluster_config.job_script_path is None:
+            raise ValueError(
+                f"No job script specified for cluster {cluster!r}, and no default job script "
+                f"path set in the config."
+            )
+
+        job_script = Path(os.path.expandvars(str(cluster_config.job_script_path)))
+
+    if not job_script.exists():
+        raise ValueError(
+            f"The job script ({job_script}) does not exist on this machine. Even though it "
+            f"can be customized per cluster, it needs to exist locally, since cluv needs to "
+            f"read its header to infer sbatch defaults."
+        )
+
+    return job_script
 
 
 def get_cluster_job_script_path(

@@ -40,7 +40,7 @@ Host mila* narval tamia rorqual fir
 Then, before running `cluv login` / `cluv sync`, make sure your key is loaded in the agent:
 
 ```bash
-ssh-add
+ssh-add <your-github-ssh-key>
 ```
 
 Alternatively, add `AddKeysToAgent yes` to your SSH config to load keys automatically on first use.

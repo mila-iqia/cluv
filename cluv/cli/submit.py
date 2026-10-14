@@ -255,7 +255,7 @@ async def submit(
                 console.log("All job submissions have failed! Exiting.")
                 return None
 
-            for _cluster, cluster_jobs in cluster_to_job_submissions.items():
+            for cluster_jobs in cluster_to_job_submissions.values():
                 for job in cluster_jobs:
                     if job is not winning_job and not has_job(job) and job.state == "SYNCING":
                         job.state = "SKIPPED"
@@ -264,7 +264,7 @@ async def submit(
 
             jobs_to_cancel = [
                 job_submission
-                for _cluster, cluster_jobs in cluster_to_job_submissions.items()
+                for cluster_jobs in cluster_to_job_submissions.values()
                 for job_submission in cluster_jobs
                 if job_submission is not winning_job and has_job(job_submission)
             ]
@@ -830,7 +830,7 @@ async def submit_job(submission: Submission, log_path: Path) -> Job:
             f"Failed to submit job on cluster {submission.cluster}: "
             f"{result.stderr or result.stdout}"
         )
-    write_submission_log(log_path, submission, job_id=job_id, error=error, result=result)
+    write_submission_log(log_path, job_id=job_id, error=error, result=result)
 
     if error is not None:
         raise JobSubmissionFailed(error)
@@ -866,7 +866,6 @@ def logging_commands_to(log_paths: tuple[Path, ...]):
 
 def write_submission_log(
     log_path: Path,
-    submission: Submission,
     *,
     job_id: int | None,
     error: str | None,

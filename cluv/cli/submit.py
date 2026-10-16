@@ -713,6 +713,21 @@ def check_path_is_safe_to_interpolate(path: PurePosixPath | str, setting: str) -
         )
 
 
+def double_quote(value: str) -> str:
+    r"""Quote `value` for the cluster's login shell, while still letting it expand env vars in it.
+
+    Inside double quotes, `|`, `&`, `;`, whitespace and glob characters lose their special meaning,
+    but `$SCRATCH` is still expanded, unlike inside `shlex.quote`'s single quotes. Of the
+    characters that stay special there, `"`, `\` and `` ` `` are escaped, and `$` is left alone.
+
+    >>> print(double_quote("--constraint=ampere|hopper"))
+    "--constraint=ampere|hopper"
+    >>> print(double_quote('--comment=say "hi"'))
+    "--comment=say \"hi\""
+    """
+    return '"' + re.sub(r'(["\\`])', r"\\\1", value) + '"'
+
+
 def get_job_env_vars(
     cluster: str, git_commit: str, cluster_config: ClusterConfig
 ) -> dict[str, str]:
@@ -802,7 +817,9 @@ def get_sbatch_command(
 
     # These are interpolated unquoted, so the cluster's login shell expands any env vars in them
     # (`$SCRATCH`, `$HOME`); they can't be `shlex`-escaped first, since quoting would both stop
-    # that expansion and close the surrounding single-quoted string.
+    # that expansion and close the surrounding single-quoted string. The exception is `chdir` and
+    # `output`, double-quoted with the other flags below: they stay checked because the same paths
+    # also go unquoted into the `cd` below and other remote commands.
     check_path_is_safe_to_interpolate(job_script, "job_script")
     if isinstance(chdir := sbatch_args.get("chdir"), str):
         check_path_is_safe_to_interpolate(chdir, "chdir")
@@ -827,9 +844,10 @@ def get_sbatch_command(
     cd_command = ""
     if project_dir_on_cluster:
         cd_command = f"cd {project_dir_on_cluster} && "
+    # Double-quote the flags: `$VAR` still gets expanded, but a `|`, `&` or space stays literal.
     inner_command = (
-        f"{env_vars_prefix}{cd_command}sbatch --parsable {' '.join(sbatch_flags)} {job_script} "
-        f"{shlex.join(program_args)}"
+        f"{env_vars_prefix}{cd_command}sbatch --parsable "
+        f"{' '.join(map(double_quote, sbatch_flags))} {job_script} {shlex.join(program_args)}"
     )
     return f"bash --login -c {shlex.quote(inner_command)}"
 

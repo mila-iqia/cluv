@@ -691,9 +691,8 @@ _UNSAFE_PATH_CHARS = re.compile(r"""[\s'"`;&|<>()\\]""")
 def check_path_is_safe_to_interpolate(path: PurePosixPath | str, setting: str) -> None:
     """Raise a `ValueError` if `path` can't be interpolated into the sbatch command as-is.
 
-    Values that may contain environment variables are written into commands run on the cluster
-    *unquoted*, so that its login shell is the one that expands them (see `get_sbatch_command`,
-    and `list_remote_run_dirs` for the results path). Escaping them
+    Values that may contain environment variables are written into the command *unquoted*, so that
+    the cluster's login shell is the one that expands them (see `get_sbatch_command`). Escaping them
     with `shlex.quote` first would stop exactly that, so anything else that shell treats specially
     has to be rejected up front instead: a space would split the value into two `sbatch` arguments,
     and a `;` would end the command and start another one.
@@ -708,7 +707,7 @@ def check_path_is_safe_to_interpolate(path: PurePosixPath | str, setting: str) -
     if match := _UNSAFE_PATH_CHARS.search(str(path)):
         raise ValueError(
             f"The {setting} {str(path)!r} contains a {match.group()!r}, which cluv can't pass to "
-            f"the cluster safely: it goes unquoted into commands run there, so that the "
+            f"sbatch safely: it goes into a `bash --login -c ...` command unquoted, so that the "
             f"cluster's login shell expands variables like $SCRATCH in it. Please use a value "
             f"without whitespace or shell metacharacters."
         )
@@ -816,11 +815,11 @@ def get_sbatch_command(
     sbatch_flags = sbatch_args_to_list(sbatch_args)
     env_vars_prefix = " ".join(f"{k}={v}" for k, v in env_vars.items())
 
-    # The job script is interpolated unquoted, so the cluster's login shell expands any env vars in
-    # it (`$SCRATCH`, `$HOME`); `shlex`-escaping it first would stop that expansion. `chdir` and
-    # `output` are double-quoted with the other sbatch flags below, but the project dir and the
-    # results path they come from also go unquoted into other remote commands (the `cd` below, the
-    # `find` of `cluv sync`), so they are held to the same rules.
+    # These are interpolated unquoted, so the cluster's login shell expands any env vars in them
+    # (`$SCRATCH`, `$HOME`); they can't be `shlex`-escaped first, since quoting would both stop
+    # that expansion and close the surrounding single-quoted string. The exception is `chdir` and
+    # `output`, double-quoted with the other flags below: they stay checked because the same paths
+    # also go unquoted into the `cd` below and other remote commands.
     check_path_is_safe_to_interpolate(job_script, "job_script")
     if isinstance(chdir := sbatch_args.get("chdir"), str):
         check_path_is_safe_to_interpolate(chdir, "chdir")
@@ -845,9 +844,7 @@ def get_sbatch_command(
     cd_command = ""
     if project_dir_on_cluster:
         cd_command = f"cd {project_dir_on_cluster} && "
-    # The sbatch flags are double-quoted, so that the cluster's login shell still expands env vars
-    # in them, while a `|` or `&` (OR / AND in `--constraint`) or a space stays part of the flag
-    # instead of turning the rest of the command into a pipeline, a background job, etc. (#227).
+    # Double-quote the flags: `$VAR` still gets expanded, but a `|`, `&` or space stays literal.
     inner_command = (
         f"{env_vars_prefix}{cd_command}sbatch --parsable "
         f"{' '.join(map(double_quote, sbatch_flags))} {job_script} {shlex.join(program_args)}"

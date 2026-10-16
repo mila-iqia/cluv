@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shlex
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -402,6 +403,35 @@ def _build_cluster_table(
     return table
 
 
+def _resolve_branch_names(cached_jobs: list[Job]) -> dict[str, str]:
+    """Best-effort local lookup of the branch whose tip currently matches each job's commit.
+
+    Returns a mapping from commit hash to branch name, for commits that still have a
+    local branch pointing exactly at them (branches move or get deleted, so this can
+    legitimately miss some jobs).
+    """
+    branches: dict[str, str] = {}
+    for commit in {job.git_commit for job in cached_jobs}:
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "for-each-ref",
+                    f"--points-at={commit}",
+                    "--format=%(refname:short)",
+                    "refs/heads/",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            continue
+        if branch := next((line for line in result.stdout.splitlines() if line), None):
+            branches[commit] = branch
+    return branches
+
+
 def _build_cluv_jobs_table(
     cached_jobs: list[Job], live_info: dict[int, LiveJobInfo], max_jobs: int | None
 ) -> Table:
@@ -416,17 +446,25 @@ def _build_cluv_jobs_table(
 
     table.add_column("Cluster", style="bold magenta")
     table.add_column("Job ID", style="bold magenta")
-    table.add_column("Git commit")
+    table.add_column("Branch (commit)")
     table.add_column("Submitted at")
     table.add_column("Job status")
     table.add_column("Waiting time")
     table.add_column("Elapsed time")
 
+    shown_jobs = list(reversed(cached_jobs))[:max_jobs]
+    branch_names = _resolve_branch_names(shown_jobs)
+
     # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
-    for job in list(reversed(cached_jobs))[:max_jobs]:
+    for job in shown_jobs:
         info = live_info.get(job.job_id)
 
         submitted_str = job.submitted_at.astimezone().strftime("%b %d %H:%M")
+
+        if branch := branch_names.get(job.git_commit):
+            commit_str = f"{branch} ({job.git_commit[:7]})"
+        else:
+            commit_str = job.git_commit[:7]
 
         job_id = Text(str(job.job_id))
         state, wait_time, elapsed_time = "-", "-", "-"
@@ -445,7 +483,7 @@ def _build_cluv_jobs_table(
         table.add_row(
             job.cluster,
             job_id,
-            job.git_commit[:7],
+            commit_str,
             submitted_str,
             state,
             wait_time,

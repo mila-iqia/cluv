@@ -100,12 +100,27 @@ async def get_job_states_with_sacct(remote: Remote | None, jobs: list[int]) -> l
         output = result.stdout.strip()
     # Need to unpack and assign the states to the right JobIDs, because sacct actually
     # outputs states in increasing order of Job IDs!
-    # job_id|state
-    job_id_to_state: dict[int, str] = {}
+    job_id_to_state = parse_sacct_job_states(output)
+    return [job_id_to_state[job_id] for job_id in jobs]
+
+
+def parse_sacct_job_states(output: str) -> dict[int, str]:
+    """Parse `job_id|state` lines from sacct into one state per job.
+
+    A job array has one line per task (`1234_0`, `1234_[1-3]`). Its state is that of a running
+    task if there is one, else of a pending one, else of a failed one, else of any task.
+    """
+    priority = ("RUNNING", "PENDING", *FAILED_JOB_STATES, "")
+    job_id_to_states: dict[int, list[str]] = {}
     for line in output.splitlines():
         job_id_str, _, state = line.partition("|")
-        job_id_to_state[int(job_id_str)] = state
-    return [job_id_to_state[job_id] for job_id in jobs]
+        job_id_to_states.setdefault(int(job_id_str.partition("_")[0]), []).append(state)
+    return {
+        job_id: min(
+            states, key=lambda s: next(i for i, p in enumerate(priority) if s.startswith(p))
+        )
+        for job_id, states in job_id_to_states.items()
+    }
 
 
 async def run_sacct(

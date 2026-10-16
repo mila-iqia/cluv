@@ -9,6 +9,7 @@ from datetime import timedelta
 import pytest
 
 from cluv.slurm import (
+    parse_sacct_job_states,
     parse_disk_quota,
     parse_diskusage_report,
     parse_savail,
@@ -296,3 +297,16 @@ class TestParseTime:
     )
     def test_parse_slurm_time(self, input: str, expected: timedelta) -> None:
         assert parse_slurm_time(input) == expected
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("12|PENDING\n14|CANCELLED by 1000", {12: "PENDING", 14: "CANCELLED by 1000"}),
+        ("64577343_[1]|PENDING", {64577343: "PENDING"}),  # `sbatch --array=1`, not started
+        ("20_0|COMPLETED\n20_1|RUNNING\n20_[2-5%1]|PENDING", {20: "RUNNING"}),
+        ("20_0|COMPLETED\n20_1|CANCELLED by 1000", {20: "CANCELLED by 1000"}),
+    ],
+)
+def test_parse_sacct_job_states(output: str, expected: dict[int, str]):
+    assert parse_sacct_job_states(output) == expected

@@ -4,11 +4,14 @@ All tests are pure (no I/O, no SSH). Fixture strings are taken from real
 cluster output captured during development.
 """
 
+import unittest.mock
 from datetime import timedelta
 
 import pytest
 
+from cluv.remote import Remote
 from cluv.slurm import (
+    get_job_states_with_sacct,
     parse_disk_quota,
     parse_diskusage_report,
     parse_savail,
@@ -296,3 +299,12 @@ class TestParseTime:
     )
     def test_parse_slurm_time(self, input: str, expected: timedelta) -> None:
         assert parse_slurm_time(input) == expected
+
+
+class TestGetJobStatesWithSacct:
+    async def test_job_not_yet_in_sacct_is_pending(self) -> None:
+        """`sacct` can lag a few seconds behind `sbatch`: a job it doesn't list yet is pending,
+        rather than a `KeyError` that would crash the whole submission."""
+        remote = unittest.mock.AsyncMock(spec_set=Remote)
+        remote.get_output.return_value = "111|RUNNING"
+        assert await get_job_states_with_sacct(remote, [111, 222]) == ["RUNNING", "PENDING"]

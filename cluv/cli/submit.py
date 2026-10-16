@@ -31,7 +31,12 @@ from cluv.cli.sync import (
 from cluv.config import ClusterConfig, find_pyproject, get_cluv_config
 from cluv.remote import Remote, command_log_files, run
 from cluv.sbatch_args import SbatchArgs, sbatch_args_from_list, sbatch_args_to_list
-from cluv.slurm import FAILED_JOB_STATES, get_job_states_with_sacct
+from cluv.slurm import (
+    FAILED_JOB_STATES,
+    TERMINAL_JOB_STATES,
+    get_job_states_and_starts_with_sacct,
+    get_job_states_with_sacct,
+)
 from cluv.utils import console, gather_dict, group_by_cluster, set_context
 
 logger = logging.getLogger(__name__)
@@ -74,6 +79,8 @@ class SubmissionProgress(Generic[JobSubmission]):
     log_path: Path
     """Where this submission's `sbatch` output will be written."""
     state: JobState = "SYNCING"
+    start: datetime.datetime | None = None
+    """When the job started running, as reported by `sacct`."""
     error: ClusterSyncFailed | JobSubmissionFailed | None = None
 
     @property
@@ -306,7 +313,7 @@ async def wait_for_first_running_job(
     _skip_sync: bool,
     sync_datasets: bool,
     initial_delay: int = 10,
-    max_wait_time_seconds: int = 60,
+    max_wait_time_seconds: int = 30,
 ) -> SubmissionProgress[Job] | None:
     """Poll `sacct` on each cluster until one submitted job starts running, or every submission has failed.
 
@@ -356,7 +363,8 @@ async def wait_for_first_running_job(
             ):
                 found_running_job.set()
                 logger.debug(f"Found {len(started_jobs)} running (or completed) jobs.")
-                return started_jobs[0]
+                # Keep the job that started first: it has made the most progress.
+                return min(started_jobs, key=_start_sort_key)
 
             if submitted_everywhere:
                 if all(j.state.startswith(tuple(FAILED_JOB_STATES)) for j in queued_jobs):
@@ -383,9 +391,17 @@ async def wait_for_first_running_job(
 async def update_job_states_with_sacct(
     remote: Remote | None, jobs: list[SubmissionProgress[Job]]
 ) -> None:
-    job_states = await get_job_states_with_sacct(remote, [job.job.job_id for job in jobs])
-    for job, state in zip(jobs, job_states):
+    job_states = await get_job_states_and_starts_with_sacct(
+        remote, [job.job.job_id for job in jobs]
+    )
+    for job, (state, start) in zip(jobs, job_states):
         job.state = state.strip().split()[0]  # keep only the first word of the state?
+        job.start = start
+
+
+def _start_sort_key(job: SubmissionProgress) -> tuple[bool, datetime.datetime]:
+    """Sort jobs by start time, with jobs of unknown start time last."""
+    return (job.start is None, job.start or datetime.datetime.max.replace(tzinfo=datetime.UTC))
 
 
 async def wait_for_jobs_to_cancel(
@@ -404,9 +420,7 @@ async def wait_for_jobs_to_cancel(
     }
     delay = initial_delay
 
-    while not all(
-        job.state.startswith(("CANCELLED", "COMPLETED", "FAILED")) for job in job_submissions
-    ):
+    while not all(job.state.startswith(tuple(TERMINAL_JOB_STATES)) for job in job_submissions):
         for job in job_submissions:
             try:
                 await run_scancel([job])

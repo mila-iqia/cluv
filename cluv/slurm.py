@@ -12,7 +12,13 @@ from datetime import datetime, timedelta, timezone
 
 from cluv.remote import Remote, run
 
-FAILED_JOB_STATES = ["FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED"]
+FAILED_JOB_STATES = [
+    "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED", "BOOT_FAIL",
+    "DEADLINE", "REVOKED", "SPECIAL_EXIT",
+]  # fmt: skip
+"""The states of a job that ended without succeeding."""
+TERMINAL_JOB_STATES = ["COMPLETED", *FAILED_JOB_STATES]
+"""The states of a job that ended. In any other state (even one we don't know of), it may still run."""
 
 
 @dataclass
@@ -88,11 +94,21 @@ def parse_slurm_time(time: str) -> timedelta:
 
 
 async def get_job_states_with_sacct(remote: Remote | None, jobs: list[int]) -> list[str]:
-    """Run sacct on the given job id(s) and return the output as a list of lines."""
+    """Run sacct on the given job id(s) and return their states, in the same order."""
+    return [state for state, _start in await get_job_states_and_starts_with_sacct(remote, jobs)]
+
+
+async def get_job_states_and_starts_with_sacct(
+    remote: Remote | None, jobs: list[int]
+) -> list[tuple[str, datetime | None]]:
+    """Run sacct on the given job id(s) and return their (state, start time), in the same order.
+
+    The start time is None for jobs that haven't started (sacct prints `Unknown` or `None`).
+    """
     if not jobs:
         return []
     jobs_str = ",".join(str(job) for job in jobs)
-    sacct_command = f"bash --login -c 'sacct -j {jobs_str} --format=JobID,State --parsable2 --noheader --allocations'"
+    sacct_command = f"bash --login -c 'sacct -j {jobs_str} --format=JobID,State,Start --parsable2 --noheader --allocations'"
     if remote:
         output = await remote.get_output(sacct_command, hide=True)
     else:
@@ -100,12 +116,21 @@ async def get_job_states_with_sacct(remote: Remote | None, jobs: list[int]) -> l
         output = result.stdout.strip()
     # Need to unpack and assign the states to the right JobIDs, because sacct actually
     # outputs states in increasing order of Job IDs!
-    # job_id|state
-    job_id_to_state: dict[int, str] = {}
+    # job_id|state|start
+    job_id_to_state: dict[int, tuple[str, datetime | None]] = {}
     for line in output.splitlines():
-        job_id_str, _, state = line.partition("|")
-        job_id_to_state[int(job_id_str)] = state
-    return [job_id_to_state[job_id] for job_id in jobs]
+        job_id_str, _, rest = line.partition("|")
+        state, _, start = rest.partition("|")
+        job_id_to_state[int(job_id_str)] = (state, _parse_start(start))
+    # `sacct` can lag a few seconds behind `sbatch`, so a job it doesn't list yet is pending.
+    return [job_id_to_state.get(job_id, ("PENDING", None)) for job_id in jobs]
+
+
+def _parse_start(start: str) -> datetime | None:
+    try:
+        return parse_timestamp(start)
+    except ValueError:  # `Unknown`, `None`, or missing.
+        return None
 
 
 async def run_sacct(

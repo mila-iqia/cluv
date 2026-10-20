@@ -540,7 +540,7 @@ class TestGetSbatchCommand:
     def test_program_args_reach_the_sbatch_process_unchanged(
         self, tmp_path: Path, program_arg: str
     ) -> None:
-        """Program args must reach `sbatch` exactly as written after `--` (issue #177).
+        """Program args must reach `sbatch` exactly as written after `--`.
 
         The command goes through two shells on the cluster: the login shell that runs what `ssh`
         was given, then the `bash -c` inside it. Both are run here, with a stub `sbatch` on the

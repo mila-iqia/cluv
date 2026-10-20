@@ -793,7 +793,7 @@ class TestSubmitCliParsing:
         )
 
     def test_empty_program_arg_is_kept(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """An empty argument after `--` is a real argument for the job script (issue #177)."""
+        """An empty argument after `--` is a real argument for the job script."""
         monkeypatch.setattr(
             cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
         )

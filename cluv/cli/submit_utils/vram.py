@@ -24,11 +24,15 @@ from cluv.utils import console
 
 logger = logging.getLogger(__name__)
 
-GPU_TYPES_COMMAND = "sinfo --noheader --format='%f|%G' | sort -u"
+GPU_TYPES_COMMAND = "sinfo --noheader --format='%i|%f|%G' | sed -n 's/^|//p' | sort -u"
 """Command used to list the GPU types (including MIG slices) available on a cluster.
 
 `%G` gives the GRES of each node (e.g. `gpu:nvidia_h100_80gb_hbm3_1g.10gb:8`) and `%f` its
 features, which on some clusters (e.g. Mila) say how much VRAM the GPUs have (e.g. `80gb`).
+
+`%i` gives the reservation a node is in, if any. Only the nodes outside of a reservation are kept
+(their lines start with an empty `%i` field, which `sed` strips), since the GPU types that only
+exist on reserved nodes can't be used by regular jobs.
 """
 
 VRAM_GB_BY_MODEL: dict[str, float] = {

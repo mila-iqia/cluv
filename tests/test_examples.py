@@ -119,6 +119,14 @@ async def skip_unless_connected(cluster: str) -> None:
                         strict=True,
                     ),
                     pytest.mark.xfail(
+                        cluster == "trillium-gpu" and vram is not None,
+                        reason=(
+                            "TODO: --vram picks a GPU type that is only available on reserved nodes, "
+                            "which makes `sbatch --test-only` fail. Remove once the cluster changes."
+                        ),
+                        strict=True,
+                    ),
+                    pytest.mark.xfail(
                         # Fir + --vram seems to work, specifically.
                         (cluster in ("killarney", "fir", "nibi") and vram is None)
                         or (cluster in ("killarney", "nibi") and vram is not None),

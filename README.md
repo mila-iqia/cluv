@@ -69,4 +69,18 @@ cluv submit mila job.sh
 Add a `[tool.cluv]` section to the `pyproject.toml` of your project to manage the behavior of the tool.
 The command `cluv init` will add a default config if it doesn't already exists in the `.toml`.
 
+Any setting can be overridden by a `cluv.toml` file placed next to the `pyproject.toml`. It uses the
+same keys as `[tool.cluv]`, without the `tool.cluv` prefix. Tables are merged recursively, so you can
+override a single value (other values, including lists, are replaced). For example:
+
+```toml
+# cluv.toml
+results_path = "$SCRATCH/my_results"
+
+[clusters.rorqual.sbatch_args]
+account = "rrg-my-pi"
+```
+
+A `cluv.toml` alone is enough if the `pyproject.toml` has no `[tool.cluv]` section.
+
 See the config at the project root for an example, or refer to the [docs](https://mila-iqia.github.io/cluv/).

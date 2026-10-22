@@ -132,7 +132,7 @@ def test_hydra_launcher_is_discoverable(
             capture_output=True,
         ).stderr
     )
-    assert f"RuntimeError: No cluv config in {pyproject_file} file." in error
+    assert f"RuntimeError: No cluv config in {pyproject_file} file" in error
 
     error = _strip_ansi(
         subprocess.run("cluv init", capture_output=True, text=True, shell=True).stderr

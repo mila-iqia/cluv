@@ -6,7 +6,15 @@ from pathlib import Path
 import pytest
 from milatools.cli.init_command import DRAC_CLUSTERS
 
-from cluv.config import ClusterConfig, PartialClusterConfig, get_cluv_config, load_cluv_config
+from pydantic import ValidationError
+
+from cluv.config import (
+    ClusterConfig,
+    PartialClusterConfig,
+    get_cluv_config,
+    has_cluv_config,
+    load_cluv_config,
+)
 
 
 def write_pyproject(tmp_path: Path, content: str) -> Path:
@@ -417,3 +425,131 @@ ALREADY_IN_ENV = "new-value"
     assert cfg.local.env == {"FOO": "$BAR/baz", "ALREADY_IN_ENV": "new-value"}
     assert os.environ["FOO"] == "$BAR/baz"
     assert os.environ["ALREADY_IN_ENV"] == "new-value"
+
+
+# ---------------------------------------------------------------------------
+# cluv.toml overrides
+# ---------------------------------------------------------------------------
+
+
+def write_cluv_toml(tmp_path: Path, content: str) -> Path:
+    p = tmp_path / "cluv.toml"
+    p.write_text(content)
+    return p
+
+
+class TestCluvToml:
+    def test_no_cluv_toml_uses_pyproject(self, tmp_path: Path) -> None:
+        p = write_pyproject(tmp_path, '[tool.cluv]\nresults_path = "logs"\n')
+        assert load_cluv_config(p).results_path == "logs"
+
+    def test_cluv_toml_overrides_top_level_field(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+project_dir = "$HOME/project"
+""",
+        )
+        write_cluv_toml(tmp_path, 'results_path = "$SCRATCH/results"\n')
+        cfg = load_cluv_config(p)
+        assert cfg.results_path == "$SCRATCH/results"
+        assert cfg.project_dir == "$HOME/project"
+
+    def test_cluv_toml_alone(self, tmp_path: Path) -> None:
+        """A cluv.toml is enough, even if pyproject.toml has no [tool.cluv] section."""
+        p = write_pyproject(tmp_path, '[project]\nname = "foo"\n')
+        write_cluv_toml(
+            tmp_path,
+            """
+results_path = "logs"
+[clusters.mila]
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.results_path == "logs"
+        assert cfg.clusters_names == ["mila"]
+        assert has_cluv_config(p)
+
+    def test_no_config_anywhere_raises(self, tmp_path: Path) -> None:
+        p = write_pyproject(tmp_path, '[project]\nname = "foo"\n')
+        write_cluv_toml(tmp_path, "")
+        assert not has_cluv_config(p)
+        with pytest.raises(RuntimeError, match="No cluv config"):
+            load_cluv_config(p)
+
+    def test_tables_are_merged_recursively(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+[tool.cluv.env]
+FOO = "foo"
+BAR = "bar"
+[tool.cluv.sbatch_args]
+mem = "16G"
+[tool.cluv.clusters.mila]
+[tool.cluv.clusters.rorqual.env]
+SBATCH_ACCOUNT = "def-me"
+[tool.cluv.clusters.rorqual.sbatch_args]
+time = "1:00:00"
+""",
+        )
+        write_cluv_toml(
+            tmp_path,
+            """
+[env]
+BAR = "overridden"
+[clusters.rorqual.env]
+SBATCH_ACCOUNT = "rrg-me"
+[clusters.narval]
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.env == {"FOO": "foo", "BAR": "overridden"}
+        assert cfg.sbatch_args == {"mem": "16G"}
+        assert cfg.clusters_names == ["mila", "rorqual", "narval"]
+        rorqual = cfg.get_cluster_config("rorqual")
+        assert rorqual.env == {"FOO": "foo", "BAR": "overridden", "SBATCH_ACCOUNT": "rrg-me"}
+        assert rorqual.sbatch_args == [{"mem": "16G", "time": "1:00:00"}]
+
+    def test_lists_are_replaced(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+[[tool.cluv.clusters.rorqual.sbatch_args]]
+account = "def-me"
+[[tool.cluv.clusters.rorqual.sbatch_args]]
+account = "rrg-me"
+""",
+        )
+        write_cluv_toml(tmp_path, '[clusters.rorqual.sbatch_args]\naccount = "other"\n')
+        cfg = load_cluv_config(p)
+        assert cfg.get_cluster_config("rorqual").sbatch_args == [{"account": "other"}]
+
+    def test_invalid_field_in_cluv_toml_raises(self, tmp_path: Path) -> None:
+        p = write_pyproject(tmp_path, '[tool.cluv]\nresults_path = "logs"\n')
+        write_cluv_toml(tmp_path, 'not_a_field = "oops"\n')
+        with pytest.raises(ValidationError):
+            load_cluv_config(p)
+
+    def test_cluv_toml_local_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(os, "environ", os.environ.copy())
+        monkeypatch.setattr("cluv.config.current_cluster", lambda: None)
+        p = write_pyproject(tmp_path, '[tool.cluv]\nresults_path = "logs"\n')
+        write_cluv_toml(tmp_path, '[local.env]\nFROM_CLUV_TOML = "yes"\n')
+        load_cluv_config(p)
+        assert os.environ["FROM_CLUV_TOML"] == "yes"
+
+    def test_get_cluv_config_reads_cluv_toml(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_pyproject(tmp_path, '[tool.cluv]\nresults_path = "logs"\n')
+        write_cluv_toml(tmp_path, 'results_path = "from-cluv-toml"\n')
+        (tmp_path / "sub").mkdir()
+        monkeypatch.chdir(tmp_path / "sub")
+        assert get_cluv_config().results_path == "from-cluv-toml"

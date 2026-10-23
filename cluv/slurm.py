@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import re
 import shlex
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -100,12 +101,25 @@ async def get_job_states_with_sacct(remote: Remote | None, jobs: list[int]) -> l
         output = result.stdout.strip()
     # Need to unpack and assign the states to the right JobIDs, because sacct actually
     # outputs states in increasing order of Job IDs!
-    # job_id|state
-    job_id_to_state: dict[int, str] = {}
+    job_id_to_state = parse_sacct_job_states(output)
+    return [job_id_to_state[job_id] for job_id in jobs]
+
+
+def parse_sacct_job_states(output: str) -> dict[int, str]:
+    """Parse `job_id|state` lines from sacct into one state per job.
+
+    A job array has one line per task (`1234_0`, `1234_[1-3]`). It is RUNNING or COMPLETED as soon
+    as one of its tasks is, else PENDING if one is pending, else the state of its first task.
+    """
+    states_per_job: dict[int, list[str]] = defaultdict(list)
     for line in output.splitlines():
         job_id_str, _, state = line.partition("|")
-        job_id_to_state[int(job_id_str)] = state
-    return [job_id_to_state[job_id] for job_id in jobs]
+        job_id = int(job_id_str.partition("_")[0])
+        states_per_job[job_id].append(state)
+    return {
+        job_id: next((s for s in ("RUNNING", "COMPLETED", "PENDING") if s in states), states[0])
+        for job_id, states in states_per_job.items()
+    }
 
 
 async def run_sacct(

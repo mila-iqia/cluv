@@ -108,11 +108,11 @@ async def run_saccts(
 
 async def run_sacct(
     remote: Remote | None,
-    jobs: str | int | list[int],
+    jobs: str | int,
     format: str = "State",
     additional_args: str = "",
-) -> str | list[str]:
-    """Run sacct on the given job id(s) and return the output."""
+) -> str:
+    """Run sacct on the given job id, or comma-separated job ids, and return the output."""
     sacct_command = (
         f"sacct -j {jobs} --format={format} --parsable2 --noheader --allocations {additional_args}"
     )

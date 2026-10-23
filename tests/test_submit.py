@@ -157,16 +157,16 @@ async def test_order_of_flags_in_sbatch_args_from_cli_is_preserved(
         "second-in-cli",
     ]
     expected_sbatch_args_in_command = [
-        *([f"--time={time_hours:02d}:00:00"] if not chunking else []),
-        "--cpus-per-task=4",
+        *([f'"--time={time_hours:02d}:00:00"'] if not chunking else []),
+        '"--cpus-per-task=4"',
         # "-f=config", # removed, since it is in the sbatch args from the CLI.
         # "-t=00:00:30",
-        "--nodes=2",
-        "--exclusive",
-        "--foo=first-in-cli",  # secretly --foo and -f are the same argument to sbatch (dest=`foo`)
-        "-f second-in-cli",  # the ordering is preserved.
+        '"--nodes=2"',
+        '"--exclusive"',
+        '"--foo=first-in-cli"',  # secretly --foo and -f are the same argument to sbatch (dest=`foo`)
+        '"-f" "second-in-cli"',  # the ordering is preserved.
         *(
-            [f"--time={chunking:02d}:00:00", f"--array=0-{time_hours // chunking}%1"]
+            [f'"--time={chunking:02d}:00:00"', f'"--array=0-{time_hours // chunking}%1"']
             if chunking
             else []
         ),
@@ -244,9 +244,9 @@ class TestGetSbatchCommand:
             "bash --login -c 'export MY_VAR=1 SPECIAL_MILA_VAR=xyz "
             # Ugly, quite hard-coded.
             f"GIT_COMMIT=abecdef CLUV_CLUSTER={cluster}; "
-            "sbatch --parsable --account=my_account --mem=8G --job-name=cluv-my_script "
-            f"--output={results_path}/{cluster}_%j/slurm-%j.out --chdir=$HOME/my_project "
-            "--export=ALL "
+            'sbatch --parsable "--account=my_account" "--mem=8G" "--job-name=cluv-my_script" '
+            f'"--output={results_path}/{cluster}_%j/slurm-%j.out" "--chdir=$HOME/my_project" '
+            '"--export=ALL" '
             f"$HOME/{job_script_relative_path} program_arg_1 program_arg_2'"
         )
 
@@ -255,11 +255,11 @@ class TestGetSbatchCommand:
     ) -> None:
         """A `results_path` holding env vars reaches the cluster's login shell unexpanded.
 
-        `--output` is interpolated into the `bash --login -c '...'` command *unquoted*, so it is
-        that login shell which expands `$SCRATCH` - the only shell that has it on Killarney and
-        Vulcan. Were the value `shlex.quote`d, the quotes would close the surrounding single-quoted
-        string and the *non-login* ssh shell would expand it instead, to nothing, leaving the job
-        writing to an unwritable `/logs/...`.
+        `--output` is interpolated into the `bash --login -c '...'` command in double quotes only,
+        so it is that login shell which expands `$SCRATCH` - the only shell that has it on
+        Killarney and Vulcan. Were the value `shlex.quote`d, the quotes would close the surrounding
+        single-quoted string and the *non-login* ssh shell would expand it instead, to nothing,
+        leaving the job writing to an unwritable `/logs/...`.
         """
         (project_dir / "pyproject.toml").write_text(
             textwrap.dedent(
@@ -283,7 +283,7 @@ class TestGetSbatchCommand:
             program_args=[],
         )
         assert "--output=$SCRATCH/logs/my_project/killarney_%j/slurm-%j.out" in sbatch_command
-        # The whole point: no quoting around the value, so the single-quoted `bash --login -c`
+        # The whole point: no single quotes around the value, so the single-quoted `bash --login -c`
         # string it sits in stays intact and that login shell is the one to expand `$SCRATCH`.
         assert "--output='" not in sbatch_command
         assert sbatch_command.count("'") == 2
@@ -296,11 +296,12 @@ class TestGetSbatchCommand:
     def test_results_path_that_would_break_the_command_is_rejected(
         self, project_dir: Path, bad_results_path: str
     ) -> None:
-        """`--output` isn't escaped (so `$SCRATCH` survives), so unsafe values must be refused.
+        """Unsafe `results_path` values are refused, even though `--output` is double-quoted.
 
-        A space would word-split the path into two `sbatch` arguments, and a quote or a `;` would
-        break the `bash --login -c '...'` command apart, rather than being passed through as part
-        of the path. Better a clear error than a job that dies on the cluster.
+        The results path also goes *unquoted* into commands that `cluv sync` runs on the cluster
+        (like the `echo` that expands `$SCRATCH` in it, then `mkdir -p` and `ln -s`), where a space
+        would word-split it, and a quote or a `;` would break the command apart. Better a clear
+        error up front.
         """
         (project_dir / "pyproject.toml").write_text(
             textwrap.dedent(
@@ -353,8 +354,9 @@ class TestGetSbatchCommand:
 
         assert sbatch_command == (
             "bash --login -c 'export MY_VAR=2 GIT_COMMIT=abecdef CLUV_CLUSTER=mila; "
-            "sbatch --parsable --job-name=cluv-my_script "
-            f"--output={results_path}/mila_%j/slurm-%j.out --chdir=$HOME/my_project --export=ALL "
+            'sbatch --parsable "--job-name=cluv-my_script" '
+            f'"--output={results_path}/mila_%j/slurm-%j.out" "--chdir=$HOME/my_project" '
+            '"--export=ALL" '
             "$HOME/my_project/scripts/my_script.sh '"
         )
 
@@ -461,7 +463,7 @@ class TestGetSbatchCommand:
         )
 
         assert f"{results_path}/mila_%A/slurm-%A_%a.out" in sbatch_command
-        assert "--time=03:00:00 --array=0-3%1" in sbatch_command
+        assert '"--time=03:00:00" "--array=0-3%1"' in sbatch_command
 
     def test_export_all_flag_added_so_env_vars_survive_a_wrapped_sbatch(
         self, project_dir: Path
@@ -495,13 +497,58 @@ class TestGetSbatchCommand:
             program_args=[],
             git_commit="abc123",
         )
-        export_flag = next(f for f in sbatch_command.split() if f.startswith("--export="))
-        assert export_flag == "--export=ALL"
+        export_flag = next(f for f in sbatch_command.split() if f.startswith('"--export='))
+        assert export_flag == '"--export=ALL"'
         # `ALL` is only worth anything because the variables are on the submitting shell:
         assert (
             "export WANDB_MODE=offline GIT_COMMIT=abc123 CLUV_CLUSTER=mila; sbatch"
             in sbatch_command
         )
+
+    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash to run the command")
+    @pytest.mark.parametrize(
+        ("sbatch_args", "expected_flag"),
+        [
+            ({"constraint": "ampere|lovelace|hopper"}, "--constraint=ampere|lovelace|hopper"),
+            ({"constraint": "ampere&hopper"}, "--constraint=ampere&hopper"),
+            ({"comment": "two words"}, "--comment=two words"),
+            ({"comment": 'say "hi"'}, '--comment=say "hi"'),
+            ({"account": "$MY_ACCOUNT"}, "--account=def-me"),
+        ],
+        ids=["or", "and", "space", "double-quote", "env-var"],
+    )
+    def test_sbatch_flags_reach_the_sbatch_process_intact(
+        self, tmp_path: Path, sbatch_args: SbatchArgs, expected_flag: str
+    ) -> None:
+        """Shell metacharacters in sbatch flags reach `sbatch`, and env vars still get expanded.
+
+        The command goes through two shells on the cluster: the login shell that runs what `ssh`
+        was given, then the `bash -c` inside it. Both are run here, with a stub `sbatch` on the
+        PATH that prints one argument per line. Unquoted, the `|` of
+        `--constraint=ampere|lovelace|hopper` made `sbatch` the first command of a pipeline,
+        without the job script (#227).
+        """
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        stub = bin_dir / "sbatch"
+        stub.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+        stub.chmod(0o755)
+
+        command = get_sbatch_command(
+            job_script=PurePosixPath("job.sh"),
+            sbatch_args=sbatch_args,
+            program_args=[],
+            env_vars={},
+        )
+        # Drop `--login` so the user's profile can't touch the PATH or the variables under test.
+        result = subprocess.run(
+            ["bash", "-c", command.replace("bash --login -c", "bash -c", 1)],
+            env={"PATH": f"{bin_dir}:/usr/bin:/bin", "MY_ACCOUNT": "def-me"},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout.splitlines() == ["--parsable", expected_flag, "job.sh"]
 
     @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash to run the command")
     def test_env_vars_reach_the_sbatch_process(self, tmp_path: Path) -> None:

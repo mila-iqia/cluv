@@ -574,11 +574,12 @@ async def get_submissions(
 
     for job_resources in job_resources_options:
         job_resources = merge_sbatch_args(from_config=job_resources, from_cli=sbatch_args)
+        env_vars = job_env_vars | get_export_flag_env_vars(job_resources)
         n_chunks, job_resources = apply_chunking(
             job_resources,
             job_script=local_job_script_path,
             chunking=chunking,
-            env_vars=job_env_vars,
+            env_vars=env_vars,
         )
 
         for expanded_resources in await expand_for_vram(
@@ -587,7 +588,7 @@ async def get_submissions(
             job_resources,
             job_script=local_job_script_path,
             vram=vram,
-            env_vars=job_env_vars,
+            env_vars=env_vars,
         ):
             expanded_resources = add_cluv_sbatch_args(
                 expanded_resources,
@@ -596,7 +597,7 @@ async def get_submissions(
                 cluster_config=cluster_config,
             )
             sbatch_command = get_sbatch_command(
-                env_vars=job_env_vars,
+                env_vars=env_vars,
                 job_script=cluster_job_script_path,
                 sbatch_args=expanded_resources,
                 program_args=program_args,
@@ -741,6 +742,44 @@ def get_job_env_vars(
     return env_vars
 
 
+def get_export_flag_env_vars(sbatch_args: SbatchArgs) -> dict[str, str]:
+    """Return the `NAME=value` variables of the user's `--export`, for cluv to export them itself.
+
+    cluv replaces any `--export` with its own `--export=ALL` (see `add_cluv_sbatch_args`): that is
+    how the job receives `GIT_COMMIT`, `CLUV_CLUSTER` and the variables from `[tool.cluv.env]`,
+    which are exported on the shell that runs `sbatch`. The variables of the user's `--export` are
+    exported there too, rather than appended to `--export=ALL`, where `sbatch` would let a value
+    already set on that shell (by the cluster's login profile, say) win over the one asked for.
+    Names without a value are left out, since `ALL` passes them on anyway.
+
+    An `--export` without `ALL` (`NONE`, `NIL` or a list of variables) is refused, since it would
+    keep cluv's own variables from reaching the job.
+
+    >>> get_export_flag_env_vars({"export": "ALL,NCCL_DEBUG=INFO,WANDB_MODE"})
+    {'NCCL_DEBUG': 'INFO'}
+    >>> get_export_flag_env_vars({"time": "1:00:00"})
+    {}
+    >>> get_export_flag_env_vars({"export": "NONE"})
+    ... # doctest: +ELLIPSIS
+    Traceback (most recent call last):
+        ...
+    ValueError: cluv can't submit with `--export=NONE`: ...
+    """
+    export = sbatch_args.get("export")
+    if export is None:
+        return {}
+    items = str(export).split(",")
+    if "ALL" not in (item.upper() for item in items):
+        raise ValueError(
+            f"cluv can't submit with `--export={export}`: the job needs the environment of the "
+            f"shell that runs `sbatch` (`--export=ALL`), which is where cluv sets GIT_COMMIT, "
+            f"CLUV_CLUSTER and the variables from `[tool.cluv.env]`. Use "
+            f"`--export=ALL,NAME=value,...` to pass more variables to the job."
+        )
+    pairs = (item.partition("=") for item in items)
+    return {name: value for name, sep, value in pairs if sep}
+
+
 def add_cluv_sbatch_args(
     sbatch_args: SbatchArgs,
     job_script: Path,
@@ -791,7 +830,8 @@ def add_cluv_sbatch_args(
     )
     sbatch_args["chdir"] = str(remote_project_dir)
     # Some clusters (trillium, trillium-gpu) have a wrapper around `sbatch` that sets `--export=NONE` by default,
-    # which would discard the environment variables.
+    # which would discard the environment variables. This replaces the user's own `--export`, if
+    # any: `get_export_flag_env_vars` has already moved its variables to the job's env vars.
     sbatch_args["export"] = "ALL"
     return sbatch_args
 

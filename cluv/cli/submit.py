@@ -164,6 +164,7 @@ async def submit(
     vram: str | None = None,
     _skip_sync: bool = False,
     sync_datasets: bool = True,
+    fetch_results: bool = True,
     parsable: bool = False,
 ) -> Job | None:
     """Submit a job to the given cluster (or all clusters if `cluster=="first"`),
@@ -250,6 +251,7 @@ async def submit(
                 found_running_job=found_running_job,
                 _skip_sync=_skip_sync,
                 sync_datasets=sync_datasets,
+                fetch_results=fetch_results,
             )
             if winning_job is None:
                 console.log("All job submissions have failed! Exiting.")
@@ -305,6 +307,7 @@ async def wait_for_first_running_job(
     found_running_job: asyncio.Event,
     _skip_sync: bool,
     sync_datasets: bool,
+    fetch_results: bool,
     initial_delay: int = 10,
     max_wait_time_seconds: int = 60,
 ) -> SubmissionProgress[Job] | None:
@@ -330,6 +333,7 @@ async def wait_for_first_running_job(
                 found_running_job=found_running_job,
                 _skip_sync=_skip_sync,
                 sync_datasets=sync_datasets,
+                fetch_results=fetch_results,
             )
             for cluster_name, cluster_job_submissions in cluster_to_job_submissions.items()
         ),
@@ -465,6 +469,7 @@ async def sync_and_submit_jobs_to_cluster(
     found_running_job: asyncio.Event,
     _skip_sync: bool = False,
     sync_datasets: bool = True,
+    fetch_results: bool = True,
 ) -> list[SubmissionProgress[Job]]:
     """Sync then submit every submission for one cluster, in parallel.
 
@@ -487,7 +492,9 @@ async def sync_and_submit_jobs_to_cluster(
     if not _skip_sync:
         try:
             with logging_commands_to(tuple(row.log_path for row in job_submissions)):
-                await sync_per_cluster_part(remote, sync_datasets=sync_datasets)
+                await sync_per_cluster_part(
+                    remote, sync_datasets=sync_datasets, sync_results=fetch_results
+                )
         except Exception as exc:
             console.log(f"Failed to sync with cluster {cluster}: {exc}")
             for job_submission in job_submissions:

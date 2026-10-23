@@ -12,6 +12,7 @@ from unittest import mock
 import pytest
 
 import cluv.__main__ as cluv_main
+import cluv.cache
 import cluv.cli.init
 import cluv.cli.submit
 import cluv.cli.submit_utils
@@ -825,6 +826,7 @@ class TestSubmitCliParsing:
                 "chunking": None,
                 "vram": None,
                 "sync_datasets": True,
+                "fetch_results": True,
                 "parsable": False,
             }
         )
@@ -859,6 +861,7 @@ class TestSubmitCliParsing:
                 "chunking": None,
                 "vram": None,
                 "sync_datasets": True,
+                "fetch_results": True,
                 "parsable": False,
             }
         )
@@ -880,6 +883,7 @@ class TestSubmitCliParsing:
                 "chunking": None,
                 "vram": "10GB",
                 "sync_datasets": True,
+                "fetch_results": True,
                 "parsable": False,
             }
         )
@@ -906,6 +910,7 @@ class TestSubmitCliParsing:
                 "chunking": None,
                 "vram": None,
                 "sync_datasets": True,
+                "fetch_results": True,
                 "parsable": False,
             }
         )
@@ -927,6 +932,7 @@ class TestSubmitCliParsing:
                 "chunking": None,
                 "vram": None,
                 "sync_datasets": True,
+                "fetch_results": True,
                 "parsable": True,
             }
         )
@@ -953,6 +959,7 @@ class TestSubmitCliParsing:
                 "chunking": 6,
                 "vram": None,
                 "sync_datasets": True,
+                "fetch_results": True,
                 "parsable": False,
             }
         )
@@ -978,9 +985,29 @@ class TestSubmitCliParsing:
                 "chunking": CHUNK_SIZE,
                 "vram": None,
                 "sync_datasets": True,
+                "fetch_results": True,
                 "parsable": False,
             }
         )
+
+    def test_no_fetch_results_is_recovered_from_sbatch_args(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--no-fetch-results` written after the job script must still reach `submit`.
+
+        argparse puts everything after the job script into `sbatch_args` (a `REMAINDER`
+        argument), cluv's own options included, and `main` then takes cluv's options back out of
+        `sbatch_args`. Without that step, `sbatch` would receive `--no-fetch-results`, and the
+        results would still be fetched.
+        """
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "job.sh", "--time=1:00:00", "--no-fetch-results"])
+
+        assert mock_submit.call_args.kwargs["fetch_results"] is False
+        assert mock_submit.call_args.kwargs["sbatch_args"] == ["--time=1:00:00"]
 
 
 async def test_failed_sync_commands_are_logged(tmp_path: Path) -> None:
@@ -988,6 +1015,49 @@ async def test_failed_sync_commands_are_logged(tmp_path: Path) -> None:
     with pytest.raises(subprocess.CalledProcessError), logging_commands_to((log_path,)):
         await cluv.remote.run(("false",))
     assert log_path.read_text().startswith("$ false\n(exited with 1)\nTraceback")
+
+
+async def test_no_fetch_results_still_creates_the_results_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With `fetch_results=False`, the sync before the submission doesn't call `fetch_results`
+    (the rsync of all the results back to this machine), but still creates the results dir and
+    its link on the cluster, as `fetch_results` would."""
+    config = CluvConfig(
+        results_path="/scratch/me/results",
+        clusters={"foo": PartialClusterConfig(project_dir="/home/me/proj")},
+    )
+    monkeypatch.setattr(sync_module, get_cluv_config.__name__, lambda: config)
+    monkeypatch.setattr(cluv.cache, cluv.cache._get_cache_dir.__name__, lambda: tmp_path)
+    for step in (sync_module.install_uv, sync_module.clone_project, sync_module.run_uv_sync):
+        monkeypatch.setattr(sync_module, step.__name__, mock.AsyncMock())
+    monkeypatch.setattr(
+        sync_module, sync_module.fetch_results.__name__, mock_fetch_results := mock.AsyncMock()
+    )
+    monkeypatch.setattr(
+        sync_module,
+        sync_module.create_results_dir_with_symlink_to_scratch.__name__,
+        mock_create_results_dir := mock.AsyncMock(),
+    )
+    remote = Remote(hostname="foo")
+
+    await wait_for_first_running_job(
+        {"foo": []},
+        cluster_to_remote={"foo": remote},
+        found_running_job=asyncio.Event(),
+        _skip_sync=False,
+        sync_datasets=True,
+        fetch_results=False,
+        initial_delay=0,
+    )
+
+    mock_fetch_results.assert_not_awaited()
+    mock_create_results_dir.assert_awaited_once_with(
+        remote,
+        project_dir=PurePosixPath("/home/me/proj"),
+        results_symlink="logs",
+        results_path=PurePosixPath("/scratch/me/results"),
+    )
 
 
 class TestBuildSubmitCommand:

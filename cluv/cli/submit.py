@@ -728,17 +728,14 @@ def get_job_env_vars(
 
 
 def get_export_flag_env_vars(sbatch_args: SbatchArgs) -> dict[str, str]:
-    """Return the `NAME=value` variables of the user's `--export`, for cluv to export them itself.
+    """Return the `NAME=value` variables of the user's `--export`.
 
-    cluv replaces any `--export` with its own `--export=ALL` (see `add_cluv_sbatch_args`): that is
-    how the job receives `GIT_COMMIT`, `CLUV_CLUSTER` and the variables from `[tool.cluv.env]`,
-    which are exported on the shell that runs `sbatch`. The variables of the user's `--export` are
-    exported there too, rather than appended to `--export=ALL`, where `sbatch` would let a value
-    already set on that shell (by the cluster's login profile, say) win over the one asked for.
-    Names without a value are left out, since `ALL` passes them on anyway.
+    cluv always passes `--export=ALL` to `sbatch` (see `add_cluv_sbatch_args`). To get these
+    variables to the job, cluv exports each `NAME=value` itself, just before running `sbatch`.
 
-    An `--export` without `ALL` (`NONE`, `NIL` or a list of variables) is refused, since it would
-    keep cluv's own variables from reaching the job.
+    A bare `NAME` (without `=value`) is skipped: `--export=ALL` already passes on every variable.
+    An `--export` without `ALL` (`NONE`, `NIL` or a list of variables) is refused, since the job
+    would then miss `GIT_COMMIT` and `CLUV_CLUSTER`.
 
     >>> get_export_flag_env_vars({"export": "ALL,NCCL_DEBUG=INFO,WANDB_MODE"})
     {'NCCL_DEBUG': 'INFO'}
@@ -815,8 +812,9 @@ def add_cluv_sbatch_args(
     )
     sbatch_args["chdir"] = str(remote_project_dir)
     # Some clusters (trillium, trillium-gpu) have a wrapper around `sbatch` that sets `--export=NONE` by default,
-    # which would discard the environment variables. This replaces the user's own `--export`, if
-    # any: `get_export_flag_env_vars` has already moved its variables to the job's env vars.
+    # which would discard the environment variables. The user's own `--export`, if any, is
+    # replaced here: `get_export_flag_env_vars` has already moved the `NAME=value` variables of
+    # the user's `--export` to the job's env vars.
     sbatch_args["export"] = "ALL"
     return sbatch_args
 

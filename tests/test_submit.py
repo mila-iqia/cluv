@@ -567,14 +567,14 @@ class TestGetSbatchCommand:
     async def test_export_flag_variables_reach_the_job(
         self, project_dir: Path, tmp_path: Path
     ) -> None:
-        """The variables of `--export=ALL,NAME=value` reach the job instead of being dropped.
+        """The `NAME=value` variables of a user's `--export=ALL,...` reach the job.
 
-        cluv's own `--export=ALL` replaces the user's, so these variables are exported on the
-        shell that runs `sbatch` instead, like those of `[tool.cluv.env]` (which they override).
-        That way they also win over a value the shell already had (from the cluster's login
-        profile, say), which they wouldn't if appended to `--export=ALL`: `sbatch` gives the
-        submitting environment precedence over them. The stub `sbatch` below prints the variables
-        that `--export=ALL` would hand to the job.
+        cluv exports these variables on the shell that runs `sbatch`, in place of any variable of
+        the same name from `[tool.cluv.env]`. A variable exported there also wins over a value
+        that the shell already had (set by the cluster's login profile, say), whereas with
+        `--export=ALL,NAME=value` alone, `sbatch` would keep the shell's value of `NAME`.
+
+        The stub `sbatch` below prints the variables that `--export=ALL` would hand to the job.
         """
         (project_dir / "pyproject.toml").write_text(
             textwrap.dedent(
@@ -627,8 +627,9 @@ class TestGetSbatchCommand:
     ) -> None:
         """An `--export` without `ALL` can't be honoured along with cluv's own `--export=ALL`.
 
-        It would keep `GIT_COMMIT` and `CLUV_CLUSTER` from reaching the job, so rather than replace
-        it and drop what it asked for, `cluv submit` refuses it before submitting anything.
+        `NONE`, `NIL` or a list of variables would keep `GIT_COMMIT` and `CLUV_CLUSTER` from
+        reaching the job. Rather than silently replace such an `--export` with `--export=ALL`,
+        `cluv submit` raises an error before submitting anything.
         """
         (project_dir / "pyproject.toml").write_text(
             textwrap.dedent(

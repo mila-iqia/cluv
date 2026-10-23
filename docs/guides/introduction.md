@@ -31,6 +31,17 @@ These are the main goals of Cluv:
 ### Intuitive monitoring of jobs and cluster health across clusters
 - [`cluv status`](../commands.md#cluv-status): Show me an overview of all my clusters, including GPU availability, queue status, and job progress.
 
+## Core Assumptions
+
+Cluv makes a few very important assumptions about your workflow. These are necessary and won't
+change:
+
+1. Your project uses [uv](https://docs.astral.sh/uv/) to manage your Python projects and dependencies.
+2. You have SSH access to each cluster, with ControlMaster sessions configured for passwordless login.
+    - As a consequence of this, **cluv is not supported on Windows machines**. This is because
+      Windows SSH clients don't support the necessary features. Use WSL2 if on Windows.
+3. Your project is in a Git repository hosted on GitHub.
+
 ## Non-goals
 
 Cluv is not meant to be a _magic_ package that does everything for you.
@@ -48,15 +59,3 @@ your project, specific to working on Slurm clusters.
         - You have to create a GitHub repository (public or private) for your project.
         - If your repository is private, you have to setup SSH keys and GitHub access for each
           cluster yourself. Cluv doesn't do that for you.
-
-
-## Core Assumptions
-
-Cluv makes a few very important assumptions about your workflow. These are necessary and won't
-change:
-
-1. Your project uses [uv](https://docs.astral.sh/uv/) to manage your Python projects and dependencies.
-2. You have SSH access to each cluster, with ControlMaster sessions configured for passwordless login.
-    - As a consequence of this, **cluv is not supported on Windows machines**. This is because
-      Windows SSH clients don't support the necessary features. Use WSL2 if on Windows.
-3. Your project is in a Git repository hosted on GitHub.

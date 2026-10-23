@@ -17,11 +17,13 @@ import milatools.cli.init_command
 import pytest
 import pytest_asyncio
 
+import cluv.cli.submit_utils.vram
 from cluv.cache import Job
 from cluv.cli.init import init
 from cluv.cli.login import login
 from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
+from cluv.cli.submit_utils.vram import get_gpu_types
 from cluv.cli.sync import sync
 from cluv.config import get_cluv_config, load_cluv_config
 from cluv.remote import Remote
@@ -77,12 +79,15 @@ TEST_SUBMIT_TIMEOUT_SECONDS = 180
 @pytest.mark.parametrize(
     "cluster",
     [
-        "mila",
+        pytest.param("mila", marks=[pytest.mark.xdist_group("mila")]),
         pytest.param(
             "rorqual",
-            marks=pytest.mark.xfail(
-                reason="Rorqual might take a long time for the job to actually run."
-            ),
+            marks=[
+                pytest.mark.xdist_group("rorqual"),
+                pytest.mark.xfail(
+                    reason="Rorqual might take a long time for the job to actually run."
+                ),
+            ],
         ),
     ],
     indirect=True,
@@ -166,6 +171,36 @@ async def test_submit(remote: Remote):
     finally:
         if should_cancel_job:
             await remote.run(f"scancel {job_id}", warn=True, hide=True, display=True)
+
+
+# The amount of VRAM used in the `--vram` tests below. Small enough that every cluster has at
+# least one GPU type that can fit it.
+TEST_VRAM = "5GB"
+
+
+@pytest.fixture
+def dont_cache_gpu_types(monkeypatch: pytest.MonkeyPatch):
+    """Always ask the cluster for its GPU types, and don't touch the user's cache."""
+    monkeypatch.setattr(cluv.cli.submit_utils.vram, "get_cached_gpu_types", lambda cluster: None)
+    monkeypatch.setattr(
+        cluv.cli.submit_utils.vram, "save_gpu_types", lambda cluster, gpu_types: None
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(30)
+async def test_get_gpu_types(remote: Remote, dont_cache_gpu_types: None):
+    """The GPU types of a real cluster can be listed, and we know how much VRAM each of them has.
+
+    This fails when a cluster gets a GPU model whose VRAM we can't figure out from its GRES name
+    or its node features, in which case it has to be added to `VRAM_GB_BY_MODEL`.
+    """
+    gpu_types = await get_gpu_types(remote.hostname, remote)
+    if not gpu_types:
+        pytest.skip(f"The {remote.hostname} cluster doesn't have any GPUs.")
+    unknown = [gpu_type for gpu_type, vram in gpu_types.items() if vram is None]
+    assert not unknown, f"Don't know how much VRAM these GPUs of {remote.hostname} have: {unknown}"
+    assert all(vram and vram > 0 for vram in gpu_types.values())
 
 
 @pytest.fixture

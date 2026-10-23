@@ -7,9 +7,10 @@ import functools
 import shlex
 import subprocess
 import sys
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from logging import getLogger as get_logger
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Callable, Literal, Self, TypeVar
 
 from cluv.utils import console, console_lock
@@ -19,6 +20,9 @@ logger = get_logger(__name__)
 Hide = Literal[True, False, "out", "stdout", "err", "stderr"]
 
 C = TypeVar("C", bound=Callable)
+
+command_log_files: ContextVar[tuple[Path, ...]] = ContextVar("command_log_files", default=())
+"""Files that `run` appends each command and its output to (e.g. `cluv submit`'s per-submission logs)."""
 
 
 @dataclasses.dataclass(frozen=True, unsafe_hash=True)
@@ -78,22 +82,21 @@ class Remote:
             command,
         )
 
-        _display = False
-        if display:
-            # Pass what to display to `run`, which uses a lock to keep the command and its output
-            # together in the console, instead of interleaving with other commands' outputs.
-            # Commands start running (and may error out) before being shown in the terminal though.
-            _display = (
-                f"({self.hostname}) $ {command}"
-                if input is None
-                else f"({self.hostname}) $ {command=}\n{input=}"
-            )
+        label = (
+            f"({self.hostname}) $ {command}"
+            if input is None
+            else f"({self.hostname}) $ {command=}\n{input=}"
+        )
+        # Pass what to display to `run`, which uses a lock to keep the command and its output
+        # together in the console, instead of interleaving with other commands' outputs.
+        # Commands start running (and may error out) before being shown in the terminal though.
         return await run(
             ssh_command,
             input=input,
             warn=warn,
             hide=hide,
-            _display=_display,
+            _display=label if display else False,
+            _log_label=label,
             _stacklevel=3,
         )
 
@@ -133,6 +136,7 @@ async def run(
     hide: Hide = False,
     _stacklevel: int = 2,
     _display: bool | str = False,
+    _log_label: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Runs the command *asynchronously* in a subprocess and returns the result.
 
@@ -181,6 +185,7 @@ async def run(
         stdout=stdout.decode(),
         stderr=stderr.decode(),
     )
+    _write_to_command_logs(_log_label or f"$ {shlex.join(program_and_args)}", result)
 
     async with console_lock.get() or contextlib.nullcontext():
         if _display:
@@ -226,6 +231,18 @@ async def run(
         if hide is not True:  # don't warn if hide is True.
             logger.warning(RuntimeWarning(message), stacklevel=_stacklevel)
     return result
+
+
+def _write_to_command_logs(label: str, result: subprocess.CompletedProcess[str]) -> None:
+    """Append the command and its output to each of the current `command_log_files`."""
+    for log_file in command_log_files.get():
+        with log_file.open("a") as f:
+            f.write(f"{label}\n")
+            for output in (result.stdout, result.stderr):
+                if output:
+                    f.write(output if output.endswith("\n") else output + "\n")
+            if result.returncode != 0:
+                f.write(f"(exited with {result.returncode})\n")
 
 
 async def control_socket_is_running(host: str) -> bool:

@@ -192,6 +192,29 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
     cluster's `datasets_path`. Enabled by default. Use `--no-sync-datasets` when the data is already
     on the cluster, or when a separate `cluv sync` is already replicating it.
 
+`--vram=<amount>`
+:   The amount of GPU memory your job needs, for example `--vram=10GB`. One job is submitted for
+    each GPU type of the cluster that has at least that much VRAM, and only the first one to start
+    is kept, the others being cancelled.
+
+    This makes single-GPU jobs start much sooner on the clusters that have
+    [MIG](https://docs.alliancecan.ca/wiki/Multi-Instance_GPU) slices (Fir, Rorqual, Narval, ...),
+    since those slices are usually idle and are never allocated unless you ask for them explicitly:
+
+    ```console
+    cluv submit rorqual scripts/job.sh --gpus=1 --vram=10GB
+    ```
+
+    On Rorqual, this races a `1g.10gb` slice, a `2g.20gb` slice, a `3g.40gb` slice and a full H100
+    against each other. When a GPU model is already requested (e.g. `--gpus=h100:1`), only that
+    model and its MIG slices are considered.
+
+    The GPU types (and how much VRAM they have) are read from `sinfo` on the cluster and cached for
+    a week, so new GPU models and MIG profiles are picked up automatically.
+
+    This option is ignored for jobs that ask for more than one GPU, since MIG slices can only be
+    used one at a time.
+
 `--parsable`
 :   Print only the job ID (or `<cluster>:<job_id>` when `cluster` is `first`) on stdout, for use in
     scripts. Everything else (logs, the live jobs table) is silenced, as with `--quiet`.

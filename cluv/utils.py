@@ -7,7 +7,7 @@ import sys
 from collections.abc import Iterator, Sequence
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Protocol, TypeVar
+from typing import Awaitable, Literal, Protocol, TypeVar, overload
 
 import rich.console
 
@@ -80,3 +80,35 @@ def group_by_cluster(objects_with_cluster_field: Sequence[JobLike]) -> dict[str,
     for job_submission in objects_with_cluster_field:
         grouped.setdefault(job_submission.cluster, []).append(job_submission)
     return grouped
+
+
+@overload
+async def gather_dict(
+    awaitables_dict: dict[str, Awaitable[T]], /, *, return_exceptions: Literal[False] = False
+) -> dict[str, T]: ...
+
+
+@overload
+async def gather_dict(
+    awaitables_dict: dict[str, Awaitable[T]], /, *, return_exceptions: Literal[True] = True
+) -> dict[str, T | BaseException]: ...
+
+
+@overload
+async def gather_dict(
+    awaitables_dict: dict[str, Awaitable[T]], /, *, return_exceptions: bool
+) -> dict[str, T] | dict[str, T | BaseException]: ...
+
+
+async def gather_dict(
+    awaitables_dict: dict[str, Awaitable[T]], /, *, return_exceptions: bool = False
+) -> dict[str, T] | dict[str, T | BaseException]:
+    """Simple wrapper around asyncio.gather to accept a dict and return a dict.
+
+    Avoids having to call asyncio.gather and then zip the results.
+    Particularly useful with comprehensions.
+    """
+    keys = list(awaitables_dict.keys())
+    awaitables_list = list(awaitables_dict.values())
+    results_list = await asyncio.gather(*awaitables_list, return_exceptions=return_exceptions)
+    return dict(zip(keys, results_list))

@@ -40,12 +40,13 @@ dev = [
     "ruff",
     "pytest-skip-slow>=0.0.5",
     "torchvision>=0.25.0",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["cluv", "tests"]
 norecursedirs = [".venv"]
-addopts = ["--doctest-modules"]
+addopts = ["--doctest-modules", "--dist=loadgroup", "--numprocesses=auto"]
 asyncio_mode = "auto"
 markers = [
     "integration: requires live SSH connections to real clusters (deselect with '-m not integration')",
@@ -55,7 +56,11 @@ markers = [
 managed = true
 
 [tool.uv.workspace]
-members = ["examples/pytorch-example", "examples/imagenet", "examples/hydra_example"]
+members = [
+    "examples/pytorch-example",
+    "examples/imagenet",
+    "examples/hydra_example",
+]
 
 [tool.uv.sources]
 remote-slurm-executor = { git = "https://www.github.com/lebrice/remote-slurm-executor" }
@@ -131,7 +136,6 @@ env = { SCRATCH = "$HOME/scratch" }
 
 [tool.cluv.sbatch_args]
 # sbatch flags applied on all clusters. CLI-supplied flags take precedence.
-time = "3:00:00"
 requeue = true
 
 ###  --------------   Clusters Config   --------------  ###
@@ -143,8 +147,10 @@ env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 [tool.cluv.clusters.tamia]
 
 [tool.cluv.clusters.killarney]
-# For example, you might not have a $SCRATCH on Killarney. This can be overwritten here.
-results_path = "$HOME/logs/cluv"
+# Killarney refuses to run jobs whose submission directory is under /home
+# ("Submitting jobs from directories residing in /home is not permitted"), so the project lives on
+# $SCRATCH there instead of the default $HOME location.
+project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.vulcan]
 
@@ -164,9 +170,14 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.trillium]
 sbatch_args = { account = "rrg-bengioy-ad" }
+# $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
+# location is rejected ("Job output requested to be written to a filesystem not available on
+# compute nodes"). Keep the project on $SCRATCH instead.
+project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.trillium-gpu]
 sbatch_args = { account = "rrg-bengioy-ad" }
+project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.narval]
 # Mila doesn't have an allocation on Narval anymore.

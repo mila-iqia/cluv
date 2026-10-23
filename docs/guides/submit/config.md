@@ -149,6 +149,19 @@ the exact commit that was running.
     If you pass your own `--output` (via `sbatch_args` or the CLI), it is placed *after* cluv's on
     the command line, so it wins instead - `sbatch` uses the last `--output` it's given.
 
+!!! note "cluv always submits with `--export=ALL`"
+    `GIT_COMMIT` and the variables from `env` reach the job because cluv exports them on the shell
+    that runs `sbatch`, and passes `--export=ALL` (some clusters, like Trillium, default to
+    `--export=NONE`). To pass more variables to a single run, use `--export=ALL,NAME=value,...`:
+    cluv exports them on that shell as well, so they win over `env` and over the cluster's login
+    profile.
+
+    ```console
+    cluv submit rorqual job.sh --export=ALL,NCCL_DEBUG=INFO
+    ```
+
+    An `--export` without `ALL` (`NONE`, `NIL` or a list of variables) is refused, since the job
+    would then miss these variables.
 
 ## CLI flags and program args
 

@@ -706,8 +706,8 @@ def check_path_is_safe_to_interpolate(path: PurePosixPath | str, setting: str) -
     """
     if match := _UNSAFE_PATH_CHARS.search(str(path)):
         raise ValueError(
-            f"The {setting} {str(path)!r} contains a {match.group()!r}, which cluv can't pass to "
-            f"sbatch safely: it goes into a `bash --login -c ...` command unquoted, so that the "
+            f"The {setting} {str(path)!r} contains a {match.group()!r}, which cluv can't use "
+            f"safely: it goes unquoted into shell commands run on the cluster, so that the "
             f"cluster's login shell expands variables like $SCRATCH in it. Please use a value "
             f"without whitespace or shell metacharacters."
         )

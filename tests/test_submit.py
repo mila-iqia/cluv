@@ -298,9 +298,10 @@ class TestGetSbatchCommand:
     ) -> None:
         """Unsafe `results_path` values are refused, even though `--output` is double-quoted.
 
-        The results path also goes *unquoted* into other commands run on the cluster (like the
-        `find` of `cluv sync`, so that `$SCRATCH` survives), where a space would word-split it, and
-        a quote or a `;` would break the command apart. Better a clear error up front.
+        The results path also goes *unquoted* into commands that `cluv sync` runs on the cluster
+        (like the `echo` that expands `$SCRATCH` in it, then `mkdir -p` and `ln -s`), where a space
+        would word-split it, and a quote or a `;` would break the command apart. Better a clear
+        error up front.
         """
         (project_dir / "pyproject.toml").write_text(
             textwrap.dedent(

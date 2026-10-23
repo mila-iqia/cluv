@@ -404,32 +404,28 @@ def _build_cluster_table(
 
 
 def _resolve_branch_names(cached_jobs: list[Job]) -> dict[str, str]:
-    """Best-effort local lookup of the branch whose tip currently matches each job's commit.
+    """Best-effort local lookup of a branch-relative name for each job's commit.
 
-    Returns a mapping from commit hash to branch name, for commits that still have a
-    local branch pointing exactly at them (branches move or get deleted, so this can
-    legitimately miss some jobs).
+    Returns a mapping from commit hash to a name like `idea-x` or `idea-x~3`, for commits
+    still reachable from a local branch (deleted or rebased branches can make some jobs
+    unresolvable). All commits are named in a single `git name-rev` call.
     """
-    branches: dict[str, str] = {}
-    for commit in {job.git_commit for job in cached_jobs}:
-        try:
-            result = subprocess.run(
-                [
-                    "git",
-                    "for-each-ref",
-                    f"--points-at={commit}",
-                    "--format=%(refname:short)",
-                    "refs/heads/",
-                ],
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            continue
-        if branch := next((line for line in result.stdout.splitlines() if line), None):
-            branches[commit] = branch
-    return branches
+    commits = list({job.git_commit for job in cached_jobs})
+    try:
+        result = subprocess.run(
+            ["git", "name-rev", "--name-only", "--refs=refs/heads/*", "--annotate-stdin"],
+            input="\n".join(commits),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return {}
+    return {
+        commit: name
+        for commit, name in zip(commits, result.stdout.splitlines())
+        if name != commit  # name-rev leaves commits with no reachable branch unchanged
+    }
 
 
 def _build_cluv_jobs_table(

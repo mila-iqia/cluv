@@ -222,10 +222,14 @@ async def sync_common_part(remotes: list[Remote], sync_datasets: bool = True) ->
 
 
 async def sync_per_cluster_part(
-    cluster_remote: Remote | None, sync_datasets: bool = True
+    cluster_remote: Remote | None, sync_datasets: bool = True, sync_results: bool = True
 ) -> list[Path]:
     """Sync steps specific to one cluster: install uv, clone/update the project, `uv sync`,
     fetch back new results, and push datasets to it if needed.
+
+    With `sync_results=False`, the results are not fetched back, but the results dir and the
+    `<project>/<results_symlink>` link to it are still created on the cluster, as with
+    `fetch_results`.
 
     Does nothing (and returns an empty list) when `cluster_remote` is None (the current
     cluster), since there's nothing to sync to it.
@@ -274,8 +278,17 @@ async def sync_per_cluster_part(
     )
     _save()
 
-    new_runs = await fetch_results(remote, config, project_state)
-    _save()
+    new_runs: list[Path] = []
+    if sync_results:
+        new_runs = await fetch_results(remote, config, project_state)
+        _save()
+    else:
+        await create_results_dir_with_symlink_to_scratch(
+            remote,
+            project_dir=project_path,
+            results_symlink=config.results_symlink,
+            results_path=await expandvars(remote, cluster_config.results_path),
+        )
     if new_runs:
         console.print(f"[green]Newly synced runs from [bold]{cluster}[/bold]:[/green]")
         for run_path in new_runs:

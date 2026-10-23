@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shlex
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -402,6 +403,31 @@ def _build_cluster_table(
     return table
 
 
+def _resolve_branch_names(cached_jobs: list[Job]) -> dict[str, str]:
+    """Best-effort local lookup of a branch-relative name for each job's commit.
+
+    Returns a mapping from commit hash to a name like `idea-x` or `idea-x~3`, for commits
+    still reachable from a local branch (deleted or rebased branches can make some jobs
+    unresolvable). All commits are named in a single `git name-rev` call.
+    """
+    commits = list({job.git_commit for job in cached_jobs})
+    try:
+        result = subprocess.run(
+            ["git", "name-rev", "--name-only", "--refs=refs/heads/*", "--annotate-stdin"],
+            input="\n".join(commits),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return {}
+    return {
+        commit: name
+        for commit, name in zip(commits, result.stdout.splitlines())
+        if name != commit  # name-rev leaves commits with no reachable branch unchanged
+    }
+
+
 def _build_cluv_jobs_table(
     cached_jobs: list[Job], live_info: dict[int, LiveJobInfo], max_jobs: int | None
 ) -> Table:
@@ -416,17 +442,25 @@ def _build_cluv_jobs_table(
 
     table.add_column("Cluster", style="bold magenta")
     table.add_column("Job ID", style="bold magenta")
-    table.add_column("Git commit")
+    table.add_column("Branch (commit)")
     table.add_column("Submitted at")
     table.add_column("Job status")
     table.add_column("Waiting time")
     table.add_column("Elapsed time")
 
+    shown_jobs = list(reversed(cached_jobs))[:max_jobs]
+    branch_names = _resolve_branch_names(shown_jobs)
+
     # Reverse the cached jobs so the most recent ones are shown first in the jobs table.
-    for job in list(reversed(cached_jobs))[:max_jobs]:
+    for job in shown_jobs:
         info = live_info.get(job.job_id)
 
         submitted_str = job.submitted_at.astimezone().strftime("%b %d %H:%M")
+
+        if branch := branch_names.get(job.git_commit):
+            commit_str = f"{branch} ({job.git_commit[:7]})"
+        else:
+            commit_str = job.git_commit[:7]
 
         job_id = Text(str(job.job_id))
         state, wait_time, elapsed_time = "-", "-", "-"
@@ -445,7 +479,7 @@ def _build_cluv_jobs_table(
         table.add_row(
             job.cluster,
             job_id,
-            job.git_commit[:7],
+            commit_str,
             submitted_str,
             state,
             wait_time,

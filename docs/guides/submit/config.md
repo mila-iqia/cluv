@@ -18,10 +18,19 @@ Per-cluster values are set under `[tool.cluv.clusters.<name>]`.
 !!! note "`project_dir` and `results_path` may use env vars, but not whitespace"
     Both may contain environment variables (`$SCRATCH/logs/x`), which are expanded by the
     cluster's *login* shell - on some clusters (Killarney, Vulcan) that's the only shell where
-    `$SCRATCH` is set. To make that work, `cluv submit` interpolates them into its `sbatch` command
-    without shell-quoting them, so they must not contain whitespace or shell metacharacters
-    (`'`, `"`, `` ` ``, `;`, `&`, `|`, `<`, `>`, `(`, `)`, `\`). `cluv submit` fails with an
-    explanatory error rather than building a command that would break on the cluster.
+    `$SCRATCH` is set. To make that work, `cluv submit` and `cluv sync` interpolate them into the
+    shell commands they run on the cluster without shell-quoting them, so they must not contain
+    whitespace or shell metacharacters (`'`, `"`, `` ` ``, `;`, `&`, `|`, `<`, `>`, `(`, `)`, `\`).
+    `cluv submit` fails with an explanatory error rather than building a command that would break
+    on the cluster.
+
+!!! note "`$` in `sbatch_args` is expanded on the cluster"
+    `sbatch_args` values, from the config or the CLI, are double-quoted in the `sbatch` command, so
+    characters like `|` or `&` reach `sbatch` as-is (e.g. `constraint = "ampere|hopper"`). `$` is
+    still expanded by the cluster's login shell, so `account = "$MY_ACCOUNT"` picks up the variable
+    set in your profile there. This also applies where you didn't mean a variable:
+    `comment = "cost $5"` reaches `sbatch` as `cost `, since `$5` is expanded (to nothing), and
+    `$(...)` is run. So only use `$` to refer to a variable.
 
 ## How global and per-cluster settings merge
 

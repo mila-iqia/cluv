@@ -21,7 +21,6 @@ import cluv.config
 from cluv.cache import CacheContent, ProjectStateOnCluster, read_cache, write_cache
 from cluv.cli.clean import clean, compute_runs_to_delete
 from cluv.cli.sync import (
-    create_results_dir_with_symlink_to_scratch,
     expandvars,
     fetch_results,
     get_active_remotes,
@@ -49,11 +48,6 @@ async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pyte
         ]
 
     monkeypatch.setattr(sync_module, list_remote_run_dirs.__name__, fake_list_remote_run_dirs)
-    monkeypatch.setattr(
-        sync_module,
-        create_results_dir_with_symlink_to_scratch.__name__,
-        mock.AsyncMock(),
-    )
     monkeypatch.setattr(sync_module, run.__name__, mock.AsyncMock())
 
     config = CluvConfig(

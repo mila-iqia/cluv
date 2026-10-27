@@ -43,6 +43,11 @@ async def test_save_does_not_clobber_a_concurrently_written_cluster(
     monkeypatch.setattr(sync_module, sync_module.install_uv.__name__, mock.AsyncMock())
     monkeypatch.setattr(sync_module, sync_module.clone_project.__name__, mock.AsyncMock())
     monkeypatch.setattr(sync_module, sync_module.run_uv_sync.__name__, mock.AsyncMock())
+    monkeypatch.setattr(
+        sync_module,
+        sync_module.create_results_dir_with_symlink_to_scratch.__name__,
+        mock.AsyncMock(),
+    )
 
     bar_watermark = datetime(2026, 6, 1, tzinfo=timezone.utc)
 

@@ -1022,7 +1022,7 @@ async def test_no_fetch_results_still_creates_the_results_dir(
 ) -> None:
     """With `fetch_results=False`, the sync before the submission doesn't call `fetch_results`
     (the rsync of all the results back to this machine), but still creates the results dir and
-    its link on the cluster, as `fetch_results` would."""
+    its link on the cluster."""
     config = CluvConfig(
         results_path="/scratch/me/results",
         clusters={"foo": PartialClusterConfig(project_dir="/home/me/proj")},

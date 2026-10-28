@@ -749,10 +749,14 @@ def get_export_flag_env_vars(sbatch_args: SbatchArgs) -> dict[str, str]:
     variables to the job, cluv exports each `NAME=value` itself, just before running `sbatch`.
 
     A bare `NAME` (without `=value`) is skipped: `--export=ALL` already passes on every variable.
-    An `--export` without `ALL` (`NONE`, `NIL` or a list of variables) is refused, since the job
-    would then miss `GIT_COMMIT` and `CLUV_CLUSTER`.
+    A list of variables without `ALL`, such as `NCCL_DEBUG=INFO`, is handled like
+    `ALL,NCCL_DEBUG=INFO`, with a warning. `NONE` and `NIL` are refused: both keywords ask for a
+    job without the environment of the shell that runs `sbatch`, where cluv sets `GIT_COMMIT`
+    and `CLUV_CLUSTER`.
 
     >>> get_export_flag_env_vars({"export": "ALL,NCCL_DEBUG=INFO,WANDB_MODE"})
+    {'NCCL_DEBUG': 'INFO'}
+    >>> get_export_flag_env_vars({"export": "NCCL_DEBUG=INFO"})
     {'NCCL_DEBUG': 'INFO'}
     >>> get_export_flag_env_vars({"time": "1:00:00"})
     {}
@@ -766,12 +770,19 @@ def get_export_flag_env_vars(sbatch_args: SbatchArgs) -> dict[str, str]:
     if export is None:
         return {}
     items = str(export).split(",")
-    if "ALL" not in (item.upper() for item in items):
+    upper_items = {item.upper() for item in items}
+    if upper_items & {"NONE", "NIL"}:
         raise ValueError(
             f"cluv can't submit with `--export={export}`: the job needs the environment of the "
             f"shell that runs `sbatch` (`--export=ALL`), which is where cluv sets GIT_COMMIT, "
             f"CLUV_CLUSTER and the variables from `[tool.cluv.env]`. Use "
             f"`--export=ALL,NAME=value,...` to pass more variables to the job."
+        )
+    if "ALL" not in upper_items:
+        logger.warning(
+            f"[yellow]Submitting with `--export=ALL,{export}` instead of `--export={export}`: the "
+            f"job needs the environment of the shell that runs `sbatch`, which is where cluv sets "
+            f"GIT_COMMIT, CLUV_CLUSTER and the variables from `[tool.cluv.env]`.[/yellow]"
         )
     pairs = (item.partition("=") for item in items)
     return {name: value for name, sep, value in pairs if sep}

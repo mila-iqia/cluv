@@ -668,15 +668,53 @@ class TestGetSbatchCommand:
         )
         assert result.stdout.strip() == "WANDB_MODE=online NCCL_DEBUG=INFO"
 
-    @pytest.mark.parametrize("export", ["NONE", "NIL", "NCCL_DEBUG=INFO"])
-    async def test_export_flag_without_all_is_rejected(
-        self, project_dir: Path, export: str
+    async def test_export_flag_without_all_gets_all_added(
+        self, project_dir: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """An `--export` without `ALL` can't be honoured along with cluv's own `--export=ALL`.
+        """`--export=NCCL_DEBUG=INFO` is submitted like `--export=ALL,NCCL_DEBUG=INFO`.
 
-        `NONE`, `NIL` or a list of variables would keep `GIT_COMMIT` and `CLUV_CLUSTER` from
-        reaching the job. Rather than silently replace such an `--export` with `--export=ALL`,
-        `cluv submit` raises an error before submitting anything.
+        cluv needs `ALL`, since `GIT_COMMIT` and `CLUV_CLUSTER` reach the job through the
+        environment of the shell that runs `sbatch`. So the job gets that whole environment, and
+        not only `NCCL_DEBUG`. A warning says so.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        with caplog.at_level("WARNING"):
+            [submission] = await get_submissions(
+                cluster="mila",
+                remote=None,
+                job_script=job_script,
+                sbatch_args=["--export=NCCL_DEBUG=INFO"],
+                program_args=[],
+                chunking=None,
+                git_commit="abc123",
+            )
+
+        inner_command = shlex.split(submission.sbatch_command)[3]
+        assert [w for w in shlex.split(inner_command) if w.startswith("--export")] == [
+            "--export=ALL"
+        ]
+        assert "NCCL_DEBUG=INFO" in inner_command
+        assert any("--export=ALL,NCCL_DEBUG=INFO" in message for message in caplog.messages)
+
+    @pytest.mark.parametrize("export", ["NONE", "NIL"])
+    async def test_export_none_or_nil_is_rejected(self, project_dir: Path, export: str) -> None:
+        """`--export=NONE` and `--export=NIL` can't be honoured along with cluv's `--export=ALL`.
+
+        Both keywords ask for a job without the environment of the shell that runs `sbatch`, where
+        cluv sets `GIT_COMMIT` and `CLUV_CLUSTER`. Replacing such an `--export` with
+        `--export=ALL` would give the job the opposite of what was asked, so `cluv submit` raises
+        an error before submitting anything.
         """
         (project_dir / "pyproject.toml").write_text(
             textwrap.dedent(

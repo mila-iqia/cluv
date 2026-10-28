@@ -170,8 +170,10 @@ the exact commit that was running.
     cluv submit rorqual job.sh --export=ALL,NCCL_DEBUG=INFO
     ```
 
-    An `--export` without `ALL` (`NONE`, `NIL` or a list of variables) is refused, since the job
-    would then miss `GIT_COMMIT` and the variables from `env`.
+    cluv adds `ALL` to an `--export` that lacks it, such as `--export=NCCL_DEBUG=INFO`, and prints
+    a warning: without `ALL`, the job would miss `GIT_COMMIT` and the variables from `env`.
+    `--export=NONE` and `--export=NIL` are refused, since both keywords ask for a job without these
+    variables.
 
 ## CLI flags and program args
 

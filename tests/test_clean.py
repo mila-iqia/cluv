@@ -57,7 +57,9 @@ async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pyte
     remote = Remote(hostname="foo")
     project_state = ProjectStateOnCluster()
 
-    await fetch_results(remote, config, project_state)
+    await fetch_results(
+        remote, config, project_state, config.get_cluster_config("foo").results_path
+    )
 
     assert project_state.last_fetch_watermark == datetime(2026, 7, 3, tzinfo=timezone.utc)
 

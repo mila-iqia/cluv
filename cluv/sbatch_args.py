@@ -57,7 +57,20 @@ def sbatch_args_from_list(sbatch_args_list: list[str]) -> SbatchArgs:
     >>> sbatch_args_from_list(["-f", "2"])
     {'f': '2'}
     >>> sbatch_args_from_list(["--gpus", "--requeue=False"])
-    {'gpus': True, 'requeue': 'False'}
+    {'gpus': True, 'requeue': False}
+    >>> sbatch_args_from_list(["--requeue=true", "--exclusive=false"])
+    {'requeue': True, 'exclusive': False}
+
+    ``--flag=False`` / ``--flag=True`` (any case) are booleans; False is omitted by `sbatch_args_to_list`. A bare
+    ``--no-flag`` removes an earlier ``flag`` (e.g. from the config) and is kept itself, since
+    sbatch has real ``--no-*`` flags (``--no-requeue``, ``--no-kill``) that must be passed on:
+
+    >>> sbatch_args_from_list(["--requeue", "--no-requeue"])
+    {'no-requeue': True}
+    >>> sbatch_args_to_list(sbatch_args_from_list(["--requeue", "--time=1:00:00", "--no-requeue"]))
+    ['--time=1:00:00', '--no-requeue']
+    >>> sbatch_args_from_list(["--no-requeue", "--requeue"])
+    {'requeue': True}
     >>> sbatch_args_from_list(["-n"])
     {'n': True}
     >>> sbatch_args_from_list(["--array=0-3%2", "-a=0-1%1"])
@@ -97,9 +110,16 @@ def sbatch_args_from_list(sbatch_args_list: list[str]) -> SbatchArgs:
             continue
         if not val.strip():
             val = True  # --exclusive --> {exclusive: True}
-        if val is not None:
-            if key in sbatch_args:
-                # remove the value so the ordering is preserved based on the positioning in `sbatch_args_list`.
-                sbatch_args.pop(key)
-            sbatch_args[key] = val
+        elif val.strip().lower() == "false":
+            val = False  # --exclusive=False --> {exclusive: False}, which is not passed to sbatch.
+        elif val.strip().lower() == "true":
+            val = True  # --exclusive=true --> {exclusive: True}, passed as the bare flag.
+        if key.startswith("no-") and val is True:
+            sbatch_args.pop(key.removeprefix("no-"), None)  # --no-requeue cancels --requeue.
+        elif val is True:
+            sbatch_args.pop(f"no-{key}", None)  # and --requeue after --no-requeue cancels that.
+        if key in sbatch_args:
+            # remove the value so the ordering is preserved based on the positioning in `sbatch_args_list`.
+            sbatch_args.pop(key)
+        sbatch_args[key] = val
     return sbatch_args

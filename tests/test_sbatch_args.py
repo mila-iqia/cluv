@@ -1,3 +1,5 @@
+import pytest
+
 from cluv.sbatch_args import sbatch_args_from_list, sbatch_args_to_list
 
 
@@ -47,8 +49,24 @@ class TestSbatchArgsFromArgsList:
     def test_bare_unknown_alias_flag_is_true(self) -> None:
         assert sbatch_args_from_list(["--gpus"]) == {"gpus": True}
 
-    def test_string_value_that_looks_falsy_stays_a_string(self) -> None:
-        assert sbatch_args_from_list(["--requeue=False"]) == {"requeue": "False"}
+    @pytest.mark.parametrize("arg", ["--requeue=False", "--requeue=false", "--requeue=FALSE"])
+    def test_false_value_is_boolean_false(self, arg: str) -> None:
+        assert sbatch_args_from_list([arg]) == {"requeue": False}
+        assert sbatch_args_to_list(sbatch_args_from_list([arg])) == []
+
+    def test_cli_false_overrides_config_true(self) -> None:
+        from_config = sbatch_args_to_list({"requeue": True, "time": "1:00:00"})
+        merged = sbatch_args_from_list(from_config + ["--requeue=False"])
+        assert sbatch_args_to_list(merged) == ["--time=1:00:00"]
+
+    def test_no_flag_cancels_config_flag_and_is_passed_on(self) -> None:
+        from_config = sbatch_args_to_list({"requeue": True, "time": "1:00:00"})
+        merged = sbatch_args_from_list(from_config + ["--no-requeue"])
+        assert merged == {"time": "1:00:00", "no-requeue": True}
+        assert sbatch_args_to_list(merged) == ["--time=1:00:00", "--no-requeue"]
+
+    def test_flag_after_no_flag_wins(self) -> None:
+        assert sbatch_args_from_list(["--no-requeue", "--requeue"]) == {"requeue": True}
 
     def test_last_duplicate_known_alias_wins(self) -> None:
         assert sbatch_args_from_list(["--time=2:00:00", "-t=00:00:30"]) == {"time": "00:00:30"}

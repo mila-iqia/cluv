@@ -1020,9 +1020,24 @@ async def test_failed_sync_commands_are_logged(tmp_path: Path) -> None:
 async def test_no_fetch_results_still_creates_the_results_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With `fetch_results=False`, the sync before the submission doesn't call `fetch_results`
-    (the rsync of all the results back to this machine), but still creates the results dir and
-    its link on the cluster."""
+    """`cluv submit` syncs the cluster before submitting. With `--no-fetch-results`
+    (`fetch_results=False`), this sync must not call `fetch_results`, which rsyncs all the results
+    back to this machine. The sync must still create the results dir on the cluster, and the
+    `<project>/logs` link to the results dir.
+
+    The function that decides whether to call `fetch_results` is `sync_per_cluster_part`. But this
+    test doesn't call `sync_per_cluster_part` directly: it calls `wait_for_first_running_job`, so
+    that the flag goes through the same functions as in a real `cluv submit`:
+
+        wait_for_first_running_job(fetch_results=False)
+        -> sync_and_submit_jobs_to_cluster(fetch_results=False)
+        -> sync_per_cluster_part(sync_results=False)
+
+    If one of these functions stops passing the flag on to the next one, the next one uses its
+    default value, `True`, and the results get fetched anyway: `--no-fetch-results` stops working,
+    without any error. This test then fails, whereas a test that calls `sync_per_cluster_part`
+    directly would still pass.
+    """
     config = CluvConfig(
         results_path="/scratch/me/results",
         clusters={"foo": PartialClusterConfig(project_dir="/home/me/proj")},
@@ -1042,13 +1057,13 @@ async def test_no_fetch_results_still_creates_the_results_dir(
     remote = Remote(hostname="foo")
 
     await wait_for_first_running_job(
-        {"foo": []},
+        {"foo": []},  # No job to submit: this test only checks the sync.
         cluster_to_remote={"foo": remote},
         found_running_job=asyncio.Event(),
         _skip_sync=False,
         sync_datasets=True,
         fetch_results=False,
-        initial_delay=0,
+        initial_delay=0,  # Otherwise, the test takes 10 s longer.
     )
 
     mock_fetch_results.assert_not_awaited()

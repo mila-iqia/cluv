@@ -807,18 +807,19 @@ def add_cluv_sbatch_args(
     base_name = sbatch_args.get("job-name") or Path(job_script).stem
     sbatch_args["job-name"] = f"cluv-{base_name}"
 
+    # The job script's `#SBATCH` lines: `sbatch` ignores those that set a flag also given on the
+    # command line, like the `--output` and `--export` set below.
+    directives = [
+        line.strip()
+        for line in job_script.read_text().splitlines()
+        if line.strip().startswith("#SBATCH")
+    ]
+
     if "output" not in sbatch_args and (
-        _header_output := next(
-            (
-                line
-                for line in job_script.read_text().splitlines()
-                if line.strip().startswith("#SBATCH") and "--output" in line
-            ),
-            None,
-        )
+        _header_output := next((line for line in directives if "--output" in line), None)
     ):
         logger.warning(
-            f"[yellow]The job script {job_script} sets {_header_output.strip()!r}, which "
+            f"[yellow]The job script {job_script} sets {_header_output!r}, which "
             f"will be overridden by cluv's --output so that results can be synced "
             f"back. Consider using cluv in your Python script to decide where to store "
             f"results instead.[/yellow]"
@@ -837,6 +838,20 @@ def add_cluv_sbatch_args(
         PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
     )
     sbatch_args["chdir"] = str(remote_project_dir)
+
+    _header_export = next(
+        (match[1] for line in directives if (match := re.search(r"--export[=\s]+(\S+)", line))),
+        None,
+    )
+    # `#SBATCH --export=ALL` does the same as cluv's own `--export=ALL`, so it isn't reported.
+    if "export" not in sbatch_args and _header_export and _header_export.upper() != "ALL":
+        logger.warning(
+            f"[yellow]The job script {job_script} sets `--export={_header_export}`, which "
+            f"`sbatch` ignores, since cluv passes `--export=ALL` on the command line. To pass "
+            f"variables to the job, use `--export=ALL,NAME=value` on the command line or in "
+            f"`sbatch_args`.[/yellow]"
+        )
+
     # Some clusters (trillium, trillium-gpu) have a wrapper around `sbatch` that sets `--export=NONE` by default,
     # which would discard the environment variables. The user's own `--export`, if any, is
     # replaced here: `get_export_flag_env_vars` has already moved the `NAME=value` variables of

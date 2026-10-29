@@ -175,6 +175,11 @@ the exact commit that was running.
     `--export=NONE` and `--export=NIL` are refused, since both keywords ask for a job without these
     variables.
 
+    `sbatch` ignores an `#SBATCH --export` line in the job script, since cluv puts `--export=ALL`
+    on the command line, and the command line wins over the job script's `#SBATCH` lines. cluv
+    prints a warning in that case, except for `#SBATCH --export=ALL`, which does the same as cluv's
+    own flag.
+
 ## CLI flags and program args
 
 Extra flags passed on the command line are **appended after** the flags from config. For most

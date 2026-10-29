@@ -739,6 +739,43 @@ class TestGetSbatchCommand:
                 git_commit="abc123",
             )
 
+    @pytest.mark.parametrize(
+        ("directive", "warned"),
+        [
+            ("#SBATCH --export=ALL,NCCL_DEBUG=INFO", True),
+            ("#SBATCH --export=NONE", True),
+            ("#SBATCH --export=ALL", False),
+        ],
+    )
+    def test_export_directive_of_the_job_script_gets_a_warning(
+        self, project_dir: Path, caplog: pytest.LogCaptureFixture, directive: str, warned: bool
+    ) -> None:
+        """An `#SBATCH --export` line of the job script gets a warning, since `sbatch` ignores it.
+
+        cluv puts `--export=ALL` on the command line, and the command line wins over the job
+        script's `#SBATCH` lines. So a variable set by such a line, like `NCCL_DEBUG=INFO`, never
+        reaches the job. `#SBATCH --export=ALL` gets no warning: that line does the same as cluv's
+        own flag.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.write_text(f"#!/bin/bash\n{directive}\necho Hello World\n")
+
+        with caplog.at_level("WARNING"):
+            build_sbatch_command(
+                cluster="mila", job_script=job_script, sbatch_args={}, program_args=[]
+            )
+
+        assert ("which `sbatch` ignores" in caplog.text) == warned
+
     def test_caller_supplied_output_flag_is_replaced_by_cluvs_own(self, project_dir: Path) -> None:
         """A user-supplied `--output=...` is overwritten with cluv's, so `cluv sync` can find it.
 

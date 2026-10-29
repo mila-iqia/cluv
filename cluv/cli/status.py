@@ -27,6 +27,7 @@ from cluv.slurm import (
     parse_savail,
     parse_sinfo_nodes,
     parse_slurm_time,
+    parse_squeue_states,
     parse_timestamp,
     run_sacct,
 )
@@ -37,14 +38,6 @@ __all__ = ["status"]
 
 
 DEFAULT_SHOW_JOBS = 10
-
-
-@dataclass
-class ClusterJobStats:
-    running: int
-    pending: int
-    cancelled: int
-    completed: int
 
 
 @dataclass
@@ -83,6 +76,7 @@ class ClusterStatus:
     online: bool
     gpu_stats: dict[str, tuple[int, int]]  # model -> (idle, total)
     storage: StorageStats
+    job_states: dict[str, int]  # state -> number of the user's jobs (all jobs, not only cluv's)
 
 
 def get_default_cluster_status(cluster: str) -> ClusterStatus:
@@ -91,6 +85,7 @@ def get_default_cluster_status(cluster: str) -> ClusterStatus:
         online=False,
         gpu_stats={},
         storage=StorageStats(home_used=0, home_quota=0, scratch_used=0, scratch_quota=0),
+        job_states={},
     )
 
 
@@ -98,6 +93,8 @@ def get_default_cluster_status(cluster: str) -> ClusterStatus:
 _SEP = "---CLUV-SEP---"
 
 SINFO_LIST_GPUS = 'sinfo --noheader -N -o "%N %t %G" 2>/dev/null | sort -u | grep gpu'
+# One state per line for each of the user's jobs, with array tasks listed individually.
+SQUEUE_LIST_STATES = "squeue -u $USER -h -r -o %T 2>/dev/null"
 
 # Script for DRAC clusters (diskusage_report, no savail/disk-quota)
 _REMOTE_SCRIPT_DRAC = f"""
@@ -105,6 +102,7 @@ _REMOTE_SCRIPT_DRAC = f"""
 timeout 1 diskusage_report 2>/dev/null; echo {_SEP}
 echo {_SEP}
 echo {_SEP}
+{SQUEUE_LIST_STATES}; echo {_SEP}
 """
 
 # Script for the Mila cluster (savail + disk-quota, no partition-stats/diskusage_report)
@@ -113,6 +111,7 @@ _REMOTE_SCRIPT_MILA = f"""
 echo {_SEP}
 savail 2>/dev/null; echo {_SEP}
 disk-quota 2>/dev/null; echo {_SEP}
+{SQUEUE_LIST_STATES}; echo {_SEP}
 """
 
 _MILA_CLUSTERS = {"mila"}
@@ -237,7 +236,7 @@ async def get_cluster_status(
         return get_default_cluster_status(cluster)
 
     parts = raw.split(_SEP)
-    sinfo_out, diskusage_out, savail_out, disk_quota_out = parts[:4]
+    sinfo_out, diskusage_out, savail_out, disk_quota_out, squeue_out = parts[:5]
 
     # --- GPU info: prefer savail (Mila) over sinfo (DRAC) ---
     gpu_stats = parse_savail(savail_out) or parse_sinfo_nodes(sinfo_out)
@@ -258,6 +257,7 @@ async def get_cluster_status(
         online=True,
         gpu_stats=gpu_stats,
         storage=storage,
+        job_states=parse_squeue_states(squeue_out),
     )
 
 
@@ -336,7 +336,7 @@ def _gpu_bars(gpu_stats: dict[str, tuple[int, int]], name_width: int) -> Text:
         if total == 0:
             bars += Text("N/A", style="dim")
         else:
-            bars += Text(f"{model:<{name_width}} ", style="bright_blue") + _gpu_bar(idle, total)
+            bars += Text(f"{model:<{name_width}} ", style="blue") + _gpu_bar(idle, total)
     return bars
 
 
@@ -345,10 +345,9 @@ def _gpu_bars(gpu_stats: dict[str, tuple[int, int]], name_width: int) -> Text:
 # ---------------------------------------------------------------------------
 def _build_cluster_table(
     data: list[ClusterStatus],
-    clusters_job_stats: dict[str, ClusterJobStats],
     disabled_clusters: dict[str, DisabledCluster],
 ) -> Table:
-    """Build the cluster overview table with live status info and job counts."""
+    """Build the cluster overview table with live status info and the user's job counts."""
     table = Table(
         title="Cluster Overview",
         box=box.ROUNDED,
@@ -360,7 +359,7 @@ def _build_cluster_table(
 
     table.add_column("Cluster", style="bold")
     table.add_column("Available GPUs (by type)", justify="left")
-    table.add_column("My jobs\nrun / pend / fail / comp", justify="center")
+    table.add_column("My jobs", justify="left")
     table.add_column("Storage used", justify="left")
 
     max_gpu_name_width = max((len(model) for c in data for model in c.gpu_stats), default=0)
@@ -378,12 +377,9 @@ def _build_cluster_table(
             else:
                 cluster_status += Text("Disabled")
 
-        job_stats = clusters_job_stats.get(
-            c.name, ClusterJobStats(running=0, cancelled=0, completed=0, pending=0)
-        )
-        my_jobs = Text(
-            f"{job_stats.running} / {job_stats.pending} / {job_stats.cancelled} / {job_stats.completed}",
-            style="cyan",
+        my_jobs = Text("\n").join(
+            Text(state, style="cyan") + Text(f" : {c.job_states.get(state, 0)}")
+            for state in ("PENDING", "RUNNING")
         )
 
         home_bar = Text("$HOME     ", style="bold") + _bar(
@@ -530,8 +526,8 @@ async def get_job_infos(
     cached_jobs: list[Job],
     clusters: list[str],
     disabled_clusters: dict[str, DisabledCluster],
-) -> tuple[dict[int, LiveJobInfo], dict[str, ClusterJobStats]]:
-    """Fetch live job info for all cached jobs, and count job statuses per cluster."""
+) -> dict[int, LiveJobInfo]:
+    """Fetch live job info for all cached jobs."""
     # Regroup jobs by cluster
     cluster_jobs: dict[str, list[int]] = {}
     for job in cached_jobs:
@@ -542,36 +538,7 @@ async def get_job_infos(
     results = await asyncio.gather(
         *(fetch_live_job_info(c, ids, disabled_clusters) for c, ids in cluster_jobs.items())
     )
-    live_info = {jid: info for cluster_result in results for jid, info in cluster_result.items()}
-
-    # Count jobs status per cluster
-    clusters_job_stats: dict[str, ClusterJobStats] = {}
-    for info in live_info.values():
-        cluster_stats = clusters_job_stats.setdefault(
-            info.cluster,
-            ClusterJobStats(running=0, cancelled=0, completed=0, pending=0),
-        )
-        if info.state == "RUNNING":
-            cluster_stats.running += 1
-        elif info.state == "PENDING":
-            cluster_stats.pending += 1
-        elif info.state in FAILED_JOB_STATES:
-            cluster_stats.cancelled += 1
-        elif info.state in ("COMPLETED", "COMPLETING"):
-            cluster_stats.completed += 1
-
-        if info.array_tasks:
-            for task in info.array_tasks:
-                if task.state == "RUNNING":
-                    cluster_stats.running += 1
-                elif task.state == "PENDING":
-                    cluster_stats.pending += 1
-                elif task.state in FAILED_JOB_STATES:
-                    cluster_stats.cancelled += 1
-                elif task.state in ("COMPLETED", "COMPLETING"):
-                    cluster_stats.completed += 1
-
-    return live_info, clusters_job_stats
+    return {jid: info for cluster_result in results for jid, info in cluster_result.items()}
 
 
 async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> None:
@@ -584,7 +551,7 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
         None
 
     The "clusters" table shows live info about each cluster's GPU availability and storage usage,
-    along with counts of the user's running/pending/failed/completed jobs on that cluster.
+    along with counts of all the user's pending/running jobs on that cluster (from `squeue`).
 
     The "jobs" table shows one row per job from the cache, with live status info (state,
     elapsed time, wait time).
@@ -595,14 +562,6 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
 
     clusters = get_cluv_config().clusters_names
     disabled_clusters = get_disabled_clusters()
-
-    # Load cached jobs
-    cached_jobs = load_jobs()
-
-    with console.status("Fetching jobs status..."):
-        jobs_status, clusters_job_stats = await get_job_infos(
-            cached_jobs, clusters, disabled_clusters
-        )
 
     if table in ("clusters", "all"):
         # Query clusters in parallel
@@ -624,11 +583,15 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
                 style="yellow",
             )
 
-        console.print(_build_cluster_table(clusters_status, clusters_job_stats, disabled_clusters))
+        console.print(_build_cluster_table(clusters_status, disabled_clusters))
         console.print(_build_cluster_table_legend())
         console.print()
 
     if table in ("jobs", "all"):
+        cached_jobs = load_jobs()
+        with console.status("Fetching jobs status..."):
+            jobs_status = await get_job_infos(cached_jobs, clusters, disabled_clusters)
+
         max_jobs = None if all_jobs else DEFAULT_SHOW_JOBS
         console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, max_jobs))
         console.print(_build_job_table_legend(max_jobs, len(cached_jobs)))

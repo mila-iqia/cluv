@@ -347,6 +347,15 @@ def parse_disk_quota(output: str) -> StorageStats:
     )
 
 
+def parse_squeue_states(output: str) -> dict[str, int]:
+    """Count the jobs in each state from ``squeue -h -r -o %T`` output (one state per line)."""
+    counts: dict[str, int] = {}
+    for line in output.splitlines():
+        if state := line.strip():
+            counts[state] = counts.get(state, 0) + 1
+    return counts
+
+
 # ---------------------------------------------------------------------------
 # diskusage_report
 # ---------------------------------------------------------------------------

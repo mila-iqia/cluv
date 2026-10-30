@@ -113,6 +113,9 @@ async def pull_datasets_if_needed(here: str | None, config: CluvConfig, all_remo
             config.data_source
             and ":" in config.data_source  # "[cluster:]path" (POSIX-only tool)
             and (source_cluster := config.data_source.split(":", 1)[0]) != here
+            # Jobs on the source cluster read the data at `data_source` directly, so only pull
+            # when another cluster needs a copy of it.
+            and any(r.hostname != source_cluster for r in all_remotes)
         ):
             _source_host, _, source_path = config.data_source.partition(":")
             # Fetch the data from the source cluster and copy it to the local datasets_path.
@@ -281,7 +284,9 @@ async def sync_per_cluster_part(
         for run_path in new_runs:
             console.print(f"  {run_path}")
 
-    if sync_datasets and config.data_source:
+    # Jobs on the source cluster read the data at `data_source` directly (see
+    # `current_cluster_config`), so there is nothing to push to it.
+    if sync_datasets and config.data_source and not config.data_source.startswith(f"{cluster}:"):
         here = current_cluster()
         if ":" not in config.data_source:
             # data_source is a local path; use it directly as the source.

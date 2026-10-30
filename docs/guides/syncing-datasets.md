@@ -64,6 +64,11 @@ With dataset sync enabled (default), Cluv will:
 1. Pull data from `data_source` to your local/current cluster `datasets_path` (remote source only).
 2. Push that dataset to each target cluster at its configured `datasets_path`.
 
+Cluv doesn't push the data to the source cluster, since jobs there read the data at `data_source`
+directly. When the source cluster is the only target, Cluv skips the pull too. For example, with
+`data_source = "mila:/network/datasets/imagenet"`, `cluv sync mila` (or `cluv submit mila`) run
+from your laptop copies no data at all.
+
 ## Optional: skip dataset replication for one run
 
 If you need to skip the dataset replication step, specify:

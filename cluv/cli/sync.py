@@ -222,10 +222,11 @@ async def sync_common_part(remotes: list[Remote], sync_datasets: bool = True) ->
 
 
 async def sync_per_cluster_part(
-    cluster_remote: Remote | None, sync_datasets: bool = True
+    cluster_remote: Remote | None, sync_datasets: bool = True, sync_results: bool = True
 ) -> list[Path]:
     """Sync steps specific to one cluster: install uv, clone/update the project, `uv sync`,
-    fetch back new results, and push datasets to it if needed.
+    create the results dir and its `<project>/<results_symlink>` link, fetch back new results
+    (unless `sync_results` is False), and push datasets to the cluster if needed.
 
     Does nothing (and returns an empty list) when `cluster_remote` is None (the current
     cluster), since there's nothing to sync to it.
@@ -274,8 +275,22 @@ async def sync_per_cluster_part(
     )
     _save()
 
-    new_runs = await fetch_results(remote, config, project_state)
-    _save()
+    results_path = await expandvars(remote, cluster_config.results_path)
+
+    # Optional, but useful if it isn't already set up: Create a symlink at project_root/<symlink_name>
+    # that points to the results_path (usually in $SCRATCH). This works with the example job script
+    # templates, which have `--output=logs/%j/slurm-%j.out` (relative to the project root).
+    await create_results_dir_with_symlink_to_scratch(
+        remote,
+        project_dir=project_path,
+        results_symlink=config.results_symlink,
+        results_path=results_path,
+    )
+
+    new_runs: list[Path] = []
+    if sync_results:
+        new_runs = await fetch_results(remote, config, project_state, results_path)
+        _save()
     if new_runs:
         console.print(f"[green]Newly synced runs from [bold]{cluster}[/bold]:[/green]")
         for run_path in new_runs:
@@ -693,9 +708,15 @@ async def _push_datasets_to_remote(
 
 
 async def fetch_results(
-    remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
+    remote: Remote,
+    config: CluvConfig,
+    project_state: ProjectStateOnCluster,
+    results_path_on_cluster: PurePosixPath,
 ) -> list[Path]:
-    """Fetches results from a remote cluster to local using rsync via the results symlink.
+    """Fetches results from a remote cluster to local using rsync.
+
+    `results_path_on_cluster` must have its env vars already resolved (see `expandvars`), since
+    rsync would otherwise look for a literal `$SCRATCH/...` folder on the cluster.
 
     Returns the list of newly-synced run directories (those that did not exist locally before
     the rsync ran). Also updates `project_state.last_fetch_watermark` (see `cluv clean`).
@@ -708,26 +729,6 @@ async def fetch_results(
         {p for p in results_path_here.iterdir() if p.is_dir()}
         if results_path_here.exists()
         else set()
-    )
-
-    # Resolve any environment variables in the results_path on the remote before rsync, otherwise
-    # it would try to fetch results from a literal $SCRATCH/... folder, which doesn't exist.
-    results_path_on_cluster = str(config.get_cluster_config(remote.hostname).results_path)
-    results_path_on_cluster = await expandvars(remote, results_path_on_cluster)
-
-    project_path_on_cluster = config.get_cluster_config(remote.hostname).project_dir
-    project_path_on_cluster = project_path_on_cluster or PurePosixPath(
-        find_pyproject().parent.relative_to(Path.home())
-    )
-    project_path_on_cluster = await expandvars(remote, project_path_on_cluster)
-    # Optional, but useful if it isn't already set up: Create a symlink at project_root/<symlink_name>
-    # that points to the results_path (usually in $SCRATCH). This works with the example job script
-    # templates, which have `--output=logs/%j/slurm-%j.out` (relative to the project root).
-    await create_results_dir_with_symlink_to_scratch(
-        remote,
-        project_dir=project_path_on_cluster,
-        results_symlink=config.results_symlink,
-        results_path=results_path_on_cluster,
     )
 
     await run(

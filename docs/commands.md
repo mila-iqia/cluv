@@ -192,6 +192,11 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
     cluster's `datasets_path`. Enabled by default. Use `--no-sync-datasets` when the data is already
     on the cluster, or when a separate `cluv sync` is already replicating it.
 
+`--fetch-results`, `--no-fetch-results`
+:   Whether the sync that precedes the submission should also fetch the cluster's results back to
+    this machine, as `cluv sync` does. Enabled by default. Use `--no-fetch-results` to submit
+    sooner when the results are large or slow to read, and fetch them later with `cluv sync`.
+
 `--vram=<amount>`
 :   The amount of GPU memory your job needs, for example `--vram=10GB`. One job is submitted for
     each GPU type of the cluster that has at least that much VRAM, and only the first one to start

@@ -127,7 +127,9 @@ def check_cluv_config(pyproject_path: Path) -> None:
     If not, add a default config section with the default clusters and settings.
     """
     if has_cluv_config(pyproject_path):
-        console.print("✅ Project already have a cluv config in pyproject.toml.", style="green")
+        console.print(
+            "✅ Project already have a cluv config in pyproject.toml or cluv.toml.", style="green"
+        )
         return
 
     console.print(

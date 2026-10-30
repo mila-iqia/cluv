@@ -1,4 +1,8 @@
-"""Lightweight config system based on a section in the pyproject.toml file."""
+"""Lightweight config system based on a section in the pyproject.toml file.
+
+The `[tool.cluv]` section of `pyproject.toml` can be overridden by a `cluv.toml` file placed next to
+it, whose top-level keys use the same format as `[tool.cluv]`.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +23,9 @@ from cluv.sbatch_args import SbatchArgs
 from cluv.utils import current_cluster, find_pyproject
 
 logger = logging.getLogger(__name__)
+
+CLUV_TOML = "cluv.toml"
+"""Name of the optional file next to `pyproject.toml` that overrides its `[tool.cluv]` section."""
 
 
 @dataclass(frozen=True)
@@ -204,10 +211,30 @@ def get_cluv_config() -> CluvConfig:
 
 
 def has_cluv_config(pyproject_path: Path) -> bool:
-    """Check if the pyproject.toml contains a cluv config"""
+    """Check if the pyproject.toml (or a cluv.toml next to it) contains a cluv config"""
+    return bool(read_cluv_config_dict(pyproject_path))
+
+
+def read_cluv_config_dict(pyproject_path: Path) -> dict:
+    """Read the `[tool.cluv]` section of pyproject.toml, overridden by `cluv.toml` if present."""
     with pyproject_path.open("rb") as handle:
-        data = tomllib.load(handle)
-    return "cluv" in data.get("tool", {})
+        cluv: dict = tomllib.load(handle).get("tool", {}).get("cluv", {})
+    cluv_toml_path = pyproject_path.parent / CLUV_TOML
+    if cluv_toml_path.exists():
+        logger.debug(f"Overriding the cluv config from {pyproject_path} with {cluv_toml_path}")
+        with cluv_toml_path.open("rb") as handle:
+            cluv = merge_configs(cluv, tomllib.load(handle))
+    return cluv
+
+
+def merge_configs(base: dict, override: dict) -> dict:
+    """Recursively merge `override` into `base`. Tables are merged, other values are replaced."""
+    merged = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            value = merge_configs(merged[key], value)
+        merged[key] = value
+    return merged
 
 
 def set_local_env_vars(env_vars: dict[str, str]) -> None:
@@ -228,12 +255,11 @@ def set_local_env_vars(env_vars: dict[str, str]) -> None:
 
 
 def load_cluv_config(pyproject_path: Path) -> CluvConfig:
-    with pyproject_path.open("rb") as handle:
-        data = tomllib.load(handle)
-
-    cluv: dict = data.get("tool", {}).get("cluv", {})
+    cluv = read_cluv_config_dict(pyproject_path)
     if not cluv:
-        raise RuntimeError(f"No cluv config in {pyproject_path} file.")
+        raise RuntimeError(
+            f"No cluv config in {pyproject_path} file or in {pyproject_path.parent / CLUV_TOML}."
+        )
 
     if current_cluster() is None:
         set_local_env_vars(cluv.get("local", {}).get("env", {}))

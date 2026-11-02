@@ -286,6 +286,13 @@ def add_status_args(subparsers: Subparsers):
         action="store_true",
         help="Show all jobs instead of only the 10 most recent.",
     )
+    # ------------------ NEW CODE ------------------
+    status_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output the status information in machine-readable JSON format.",
+    )
+    # ----------------------------------------------
     status_parser.set_defaults(func=status)
     return status_parser
 

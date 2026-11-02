@@ -108,13 +108,14 @@ async def get_job_states_with_sacct(remote: Remote | None, jobs: list[int]) -> l
 def parse_sacct_job_states(output: str) -> dict[int, str]:
     """Parse `job_id|state` lines from sacct into one state per job.
 
-    A job array has one line per task (`1234_0`, `1234_[1-3]`). It is RUNNING or COMPLETED as soon
-    as one of its tasks is, else PENDING if one is pending, else the state of its first task.
+    A job array has one line per task (`1234_0`, `1234_[1-3]`), and a heterogeneous job (`#SBATCH
+    hetjob`) one per component (`1234+0`, `1234+1`). The job is RUNNING or COMPLETED as soon as one
+    of these is, else PENDING if one is pending, else the state of the first one.
     """
     states_per_job: dict[int, list[str]] = defaultdict(list)
     for line in output.splitlines():
         job_id_str, _, state = line.partition("|")
-        job_id = int(job_id_str.partition("_")[0])
+        job_id = int(re.split(r"[_+]", job_id_str, maxsplit=1)[0])
         states_per_job[job_id].append(state)
     return {
         job_id: next((s for s in ("RUNNING", "COMPLETED", "PENDING") if s in states), states[0])

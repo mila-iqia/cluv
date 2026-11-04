@@ -1,23 +1,20 @@
 # Getting started
 
-This guide shows how to set up a project with [`cluv init`](commands.md#cluv-init) and how to
+This guide shows how to set up a project with [`cluv init`](../commands.md#cluv-init) and how to
 adapt the generated config and job scripts to your clusters and your workload.
 
 ## Prerequisites
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) installed on your local machine.
 - An account on at least one Slurm cluster (e.g. Mila, or a DRAC cluster like Rorqual or Narval).
-- SSH access to clusters through an entry in your `~/.ssh/config` (see [Setting up SSH access to all clusters](troubleshooting.md#setting-up-ssh-access-to-all-clusters)).
-- A git repository for your project, hosted on GitHub (see [Setting up SSH access to GitHub](troubleshooting.md#setting-up-ssh-access-to-github-from-the-clusters)).
+- SSH access to clusters through an entry in your `~/.ssh/config` (see [Setting up SSH access to all clusters](../troubleshooting.md#setting-up-ssh-access-to-all-clusters)).
+- A git repository for your project, hosted on GitHub (see [Setting up SSH access to GitHub](../troubleshooting.md#setting-up-ssh-access-to-github-from-the-clusters)).
 
 Then install `cluv`:
 
 ```console
 uv tool install cluster-uv
 ```
-
-!!! note
-    `cluv` is not supported on Windows. Use WSL2 instead.
 
 ## Run `cluv init`
 
@@ -57,7 +54,7 @@ the DRAC and PAICE clusters. An empty table is enough to enable a cluster with t
 For the clusters you don't want to use (no access, missing SSH entry, ...), you have two options:
 
 - **Remove their table** from the config.
-- **Disable them** with [`cluv disable`](commands.md#cluv-disable), without touching the config:
+- **Disable them** with [`cluv disable`](../commands.md#cluv-disable), without touching the config:
 
     ```console
     cluv disable narval        # Until `cluv enable narval` is run.
@@ -112,7 +109,7 @@ sbatch_args = { account = "def-yourpi", time = "12:00:00" }
 ```
 
 Flags given on the command line always take precedence. See
-[Configuring job submission](guides/submit/config.md) for the full merge rules.
+[Configuring job submission](submit/config.md) for the full merge rules.
 
 ### Set environment variables
 
@@ -131,7 +128,7 @@ env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 
 !!! note
     You can still use cluv on clusters whose compute nodes have no internet access.
-    [`cluv sync`](commands.md#cluv-sync) runs `uv sync` on the login nodes, which do have internet
+    [`cluv sync`](../commands.md#cluv-sync) runs `uv sync` on the login nodes, which do have internet
     access. Your environment is therefore installed before the job starts, and the job only uses
     it offline.
 
@@ -167,7 +164,7 @@ All of these can be set globally or per cluster.
 ### Configure dataset syncing (optional)
 
 If your jobs need a dataset, `data_source` and `datasets_path` let `cluv sync` replicate it from
-one cluster to all the others. See [Syncing datasets](guides/syncing-datasets.md).
+one cluster to all the others. See [Syncing datasets](syncing-datasets.md).
 
 ## Adapt the job scripts
 
@@ -205,7 +202,7 @@ job_script_path = "scripts/job_rorqual.sh"
 [ImageNet example](https://github.com/mila-iqia/cluv/tree/master/examples/imagenet) uses this to run
 a multi-node, multi-GPU training on every cluster: it's a good place to start for your own scripts.
 
-See [Writing a job script](guides/submit/job-scripts.md) for the conventions cluv relies on.
+See [Writing a job script](submit/job-scripts.md) for the conventions cluv relies on.
 
 ## Commit and try it out
 
@@ -232,11 +229,9 @@ cluv sync                          # Copy the results back into `logs/` (once th
     (untracked files are ignored), so that every job can be traced back to the exact commit it ran
     with. Commit your changes first, or pass `--autocommit` to let cluv commit them for you.
 
-If something goes wrong, see [Troubleshooting](troubleshooting.md).
-
 ## Next steps
 
-- [Configuring job submission](guides/submit/config.md): merge rules, multiple job configurations,
+- [Configuring job submission](submit/config.md): merge rules, multiple job configurations,
   and what cluv injects into every job.
-- [Racing clusters with `cluv submit first`](guides/submit/racing-clusters.md).
-- [Hydra launcher](hydra-launcher.md): launch Hydra sweeps on remote clusters.
+- [Racing clusters with `cluv submit first`](submit/racing-clusters.md).
+- [Hydra launcher](../hydra-launcher.md): launch Hydra sweeps on remote clusters.

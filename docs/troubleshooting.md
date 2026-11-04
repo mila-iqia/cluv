@@ -5,7 +5,8 @@ This page covers common setup issues.
 ## Setting up SSH access to all clusters
 
 `cluv` connects to each cluster using the hostnames configured in your `~/.ssh/config`. We
-recommend using `milatools` to generate the SSH config for all Mila and Alliance clusters at once:
+recommend using [`milatools`](https://github.com/mila-iqia/milatools) to generate the SSH config
+for all Mila and Alliance clusters at once:
 
 ```bash
 mila init
@@ -14,6 +15,24 @@ mila init
 !!! note
 
     `mila init` is meant to be run on your **local machine**.
+
+!!! tip "Recommended: ControlMaster and ServerAlive"
+
+    In your SSH config, we recommend having these options for each cluster:
+
+    - **ControlMaster**: reuses a single SSH connection per cluster, so you only go through 2FA
+      once (with [`cluv login`](commands.md#cluv-login)) and other cluv commands connect instantly.
+    - **ServerAlive**: sends keep-alive messages so idle connections aren't dropped by the cluster
+      or your network.
+
+    ```text title="~/.ssh/config"
+    Host mila narval rorqual
+        ControlMaster auto
+        ControlPath ~/.ssh/cm-%r@%h:%p
+        ControlPersist yes
+        ServerAliveInterval 120
+        ServerAliveCountMax 5
+    ```
 
 More information in the Mila Technical Documentation:
 

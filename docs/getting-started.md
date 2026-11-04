@@ -7,12 +7,8 @@ adapt the generated config and job scripts to your clusters and your workload.
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) installed on your local machine.
 - An account on at least one Slurm cluster (e.g. Mila, or a DRAC cluster like Rorqual or Narval).
-- SSH access to clusters through an entry in your `~/.ssh/config`, with ControlMaster enabled
-  (see [Setting up SSH access](troubleshooting.md#setting-up-ssh-access-to-all-clusters)). The
-  easiest way to set this up is with [`mila init`](https://github.com/mila-iqia/milatools).
-- A git repository for your project, hosted on GitHub. If it's private, each cluster needs SSH
-  access to GitHub (see
-  [Setting up SSH access to GitHub](troubleshooting.md#setting-up-ssh-access-to-github-from-the-clusters)).
+- SSH access to clusters through an entry in your `~/.ssh/config` (see [Setting up SSH access to all clusters](troubleshooting.md#setting-up-ssh-access-to-all-clusters)).
+- A git repository for your project, hosted on GitHub (see [Setting up SSH access to GitHub](troubleshooting.md#setting-up-ssh-access-to-github-from-the-clusters)).
 
 Then install `cluv`:
 
@@ -31,18 +27,20 @@ be somewhere under your home directory (`$HOME`), and the folder is created if i
 ```console
 cluv init ~/my-project
 ```
-
-Without a path, `cluv init` sets up the current directory.
-
 This adds a `[tool.cluv]` section to your `pyproject.toml` and job script templates in
-`scripts/`. It only creates what's missing, so it's safe to re-run. **Read the output carefully**:
-every warning points to something you'll probably want to fix in the next section.
+`scripts/`. It only creates what's missing, so it's safe to re-run. 
+
+**Read the output carefully**: every warning points to something you'll probably want to fix in the next section.
 
 ## Adapt the config to your needs
 
-The generated `[tool.cluv]` section is the config for a default Mila researcher. It's a good
-starting point, but some of its defaults are specific to Mila. Open `pyproject.toml` and go
-through the steps below. See the [Config reference](reference/config.md) for every option.
+The generated config aims to work on as many clusters as possible out of the box, with some values
+(like allocation accounts) set for core Mila students. Open `pyproject.toml` and go through the
+steps below to adapt it to your access and your workload.
+
+The config has two levels: settings in `[tool.cluv]` apply to every cluster, and each
+`[tool.cluv.clusters.<name>]` table can override them for one cluster. See the
+[Config reference](reference/config.md) for every option.
 
 ### Keep only your clusters
 
@@ -113,8 +111,8 @@ gpus = "1"
 sbatch_args = { account = "def-yourpi", time = "12:00:00" }
 ```
 
-Flags given on the command line always take precedence.
-See [Configuring job submission](guides/submit/config.md) for the full merge rules.
+Flags given on the command line always take precedence. See
+[Configuring job submission](guides/submit/config.md) for the full merge rules.
 
 ### Set environment variables
 
@@ -139,18 +137,19 @@ env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 
 ### Choose where results and code go
 
-You can customize where your jobs run and where their outputs are written. The template sets
-defaults that work for Mila and the DRAC clusters, but you may need to change them for other
-clusters.
+On each cluster, cluv keeps your code and your results apart. The code is a git clone of your
+project, by default in `$HOME`. Results can get large, so they're written to `$SCRATCH`, with a
+symlink in your project to reach them. The defaults follow these cluster conventions, so you
+usually don't need to change them:
 
-- `results_path`: where job outputs are written on each cluster. `cluv sync` copies new results back
-  from there. When you run cluv on your own machine, `[tool.cluv.local]` sets `$SCRATCH` to
-  `$HOME/scratch` so the same path works locally.
-- `results_symlink`: the name of the symlink in your project that points to `results_path`, so you
-  can browse results from the project folder.
-- `project_dir`: where the project is cloned on each cluster. Some clusters don't allow jobs to run
-  from `$HOME` (e.g. Killarney, Trillium), so the template puts the project in `$SCRATCH/repos/cluv`
-  there.
+- `results_path` (`$SCRATCH/logs/<project-name>` in the template): where job outputs are written
+  on each cluster. `cluv sync` copies new results back from there. When you run cluv on your own
+  machine, `[tool.cluv.local]` sets `$SCRATCH` to `$HOME/scratch` so the same path works locally.
+- `results_symlink` (`logs` in the template): a symlink in your project that points to
+  `results_path`, so you can browse results from the project folder.
+- `project_dir` (by default, the same path relative to `$HOME` as on your machine): where the
+  project is cloned on each cluster. Some clusters don't allow jobs to run from `$HOME` (e.g.
+  Killarney, Trillium), so the template puts the project in `$SCRATCH/repos/cluv` there.
 
 ```toml title="pyproject.toml"
 [tool.cluv.clusters.trillium]
@@ -158,6 +157,12 @@ project_dir = "$SCRATCH/repos/my-project"
 ```
 
 All of these can be set globally or per cluster.
+
+!!! note
+    `cluv sync` only copies back what's under `results_path`. By default, a job only writes its
+    Slurm output there. If you want other results back on your machine (checkpoints, metrics,
+    logs, ...), make your program write them under `results_path` too, ideally in the same per-job
+    folder.
 
 ### Configure dataset syncing (optional)
 
@@ -204,7 +209,7 @@ See [Writing a job script](guides/submit/job-scripts.md) for the conventions clu
 
 ## Commit and try it out
 
-cluv deploys your project through git, so the remote clusters only see what's been pushed:
+cluv deploys your project through git, so commit and push the files generated by `cluv init`.
 
 ```console
 git add pyproject.toml scripts/
@@ -212,20 +217,20 @@ git commit -m "Add cluv config"
 git push
 ```
 
+Then connect to your clusters, sync the project and submit your first job:
+
+```console
+cluv login                         # Connect to every cluster (answer the 2FA prompts).
+cluv sync                          # Clone the project and run `uv sync` on each cluster.
+cluv submit mila -- python main.py # Submit a job.
+cluv status                        # Follow the job.
+cluv sync                          # Copy the results back into `logs/` (once the job is done).
+```
+
 !!! note
     `cluv submit` refuses to submit a job when your working directory has uncommitted changes
     (untracked files are ignored), so that every job can be traced back to the exact commit it ran
     with. Commit your changes first, or pass `--autocommit` to let cluv commit them for you.
-
-Check that everything works end to end:
-
-```console
-cluv login                                        # Connect to every cluster (answer the 2FA prompts).
-cluv sync                                         # Clone the project and run `uv sync` on each cluster.
-cluv submit mila --time=0:05:00 -- python -c "print('hello')"
-cluv status                                       # Follow the job.
-cluv sync                                         # Copy the results back into `logs/`.
-```
 
 If something goes wrong, see [Troubleshooting](troubleshooting.md).
 

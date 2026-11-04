@@ -308,6 +308,8 @@ class TestParseTime:
         ("20_0|COMPLETED\n20_1|RUNNING\n20_[2-5%1]|PENDING", {20: "RUNNING"}),
         ("20_0|COMPLETED\n20_[1-3]|PENDING", {20: "COMPLETED"}),  # the array has started
         ("20_0|FAILED\n20_[1-3]|PENDING", {20: "PENDING"}),
+        ("11502357+0|RUNNING\n11502357+1|RUNNING", {11502357: "RUNNING"}),  # `#SBATCH hetjob`
+        ("30+0|PENDING\n30+1|PENDING\n31|RUNNING", {30: "PENDING", 31: "RUNNING"}),
     ],
 )
 def test_parse_sacct_job_states(output: str, expected: dict[int, str]):

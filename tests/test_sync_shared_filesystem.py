@@ -161,12 +161,16 @@ async def test_sync_only_syncs_once_but_returns_every_remote(monkeypatch: pytest
         ),
     )
 
-    remotes = await sync_module.sync(["trillium", "trillium-gpu"], sync_datasets=False)
+    remotes = await sync_module.sync(
+        ["trillium", "trillium-gpu"], sync_datasets=False, fetch_results=False
+    )
 
     # Both clusters are returned (they're genuinely different Slurm targets)...
     assert {r.hostname for r in remotes} == {"trillium", "trillium-gpu"}
     # ...but the actual sync work only ran once, for the cluster that "wins" the shared group.
-    mock_sync_per_cluster_part.assert_awaited_once()
+    mock_sync_per_cluster_part.assert_awaited_once_with(
+        mock.ANY, sync_datasets=False, sync_results=False
+    )
     assert mock_sync_per_cluster_part.await_args.args[0].hostname == "trillium"
 
     # And every collaborator mocked to get there was actually exercised -- otherwise mocking it

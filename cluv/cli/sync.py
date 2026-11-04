@@ -46,6 +46,7 @@ CLUSTERS_SHARING_A_FILESYSTEM: list[frozenset[str]] = [
 async def sync(
     clusters: list[str] | None = None,
     sync_datasets: bool = True,
+    fetch_results: bool = True,
 ) -> list[Remote]:
     """Synchronizes the current project across clusters.
 
@@ -58,6 +59,7 @@ async def sync(
         clusters: List of SSH hostnames of the target clusters. If empty, will attempt to sync
             with all clusters in the config that we have an active SSH connection to.
         sync_datasets: Whether to pull/push datasets from/to `data_source` as part of the sync.
+        fetch_results: Whether to fetch results from each cluster as part of the sync.
 
     Returns:
         A list of Remote objects corresponding to the clusters that were synced with.
@@ -102,7 +104,10 @@ async def sync(
         f"{[remote.hostname for remote in remotes]}"
     )
     await asyncio.gather(
-        *(sync_per_cluster_part(remote, sync_datasets=sync_datasets) for remote in remotes_to_sync)
+        *(
+            sync_per_cluster_part(remote, sync_datasets=sync_datasets, sync_results=fetch_results)
+            for remote in remotes_to_sync
+        )
     )
     return remotes
 

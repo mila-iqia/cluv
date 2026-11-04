@@ -26,6 +26,7 @@ from cluv.cli.submit import (
     build_submit_command,
     ensure_clean_git_state,
     get_cluster_job_script_path,
+    get_export_flag_env_vars,
     get_job_env_vars,
     get_local_job_script,
     get_sbatch_command,
@@ -66,7 +67,7 @@ def build_sbatch_command(
     `get_sbatch_command` only assembles the final string now; the cluv-specific parts of it (the
     `--output`/`--job-name`/`--export` flags, the job's env vars, the job script's path *on the
     cluster*) are each computed by their own function beforehand. Tests that care about the whole
-    command go through this instead of repeating those four calls.
+    command go through this instead of repeating those calls.
     """
     cluster_config = get_cluv_config().get_cluster_config(cluster)
     return get_sbatch_command(
@@ -75,7 +76,8 @@ def build_sbatch_command(
             sbatch_args, job_script=job_script, cluster=cluster, cluster_config=cluster_config
         ),
         program_args=program_args,
-        env_vars=get_job_env_vars(cluster, git_commit, cluster_config),
+        env_vars=get_job_env_vars(cluster, git_commit, cluster_config)
+        | get_export_flag_env_vars(sbatch_args),
     )
 
 
@@ -609,11 +611,72 @@ class TestGetSbatchCommand:
             *program_args,
         ]
 
-    def test_caller_supplied_export_flag_is_replaced_by_cluvs_own(self, project_dir: Path) -> None:
-        """A user-supplied `--export=...` is overwritten with cluv's `ALL`, not kept.
+    @pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash to run the command")
+    async def test_export_flag_variables_reach_the_job(
+        self, project_dir: Path, tmp_path: Path
+    ) -> None:
+        """The `NAME=value` variables of a user's `--export=ALL,...` reach the job.
 
-        cluv needs the submitting shell's environment to reach the job for `$GIT_COMMIT` and
-        `$CLUV_CLUSTER` to be there, and `--export=NONE` would drop exactly that.
+        cluv exports these variables on the shell that runs `sbatch`, in place of any variable of
+        the same name from `[tool.cluv.env]`. A variable exported there also wins over a value
+        that the shell already had (set by the cluster's login profile, say), whereas with
+        `--export=ALL,NAME=value` alone, `sbatch` would keep the shell's value of `NAME`.
+
+        The stub `sbatch` below prints the variables that `--export=ALL` would hand to the job.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.env]
+            WANDB_MODE = "offline"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        stub = bin_dir / "sbatch"
+        stub.write_text('#!/bin/sh\necho "WANDB_MODE=$WANDB_MODE NCCL_DEBUG=$NCCL_DEBUG"\n')
+        stub.chmod(0o755)
+
+        [submission] = await get_submissions(
+            cluster="mila",
+            remote=None,
+            job_script=job_script,
+            sbatch_args=["--export=ALL,WANDB_MODE=online,NCCL_DEBUG=INFO"],
+            program_args=[],
+            chunking=None,
+            git_commit="abc123",
+        )
+        # Drop `--login` so the user's profile can't touch the PATH or the variables under test.
+        inner_command = shlex.split(
+            submission.sbatch_command.replace("bash --login -c", "bash -c", 1)
+        )[2]
+        export_flags = [w for w in shlex.split(inner_command) if w.startswith("--export")]
+        assert export_flags == ["--export=ALL"]
+
+        result = subprocess.run(
+            ["bash", "-c", inner_command],
+            # As if the cluster's login profile had already set `NCCL_DEBUG`.
+            env={"PATH": f"{bin_dir}:/usr/bin:/bin", "NCCL_DEBUG": "WARN"},
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert result.stdout.strip() == "WANDB_MODE=online NCCL_DEBUG=INFO"
+
+    async def test_export_flag_without_all_gets_all_added(
+        self, project_dir: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`--export=NCCL_DEBUG=INFO` is submitted like `--export=ALL,NCCL_DEBUG=INFO`.
+
+        cluv needs `ALL`, since `GIT_COMMIT` and `CLUV_CLUSTER` reach the job through the
+        environment of the shell that runs `sbatch`. So the job gets that whole environment, and
+        not only `NCCL_DEBUG`. A warning says so.
         """
         (project_dir / "pyproject.toml").write_text(
             textwrap.dedent(
@@ -627,15 +690,92 @@ class TestGetSbatchCommand:
         job_script = project_dir / "job.sh"
         job_script.touch(0o755)
 
-        sbatch_command = build_sbatch_command(
-            cluster="mila",
-            job_script=job_script,
-            sbatch_args={"export": "NONE"},
-            program_args=[],
+        with caplog.at_level("WARNING"):
+            [submission] = await get_submissions(
+                cluster="mila",
+                remote=None,
+                job_script=job_script,
+                sbatch_args=["--export=NCCL_DEBUG=INFO"],
+                program_args=[],
+                chunking=None,
+                git_commit="abc123",
+            )
+
+        inner_command = shlex.split(submission.sbatch_command)[3]
+        assert [w for w in shlex.split(inner_command) if w.startswith("--export")] == [
+            "--export=ALL"
+        ]
+        assert "NCCL_DEBUG=INFO" in inner_command
+        assert any("--export=ALL,NCCL_DEBUG=INFO" in message for message in caplog.messages)
+
+    @pytest.mark.parametrize("export", ["NONE", "NIL"])
+    async def test_export_none_or_nil_is_rejected(self, project_dir: Path, export: str) -> None:
+        """`--export=NONE` and `--export=NIL` can't be honoured along with cluv's `--export=ALL`.
+
+        Both keywords ask for a job without the environment of the shell that runs `sbatch`, where
+        cluv sets `GIT_COMMIT` and `CLUV_CLUSTER`. Replacing such an `--export` with
+        `--export=ALL` would give the job the opposite of what was asked, so `cluv submit` raises
+        an error before submitting anything.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.mila]
+            """
+            )
         )
-        assert sbatch_command.count("--export=") == 1
-        assert "--export=ALL" in sbatch_command
-        assert "--export=NONE" not in sbatch_command
+        job_script = project_dir / "job.sh"
+        job_script.touch(0o755)
+
+        with pytest.raises(ValueError, match=f"--export={export}"):
+            await get_submissions(
+                cluster="mila",
+                remote=None,
+                job_script=job_script,
+                sbatch_args=[f"--export={export}"],
+                program_args=[],
+                chunking=None,
+                git_commit="abc123",
+            )
+
+    @pytest.mark.parametrize(
+        ("directive", "warned"),
+        [
+            ("#SBATCH --export=ALL,NCCL_DEBUG=INFO", True),
+            ("#SBATCH --export=NONE", True),
+            ("#SBATCH --export=ALL", False),
+        ],
+    )
+    def test_export_directive_of_the_job_script_gets_a_warning(
+        self, project_dir: Path, caplog: pytest.LogCaptureFixture, directive: str, warned: bool
+    ) -> None:
+        """An `#SBATCH --export` line of the job script gets a warning, since `sbatch` ignores it.
+
+        cluv puts `--export=ALL` on the command line, and the command line wins over the job
+        script's `#SBATCH` lines. So a variable set by such a line, like `NCCL_DEBUG=INFO`, never
+        reaches the job. `#SBATCH --export=ALL` gets no warning: that line does the same as cluv's
+        own flag.
+        """
+        (project_dir / "pyproject.toml").write_text(
+            textwrap.dedent(
+                """\
+            [tool.cluv]
+            results_path = "results"
+            [tool.cluv.clusters.mila]
+            """
+            )
+        )
+        job_script = project_dir / "job.sh"
+        job_script.write_text(f"#!/bin/bash\n{directive}\necho Hello World\n")
+
+        with caplog.at_level("WARNING"):
+            build_sbatch_command(
+                cluster="mila", job_script=job_script, sbatch_args={}, program_args=[]
+            )
+
+        assert ("which `sbatch` ignores" in caplog.text) == warned
 
     def test_caller_supplied_output_flag_is_replaced_by_cluvs_own(self, project_dir: Path) -> None:
         """A user-supplied `--output=...` is overwritten with cluv's, so `cluv sync` can find it.

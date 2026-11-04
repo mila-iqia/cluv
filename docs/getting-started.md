@@ -28,7 +28,7 @@ be somewhere under your home directory (`$HOME`), and the folder is created if i
 cluv init ~/my-project
 ```
 This adds a `[tool.cluv]` section to your `pyproject.toml` and job script templates in
-`scripts/`. It only creates what's missing, so it's safe to re-run. 
+`scripts/`. It only creates what's missing, so it's safe to re-run.
 
 **Read the output carefully**: every warning points to something you'll probably want to fix in the next section.
 

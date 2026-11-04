@@ -1,6 +1,6 @@
 # cluv
 
-cluv — sync and submit UV-based Python projects across HPC clusters.
+Sync and submit UV-based Python projects across HPC clusters.
 
 ## Requirements
 
@@ -32,15 +32,6 @@ If you want the bleeding edge version from GitHub, use:
 
 ```bash
 uv add git+https://github.com/mila-iqia/cluv
-```
-
-Then you can run `cluv` directly as a command:
-
-```bash
-cluv init
-cluv login mila
-cluv sync mila
-cluv submit mila job.sh
 ```
 
 ## Documentation

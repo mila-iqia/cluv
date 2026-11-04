@@ -6,6 +6,7 @@ edit_uri: edit/master/docs/
 
 nav:
   - Home: index.md
+  - Getting started: getting-started.md
   - Hydra launcher: hydra-launcher.md
   - Commands: commands.md
   - Troubleshooting: troubleshooting.md

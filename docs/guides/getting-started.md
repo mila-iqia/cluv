@@ -37,7 +37,7 @@ steps below to adapt it to your access and your workload.
 
 The config has two levels: settings in `[tool.cluv]` apply to every cluster, and each
 `[tool.cluv.clusters.<name>]` table can override them for one cluster. See the
-[Config reference](reference/config.md) for every option.
+[Config reference](../reference/config.md) for every option.
 
 ### Keep only your clusters
 
@@ -175,8 +175,7 @@ command you pass after `--` with `uv run`:
   `cluv submit`. Runs directly from the synced project folder. Good for short and simple jobs that
   start quickly.
 - **`safe_job.sh`**: clones the exact commit you submitted into `$SLURM_TMPDIR` before running, so
-  a later `cluv sync` can't change the code under a job that is still queued. Prefer this one for
-  long-queued or long-running jobs.
+  a later `cluv sync` can't change the code under a job that is still queued.
 
 Keep these two as simple references. When your jobs need something more specific (more resources,
 modules, setup steps, ...), add a new job script rather than editing them. Make sure it forwards its
@@ -231,6 +230,8 @@ cluv sync                          # Copy the results back into `logs/` (once th
 
 ## Next steps
 
+- [ImageNet example](https://github.com/mila-iqia/cluv/tree/master/examples/imagenet): a
+  complete multi-node, multi-GPU training project, ready to run on every cluster.
 - [Configuring job submission](submit/config.md): merge rules, multiple job configurations,
   and what cluv injects into every job.
 - [Racing clusters with `cluv submit first`](submit/racing-clusters.md).

@@ -64,11 +64,11 @@ Available for all commands.
 Initialize a cluv project.
 
 If the project already have a `pyproject.toml` file, it will add a `[tool.cluv]` section to the file.
+If not, it will create one with [`uv init`](https://docs.astral.sh/uv/reference/cli/#uv-init) and
+add a `[tool.cluv]` section.
 
-If the project does not have a `pyproject.toml` file, it will create one with [`uv init`](https://docs.astral.sh/uv/reference/cli/#uv-init)
-and add a `[tool.cluv]` section.
-
-Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to `$SCRATCH/logs/<project_name>`.
+Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to
+`$SCRATCH/logs/<project_name>`.
 
 Default project structure after [`cluv init`](#cluv-init) (if the project didn't already exist):
 ```

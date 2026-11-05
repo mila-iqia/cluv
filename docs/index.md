@@ -123,10 +123,12 @@ cluv sh -- squeue --me
         clean(<b>cluv clean</b> <br> Clean old logs on clusters)
         run(<b>cluv run</b> <br> Run commands on clusters)
         sh(<b>cluv sh</b> <br> Run raw shell commands on clusters)
+        doctor(<b>cluv doctor</b> <br> Diagnose setup issues)
 
         init ===> login
         init ==> disable
         init ==> enable
+        init ==> doctor
 
         login ===> sync
         login ===> submit
@@ -145,4 +147,5 @@ cluv sh -- squeue --me
         click clean "commands/#cluv-clean"
         click run "commands/#cluv-run"
         click sh "commands/#cluv-sh"
+        click doctor "commands/#cluv-doctor"
 ```

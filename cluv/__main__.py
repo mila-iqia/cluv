@@ -314,6 +314,21 @@ def add_sync_args(subparsers: Subparsers):
         default=True,
         help="Push datasets from data_source to each cluster. Requires data_source in config.",
     )
+    extras_group = sync_parser.add_mutually_exclusive_group()
+    extras_group.add_argument(
+        "--extra",
+        dest="extras",
+        action="append",
+        default=None,
+        metavar="<extra>",
+        help="Passed to `uv sync --extra` on each cluster.",
+    )
+    extras_group.add_argument(
+        "--all-extras",
+        dest="all_extras",
+        action="store_true",
+        help="Passed to `uv sync --all-extras` on each cluster.",
+    )
     # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
     # sync_parser.add_argument(
     #     "--",

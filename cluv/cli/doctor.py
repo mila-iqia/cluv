@@ -8,6 +8,11 @@ import fnmatch
 from enum import Enum
 from pathlib import PurePosixPath
 
+from rich.console import Group
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
 from cluv.cache import get_disabled_clusters
 from cluv.cli.disable import format_remaining
 from cluv.cli.sync import remote_test
@@ -20,10 +25,14 @@ __all__ = ["doctor"]
 
 
 class Status(Enum):
-    OK = "[green]✔[/green]"
-    WARN = "[yellow]![/yellow]"
-    FAIL = "[red]✘[/red]"
-    SKIP = "[dim]-[/dim]"
+    OK = ("✔", "green")
+    WARN = ("!", "yellow")
+    FAIL = ("✘", "red")
+    SKIP = ("-", "dim")
+
+    @property
+    def icon(self) -> Text:
+        return Text(self.value[0], style=f"bold {self.value[1]}")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -32,26 +41,57 @@ class Check:
     message: str
     hint: str = ""
 
-    def __str__(self) -> str:
-        return f"  {self.status.value} {self.message}" + (f" → {self.hint}" if self.hint else "")
-
 
 async def doctor(clusters: list[str]) -> None:
     """Run checks on each cluster and suggest fixes for the ones that fail."""
     config = get_cluv_config()
     clusters = clusters or config.clusters_names
-    results = await asyncio.gather(*(check_cluster(config, cluster) for cluster in clusters))
+    with console.status(f"Checking {len(clusters)} cluster(s)..."):
+        results = await asyncio.gather(*(check_cluster(config, c) for c in clusters))
 
     for cluster, checks in zip(clusters, results):
-        console.print(f"[bold]{cluster}[/bold]")
-        if all(check.status is Status.OK for check in checks):
-            console.print(f"  {Status.OK.value} all checks passed")
-            continue
-        for check in checks:
-            console.print(str(check))
+        console.print(cluster_panel(cluster, checks))
 
-    if any(check.status is Status.FAIL for checks in results for check in checks):
+    worst = [worst_status(checks) for checks in results]
+    summary = Text.assemble(
+        (f"{worst.count(Status.OK)} healthy", "green"),
+        "  ·  ",
+        (f"{worst.count(Status.WARN)} with warnings", "yellow"),
+        "  ·  ",
+        (f"{worst.count(Status.FAIL)} failing", "red"),
+    )
+    console.rule(summary)
+    if Status.FAIL in worst:
         raise SystemExit(1)
+
+
+def worst_status(checks: list[Check]) -> Status:
+    statuses = {check.status for check in checks}
+    return next((s for s in (Status.FAIL, Status.WARN) if s in statuses), Status.OK)
+
+
+def cluster_panel(cluster: str, checks: list[Check]) -> Panel:
+    worst = worst_status(checks)
+    counts = Text("  ").join(
+        Text.assemble(status.icon, f" {n}")
+        for status in Status
+        if (n := sum(check.status is status for check in checks))
+    )
+    title = Text.assemble((cluster, "bold"), "  ", counts)
+
+    if worst is Status.OK:
+        body = Text.assemble(Status.OK.icon, f" all {len(checks)} checks passed")
+    else:
+        body = Table.grid(padding=(0, 1))
+        body.add_column(width=1)
+        body.add_column()
+        for check in checks:
+            message = Text(check.message, style="dim" if check.status is Status.SKIP else "")
+            if check.hint:
+                message = Group(message, Text(f"→ {check.hint}", style="dim italic"))
+            body.add_row(check.status.icon, message)
+
+    return Panel(body, title=title, title_align="left", border_style=worst.value[1])
 
 
 async def check_cluster(config: CluvConfig, cluster: str) -> list[Check]:

@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import dataclasses
 import datetime
+import functools
 import itertools
 import logging
 import os
@@ -21,12 +22,17 @@ import rich.text
 from rich.live import Live
 
 from cluv.cache import Job, Submission, get_submission_log_dir, save_job
+from cluv.cli.submit_utils import dry_run
 from cluv.cli.submit_utils.chunking import apply_chunking
 from cluv.cli.submit_utils.vram import expand_for_vram
 from cluv.cli.sync import (
+    CLUSTERS_SHARING_A_FILESYSTEM,
+    _remotes_to_actually_sync,
     get_cluster_to_remote,
+    run_git_push_if_needed,
     sync_common_part,
     sync_per_cluster_part,
+    update_project_checkout,
 )
 from cluv.config import ClusterConfig, find_pyproject, get_cluv_config
 from cluv.remote import Remote, command_log_files, run
@@ -166,6 +172,7 @@ async def submit(
     sync_datasets: bool = True,
     fetch_results: bool = True,
     parsable: bool = False,
+    test_only: bool = False,
 ) -> Job | None:
     """Submit a job to the given cluster (or all clusters if `cluster=="first"`),
     and return the Job object if successful.
@@ -177,6 +184,11 @@ async def submit(
     is 'first') to stdout, for programmatic use, instead of the usual human-readable summary.
     Everything else (logs, the live jobs table, command outputs) is silenced, as with `--quiet`.
 
+    If `test_only` is True, nothing is submitted, committed or recorded: the current commit is
+    pushed and pulled on each cluster (only that part of the sync), then `sbatch --test-only` is
+    run there for every job configuration that would have been submitted, and a table of the
+    estimated start times (or why a configuration couldn't be tested or was rejected) is printed.
+
     Returns None if the submission failed.
     """
     # `--parsable` promises that stdout carries nothing but the job id. `--quiet` already suppresses
@@ -184,6 +196,16 @@ async def submit(
     # `cluv.remote.run`, which check `console.quiet` too), so it is all this needs to do.
     if parsable:
         console.quiet = True
+    if test_only:
+        await submit_test_only(
+            cluster,
+            job_script=job_script,
+            sbatch_args=sbatch_args,
+            program_args=program_args,
+            chunking=chunking,
+            vram=vram,
+        )
+        return None
     submit_command = build_submit_command(
         cluster=cluster, job_script=job_script, sbatch_args=sbatch_args, program_args=program_args
     )
@@ -298,6 +320,119 @@ async def submit(
 
     save_job(job)
     return job
+
+
+async def submit_test_only(
+    cluster: typing.Literal["first"] | str | list[str],
+    *,
+    job_script: Path | None,
+    sbatch_args: list[str],
+    program_args: list[str],
+    chunking: int | None,
+    vram: str | None,
+) -> list[dry_run.TestOnlyResult]:
+    """`cluv submit --test-only`: push the current commit, pull it on each cluster, and run
+    `sbatch --test-only` there, the way `cluv submit` would run `sbatch` (same directory, same
+    job script, same environment variables).
+
+    A configuration that can't be tested gets a rejected row saying why: the cluster isn't
+    configured, `git push` failed (every row), or `git pull` failed on that cluster (its rows).
+    """
+    if subprocess.getoutput("git status --porcelain").strip():
+        console.log(
+            "[yellow]There are uncommitted changes: the clusters get the last commit, without "
+            "them.[/yellow]"
+        )
+    git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+    cluster_to_remote = await get_cluster_to_remote(cluster)
+    submissions: list[Submission] = []
+    not_tested: list[dry_run.TestOnlyResult] = []
+    for cluster_name, remote in cluster_to_remote.items():
+        try:
+            submissions += await get_submissions(
+                cluster=cluster_name,
+                remote=remote,
+                job_script=job_script,
+                sbatch_args=sbatch_args,
+                program_args=program_args,
+                chunking=chunking,
+                vram=vram,
+                git_commit=git_commit,
+                test_only=True,
+            )
+        except ValueError as err:
+            # E.g. no job script for this cluster: a rejected row, not a crash that
+            # hides the other clusters' forecasts (`cluv submit first --test-only`).
+            not_tested.append(
+                dry_run.TestOnlyResult(cluster=cluster_name, config="-", error=str(err))
+            )
+
+    try:
+        await run_git_push_if_needed()
+    except Exception as err:
+        error = f"git push failed: {_command_error(err)}"
+        return await dry_run.test_only([], [*not_tested, *map(_untested(error), submissions)])
+
+    pull_errors = await _pull_on_clusters([s.remote for s in submissions if s.remote is not None])
+    to_test: list[Submission] = []
+    for submission in submissions:
+        if (error := pull_errors.get(submission.cluster)) is not None:
+            not_tested.append(_untested(f"git pull failed: {error}")(submission))
+        else:
+            to_test.append(submission)
+    return await dry_run.test_only(to_test, not_tested)
+
+
+def _untested(error: str) -> functools.partial[dry_run.TestOnlyResult]:
+    """Makes the rejected row of a submission that couldn't be tested, with this error."""
+    return functools.partial(_untested_row, error)
+
+
+def _untested_row(error: str, submission: Submission) -> dry_run.TestOnlyResult:
+    return dry_run.TestOnlyResult(
+        cluster=submission.cluster,
+        config=dry_run.describe_config(submission.sbatch_args),
+        error=error,
+    )
+
+
+async def _pull_on_clusters(remotes: list[Remote]) -> dict[str, str]:
+    """Update the project's checkout on these clusters, once per filesystem, in parallel.
+
+    Returns the error message of each cluster where that failed (a cluster sharing its filesystem
+    with one that failed gets the same error).
+    """
+    unique = list({remote.hostname: remote for remote in remotes}.values())
+    to_pull = _remotes_to_actually_sync(unique)
+    outcomes = await asyncio.gather(
+        *(update_project_checkout(remote) for remote in to_pull), return_exceptions=True
+    )
+    errors = {
+        remote.hostname: _command_error(outcome)
+        for remote, outcome in zip(to_pull, outcomes)
+        if isinstance(outcome, BaseException)
+    }
+    for remote in unique:
+        group = next((g for g in CLUSTERS_SHARING_A_FILESYSTEM if remote.hostname in g), ())
+        for other in group:
+            if other in errors:
+                errors.setdefault(remote.hostname, errors[other])
+    return errors
+
+
+def _command_error(err: BaseException) -> str:
+    """The useful part of a failed command's exception: its stderr if there is any.
+
+    >>> _command_error(subprocess.CalledProcessError(1, "git pull", stderr="fatal: no\\n"))
+    'fatal: no'
+    >>> _command_error(RuntimeError("boom"))
+    'boom'
+    """
+    stderr = getattr(err, "stderr", None)
+    if isinstance(stderr, bytes):
+        stderr = stderr.decode(errors="replace")
+    lines = [line.strip() for line in (stderr or str(err)).splitlines() if line.strip()]
+    return "; ".join(lines) or type(err).__name__
 
 
 async def wait_for_first_running_job(
@@ -550,6 +685,7 @@ async def get_submissions(
     chunking: int | None,
     git_commit: str,
     vram: str | None = None,
+    test_only: bool = False,
 ) -> list[Submission]:
     """Expand the possible job configurations for a cluster. Returns a list of `Submission` objects.
 
@@ -557,7 +693,8 @@ async def get_submissions(
     `[tool.cluv.clusters.<name>].sbatch_args`), times one per compatible GPU type when `vram`
     is set (see `expand_for_vram`).
 
-    Does *not* do the actual job submission with `sbatch`.
+    Does *not* do the actual job submission with `sbatch`. With `test_only`, the submissions'
+    `sbatch_command` runs `sbatch --test-only` instead (see `get_sbatch_command`).
     """
     submissions: list[Submission] = []
     config = get_cluv_config()
@@ -608,6 +745,7 @@ async def get_submissions(
                 sbatch_args=expanded_resources,
                 program_args=program_args,
                 project_dir_on_cluster=cluster_config.project_dir,
+                test_only=test_only,
             )
             submissions.append(
                 Submission(
@@ -809,8 +947,14 @@ def get_sbatch_command(
     program_args: list[str],
     env_vars: dict[str, str],
     project_dir_on_cluster: PurePosixPath | None = None,
+    test_only: bool = False,
 ) -> str:
-    """Generate the command to submit the job via `sbatch` on the cluster."""
+    """Generate the command to submit the job via `sbatch` on the cluster.
+
+    With `test_only`, the same command runs `sbatch --test-only` instead, which submits nothing:
+    `--verbose` makes it print the options it parsed (see `dry_run.total_resources`) and `TZ=UTC`
+    the start time in UTC (see `dry_run.parse_test_only_output`).
+    """
     if job_script.is_absolute():
         raise RuntimeError(
             f"The job script path {str(job_script)!r} is an absolute path on this machine, but it "
@@ -852,8 +996,9 @@ def get_sbatch_command(
     if project_dir_on_cluster:
         cd_command = f"cd {project_dir_on_cluster} && "
     # Double-quote the flags: `$VAR` still gets expanded, but a `|`, `&` or space stays literal.
+    sbatch = "TZ=UTC sbatch --verbose --test-only" if test_only else "sbatch --parsable"
     inner_command = (
-        f"{env_vars_prefix}{cd_command}sbatch --parsable "
+        f"{env_vars_prefix}{cd_command}{sbatch} "
         f"{' '.join(map(double_quote, sbatch_flags))} {job_script} {shlex.join(program_args)}"
     )
     return f"bash --login -c {shlex.quote(inner_command)}"

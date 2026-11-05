@@ -258,6 +258,17 @@ def add_submit_args(subparsers: Subparsers):
         ),
     )
     submit_parser.add_argument(
+        "--test-only",
+        dest="test_only",
+        action="store_true",
+        help=(
+            "Don't submit anything: run `sbatch --test-only` for every job configuration that "
+            "would be submitted (each cluster, allocation and --vram GPU type) and show when "
+            "Slurm estimates each would start, or why it is rejected. Nothing is synced or "
+            "committed: the job script is sent to sbatch on stdin."
+        ),
+    )
+    submit_parser.add_argument(
         "sbatch_args",
         nargs=argparse.REMAINDER,
         metavar="...",

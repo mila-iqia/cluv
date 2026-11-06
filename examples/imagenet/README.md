@@ -29,8 +29,8 @@ A real run needs the ILSVRC2012 archives (`ILSVRC2012_img_train.tar`, `ILSVRC201
 (`/network/datasets/imagenet`) and fir (`$HOME/projects/rrg-bengioy-ad/data/curated/imagenet`)
 already have a shared copy that `datasets_path` points at; anywhere else you have to put them in
 `$SCRATCH/datasets/imagenet` yourself. `cluv sync` copies datasets _through the machine you submit
-from_, so use `cluv sync --no-sync-datasets` on the clusters that already have a copy rather than
-routing 150GB through your laptop.
+from_. It doesn't copy them to mila, the cluster in `data_source`, but for the other clusters that
+already have a copy, use `cluv sync --no-sync-datasets` rather than routing 150GB through your laptop.
 
 Extracting ImageNet into `$SLURM_TMPDIR` takes 10-15 minutes, which is why the real run above trains
 on a subset to fit the 1h limit from the config. For real training, ask for more time - the flags are

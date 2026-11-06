@@ -238,31 +238,11 @@ async def sync_per_cluster_part(
     cluster = remote.hostname
     config = get_cluv_config()
     cluster_config = config.get_cluster_config(cluster)
-
-    project_path = cluster_config.project_dir
-    if project_path is None:
-        local_project_dir = find_pyproject().parent
-        if not local_project_dir.is_relative_to(Path.home()):
-            raise RuntimeError(
-                f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
-                f"project root ({local_project_dir}) is not under $HOME. "
-                f"Please set `cluv.project_dir` in the Cluv config section of pyproject.toml."
-            )
-        project_path = PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
-    project_path = await expandvars(remote, project_path)
-
+    project_path = await get_project_path_on_cluster(remote)
     project_state = read_cache().project_states.get(cluster) or ProjectStateOnCluster()
 
     def _save():
-        # Re-read the cache right before writing, instead of reusing the snapshot read at the
-        # top of this function: multiple clusters' sync_per_cluster_part calls run concurrently
-        # in the same event loop, each starting from its own initial read, so writing back a
-        # stale full snapshot would clobber other clusters' updates. read_cache/write_cache are
-        # synchronous (no `await` in between), so this merge-and-write is atomic with respect to
-        # the other concurrently-running cluster tasks.
-        cache = read_cache()
-        cache.project_states[cluster] = project_state
-        write_cache(cache)
+        save_project_state(cluster, project_state)
 
     await install_uv(remote, project_state)
     _save()
@@ -314,6 +294,47 @@ async def sync_per_cluster_part(
         _save()
 
     return new_runs
+
+
+async def get_project_path_on_cluster(remote: Remote) -> PurePosixPath:
+    """Where the project lives on this cluster: its `project_dir`, or the same path relative to
+    $HOME as here."""
+    cluster = remote.hostname
+    project_path = get_cluv_config().get_cluster_config(cluster).project_dir
+    if project_path is None:
+        local_project_dir = find_pyproject().parent
+        if not local_project_dir.is_relative_to(Path.home()):
+            raise RuntimeError(
+                f"Project path is not set for cluster {cluster!r} in the Cluv config, and the "
+                f"project root ({local_project_dir}) is not under $HOME. "
+                f"Please set `cluv.project_dir` in the Cluv config section of pyproject.toml."
+            )
+        project_path = PurePosixPath("$HOME") / local_project_dir.relative_to(Path.home())
+    return await expandvars(remote, project_path)
+
+
+def save_project_state(cluster: str, project_state: ProjectStateOnCluster) -> None:
+    """Write one cluster's project state to the cache.
+
+    Re-reads the cache right before writing, instead of reusing an earlier snapshot: several
+    clusters' syncs run concurrently in the same event loop, so writing back a stale full snapshot
+    would clobber the other clusters' updates. read_cache/write_cache are synchronous (no `await`
+    in between), so this merge-and-write is atomic with respect to the other cluster tasks.
+    """
+    cache = read_cache()
+    cache.project_states[cluster] = project_state
+    write_cache(cache)
+
+
+async def update_project_checkout(remote: Remote) -> None:
+    """Only the git part of `sync_per_cluster_part`: clone the project on the cluster, or check
+    out and pull the current branch there (skipped if the cache says it's already at the current
+    commit). No uv, `uv sync`, results or datasets. Used by `cluv submit --test-only`, so that
+    `sbatch --test-only` reads the job script the job would get."""
+    project_state = read_cache().project_states.get(remote.hostname) or ProjectStateOnCluster()
+    project_path = await get_project_path_on_cluster(remote)
+    await clone_project(remote, project_path=project_path, project_state=project_state)
+    save_project_state(remote.hostname, project_state)
 
 
 async def expandvars(remote: Remote, path: str | PurePosixPath) -> PurePosixPath:

@@ -224,6 +224,15 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 :   Print only the job ID (or `<cluster>:<job_id>` when `cluster` is `first`) on stdout, for use in
     scripts. Everything else (logs, the live jobs table) is silenced, as with `--quiet`.
 
+`--test-only`
+:   Submit nothing. Run `sbatch --test-only` for every job configuration `cluv submit` would have
+    submitted (each cluster, each allocation in `sbatch_args`, each GPU type with `--vram`) and
+    print a table of when Slurm estimates each would start (nodes, partition), or why it rejects
+    it. Exits with status 1 if any configuration is rejected, so it can gate a CI job.
+
+    Nothing is synced, committed or recorded: the local job script is piped to `sbatch` on stdin,
+    so it doesn't need to exist on the cluster. Program arguments (after `--`) are ignored.
+
 ---
 
 ## [`cluv clean`](#cluv-clean)

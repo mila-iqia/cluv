@@ -538,6 +538,7 @@ async def clone_project(
 
         # Set the checked out commit for that project on that cluster. This will be written to the
         # cache to avoid unnecessary syncs later.
+        await _update_submodules(remote, cluster_repo_dir, gitenv)
         project_state.checked_out_git_commit = current_git_commit
         return
 
@@ -562,6 +563,7 @@ async def clone_project(
             hide=False,
             env=gitenv,
         )
+        await _update_submodules(remote, cluster_repo_dir, gitenv)
         project_state.checked_out_git_commit = current_git_commit
         return
 
@@ -595,6 +597,7 @@ async def clone_project(
             hide=False,
             env=gitenv,
         )
+        await _update_submodules(remote, cluster_repo_dir, gitenv)
         project_state.checked_out_git_commit = current_git_commit
         return
 
@@ -613,7 +616,19 @@ async def clone_project(
         hide=False,
         env=gitenv,
     )
+    await _update_submodules(remote, cluster_repo_dir, gitenv)
     project_state.checked_out_git_commit = current_git_commit
+
+
+async def _update_submodules(remote: Remote, repo_dir: PurePosixPath, gitenv: dict[str, str]):
+    """Checks out the submodules (recursively) at the commits recorded in the checked-out commit.
+
+    Without this, `uv sync` fails on projects with path dependencies inside submodules. This is a
+    no-op in repos without submodules.
+    """
+    await remote.run(
+        f"git -C {repo_dir} submodule update --init --recursive", hide=False, env=gitenv
+    )
 
 
 async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):

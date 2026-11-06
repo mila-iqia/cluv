@@ -440,13 +440,8 @@ def _is_github_pr_ref(github_ref: str) -> bool:
 
 async def clone_project(
     remote: Remote, project_path: PurePosixPath, project_state: ProjectStateOnCluster
-):
-    """Setup the project repo on all the remote clusters.
-
-    New idea:
-    - Assume GitHub. Push to GitHub if needed. Clone from github on the remotes.
-    - Worry about authentication later, just raise an error if need be for now.
-    """
+) -> None:
+    """Setup the project repo on all the remote clusters."""
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
 
     # In the case of a subproject (like the examples in the cluv repo), these are different!
@@ -529,60 +524,63 @@ async def clone_project(
     # repo root, since the project subdir might not exist on the main/master branch!
     await remote.run(f"git -C {cluster_repo_dir} fetch --all --prune", hide=True, env=gitenv)
 
+    # From the GitHub docs:
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/variables
+    #     GITHUB_HEAD_REF: "The head ref or source branch of the pull request in a workflow run.
+    #      This property is only set when the event that triggers a workflow run is either
+    #      pull_request or pull_request_target. For example, feature-branch-1."
+    github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
+
     if not detached_head:
         # Simplest case. We're on a branch, life is good.
         await remote.run(
             f"git -C {cluster_repo_dir} checkout {current_git_branch}", hide=False, env=gitenv
         )
         await remote.run(f"git -C {cluster_repo_dir} pull", hide=False, env=gitenv)
-
-        # Set the checked out commit for that project on that cluster. This will be written to the
-        # cache to avoid unnecessary syncs later.
-        await _update_submodules(remote, cluster_repo_dir, gitenv)
-        project_state.checked_out_git_commit = current_git_commit
-        return
-
-    # Detached head (not on a branch), for example in a CI run on GitHub (pull request/push/release)
-
-    github_head_ref = os.environ.get("GITHUB_HEAD_REF", "").strip()
-    # Quote in case there are spaces or other weird characters perhaps embedded in the branch name,
-    # to avoid command injection vulnerabilities. We also check for some weird characters in the
-    # branch name later on, but this is just in case.
-    github_head_ref = shlex.quote(github_head_ref)
-
-    # From the GitHub docs:
-    # https://docs.github.com/en/actions/reference/workflows-and-actions/variables
-    #     GITHUB_HEAD_REF: "The head ref or source branch of the pull request in a workflow run.
-    #      This property is only set when the event that triggers a workflow run is either
-    #      pull_request or pull_request_target. For example, feature-branch-1."
-
-    if not github_head_ref:
-        # Push on master, for example after merging a PR.
+    elif not github_head_ref:
+        # Detached head with no PR branch: either a CI push on master (for example right after
+        # merging a PR), or someone checked out a commit locally. Just detach at that exact commit.
         await remote.run(
             f"git -C {cluster_repo_dir} checkout --detach {current_git_commit}",
             hide=False,
             env=gitenv,
         )
-        await _update_submodules(remote, cluster_repo_dir, gitenv)
-        project_state.checked_out_git_commit = current_git_commit
-        return
+    else:
+        # Detached head with GITHUB_HEAD_REF set: a GitHub CI run on a pull request.
+        await _checkout_github_ci_head(
+            remote, cluster_repo_dir, gitenv, git_remote_name, github_head_ref
+        )
 
-    # GITHUB_HEAD_REF is set, because we're in a pull request CI run.
+    # Set the checked out commit for that project on that cluster. This will be written to the
+    # cache to avoid unnecessary syncs later.
+    await _update_submodules(remote, cluster_repo_dir, gitenv)
+    project_state.checked_out_git_commit = current_git_commit
+
+
+async def _checkout_github_ci_head(
+    remote: Remote,
+    cluster_repo_dir: PurePosixPath,
+    gitenv: dict[str, str],
+    git_remote_name: str,
+    github_head_ref: str,
+) -> None:
+    """Checks out the branch GITHUB_HEAD_REF points to, for a detached-head GitHub CI run."""
     if (
         not re.fullmatch(r"[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*", github_head_ref)
         or ".." in github_head_ref
     ):
         raise RuntimeError(f"Invalid GITHUB_HEAD_REF value: {github_head_ref!r}")
+    # Quote in case there are spaces or other weird characters perhaps embedded in the branch name,
+    # to avoid command injection vulnerabilities. We also check for some weird characters in the
+    # branch name above, but this is just in case.
+    github_head_ref = shlex.quote(github_head_ref)
 
+    # The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
+    # Unlike the PR head branch, this ref exists on the base repo even when the PR comes
+    # from a fork, so the project clones on the clusters can fetch it from their remote.
+    # GitHub docs: "The fully-formed ref of the branch or tag that triggered the workflow run."
     github_ref = os.environ.get("GITHUB_REF", "").strip()
     github_ref = shlex.quote(github_ref)
-    """The PR ref on the base repo (e.g. 'refs/pull/72/merge') when run by GitHub Actions for a PR.
-
-    Unlike the PR head branch, this ref exists on the base repo even when the PR comes
-    from a fork, so the project clones on the clusters can fetch it from their remote.
-
-    GitHub docs: "The fully-formed ref of the branch or tag that triggered the workflow run."
-    """
 
     if _is_github_pr_ref(github_ref):
         # The head branch of a PR from a fork doesn't exist on the base repo, so
@@ -597,8 +595,6 @@ async def clone_project(
             hide=False,
             env=gitenv,
         )
-        await _update_submodules(remote, cluster_repo_dir, gitenv)
-        project_state.checked_out_git_commit = current_git_commit
         return
 
     # GITHUB_REF was not a PR ref, so it could be a release or a tag? Or a branch that exists on the
@@ -616,8 +612,6 @@ async def clone_project(
         hide=False,
         env=gitenv,
     )
-    await _update_submodules(remote, cluster_repo_dir, gitenv)
-    project_state.checked_out_git_commit = current_git_commit
 
 
 async def _update_submodules(remote: Remote, repo_dir: PurePosixPath, gitenv: dict[str, str]):

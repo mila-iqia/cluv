@@ -46,6 +46,8 @@ CLUSTERS_SHARING_A_FILESYSTEM: list[frozenset[str]] = [
 async def sync(
     clusters: list[str] | None = None,
     sync_datasets: bool = True,
+    extras: list[str] | None = None,
+    all_extras: bool = False,
 ) -> list[Remote]:
     """Synchronizes the current project across clusters.
 
@@ -58,6 +60,9 @@ async def sync(
         clusters: List of SSH hostnames of the target clusters. If empty, will attempt to sync
             with all clusters in the config that we have an active SSH connection to.
         sync_datasets: Whether to pull/push datasets from/to `data_source` as part of the sync.
+        extras: Optional-dependency groups (extras) to install, passed as `--extra` to the
+            `uv sync` run on each cluster.
+        all_extras: Pass `--all-extras` to the `uv sync` run on each cluster.
 
     Returns:
         A list of Remote objects corresponding to the clusters that were synced with.
@@ -102,7 +107,12 @@ async def sync(
         f"{[remote.hostname for remote in remotes]}"
     )
     await asyncio.gather(
-        *(sync_per_cluster_part(remote, sync_datasets=sync_datasets) for remote in remotes_to_sync)
+        *(
+            sync_per_cluster_part(
+                remote, sync_datasets=sync_datasets, extras=extras, all_extras=all_extras
+            )
+            for remote in remotes_to_sync
+        )
     )
     return remotes
 
@@ -222,11 +232,16 @@ async def sync_common_part(remotes: list[Remote], sync_datasets: bool = True) ->
 
 
 async def sync_per_cluster_part(
-    cluster_remote: Remote | None, sync_datasets: bool = True, sync_results: bool = True
+    cluster_remote: Remote | None,
+    sync_datasets: bool = True,
+    sync_results: bool = True,
+    extras: list[str] | None = None,
+    all_extras: bool = False,
 ) -> list[Path]:
-    """Sync steps specific to one cluster: install uv, clone/update the project, `uv sync`,
-    create the results dir and its `<project>/<results_symlink>` link, fetch back new results
-    (unless `sync_results` is False), and push datasets to the cluster if needed.
+    """Sync steps specific to one cluster: install uv, clone/update the project, `uv sync`
+    (with `extras` / `all_extras` passed on as `--extra` / `--all-extras`), create the results
+    dir and its `<project>/<results_symlink>` link, fetch back new results (unless
+    `sync_results` is False), and push datasets to the cluster if needed.
 
     Does nothing (and returns an empty list) when `cluster_remote` is None (the current
     cluster), since there's nothing to sync to it.
@@ -271,7 +286,12 @@ async def sync_per_cluster_part(
     _save()
 
     await run_uv_sync(
-        remote, project_path, project_state, uv_cache_dir=cluster_config.env.get("UV_CACHE_DIR")
+        remote,
+        project_path,
+        project_state,
+        uv_cache_dir=cluster_config.env.get("UV_CACHE_DIR"),
+        extras=extras,
+        all_extras=all_extras,
     )
     _save()
 
@@ -334,10 +354,18 @@ async def run_uv_sync(
     project_path: PurePosixPath,
     project_state: ProjectStateOnCluster,
     uv_cache_dir: str | None = None,
+    extras: list[str] | None = None,
+    all_extras: bool = False,
 ):
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+    extras_flags = _uv_sync_extras_flags(extras, all_extras)
 
-    if project_state.last_uv_sync_git_commit == current_git_commit:
+    # `uv sync` is exact: it also *removes* extras that aren't requested. So a sync with different
+    # extras than last time must run again even if the commit didn't change.
+    if (
+        project_state.last_uv_sync_git_commit == current_git_commit
+        and (project_state.last_uv_sync_extras_flags or "") == extras_flags
+    ):
         logger.info(
             f"uv sync was already run for the current commit ({current_git_commit}) on "
             f"{remote.hostname}. Skipping uv sync."
@@ -364,9 +392,18 @@ async def run_uv_sync(
     # the job will actually read from gets populated either way.
     reinstall_flag = " --reinstall" if uv_cache_dir else ""
     await remote.run(
-        f"bash --login -c '{env_prefix}uv --directory={project_path} sync --quiet{reinstall_flag}'"
+        f"bash --login -c '{env_prefix}uv --directory={project_path} sync --quiet"
+        f"{reinstall_flag}{extras_flags}'"
     )
     project_state.last_uv_sync_git_commit = current_git_commit
+    project_state.last_uv_sync_extras_flags = extras_flags
+
+
+def _uv_sync_extras_flags(extras: list[str] | None, all_extras: bool) -> str:
+    """The `--extra`/`--all-extras` flags to append to the `uv sync` command (with a leading
+    space), or an empty string when there are none. `uv sync` itself checks them."""
+    flags = "".join(f" --extra {extra}" for extra in extras or [])
+    return flags + (" --all-extras" if all_extras else "")
 
 
 async def install_uv(remote: Remote, project_state: ProjectStateOnCluster):

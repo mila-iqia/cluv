@@ -167,6 +167,13 @@ class CluvConfig(BaseModel):
     def clusters_names(self) -> list[str]:
         return list(self.clusters.keys())
 
+    @property
+    def data_source_cluster(self) -> str | None:
+        """The cluster in `data_source`, or None if `data_source` is unset or a local path."""
+        if self.data_source and ":" in self.data_source:  # "[cluster:]path" (POSIX-only tool)
+            return self.data_source.partition(":")[0]
+        return None
+
     def get_cluster_config(self, cluster: str) -> ClusterConfig:
         """Returns the cluster config for a specific cluster.
 
@@ -248,12 +255,10 @@ def current_cluster_config() -> ClusterConfig[Path] | None:
         return None  # not on a cluster.
     cluv_config = get_cluv_config()
     cluster_config = cluv_config.get_cluster_config(cluster)
-    data_source = cluv_config.data_source
-    if data_source:
-        source_cluster, _, data_path = data_source.partition(":")
-        if cluster == source_cluster:
-            # use the dataset path from the data_source setting as the datasets_path.
-            cluster_config = dataclasses.replace(cluster_config, datasets_path=Path(data_path))
+    if cluv_config.data_source and cluster == cluv_config.data_source_cluster:
+        # use the dataset path from the data_source setting as the datasets_path.
+        data_path = cluv_config.data_source.partition(":")[2]
+        cluster_config = dataclasses.replace(cluster_config, datasets_path=Path(data_path))
     return dataclasses.replace(  # type: ignore
         cluster_config,
         **{

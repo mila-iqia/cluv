@@ -111,17 +111,17 @@ async def pull_datasets_if_needed(here: str | None, config: CluvConfig, all_remo
     with set_context(console_lock, asyncio.Lock()):
         if (
             config.data_source
-            and ":" in config.data_source  # "[cluster:]path" (POSIX-only tool)
-            and (source_cluster := config.data_source.split(":", 1)[0]) != here
+            and (source_cluster := config.data_source_cluster)
+            and source_cluster != here
             # Jobs on the source cluster read the data at `data_source` directly, so only pull
             # when another cluster needs a copy of it.
             and any(r.hostname != source_cluster for r in all_remotes)
         ):
-            _source_host, _, source_path = config.data_source.partition(":")
+            source_path = config.data_source.partition(":")[2]
             # Fetch the data from the source cluster and copy it to the local datasets_path.
             source_remote = next(
                 (r for r in all_remotes if r.hostname == source_cluster),
-                await get_remote_without_2fa_prompt(_source_host),
+                await get_remote_without_2fa_prompt(source_cluster),
             )
             if not source_remote:
                 raise RuntimeError(
@@ -301,9 +301,9 @@ async def sync_per_cluster_part(
 
     # Jobs on the source cluster read the data at `data_source` directly (see
     # `current_cluster_config`), so there is nothing to push to it.
-    if sync_datasets and config.data_source and not config.data_source.startswith(f"{cluster}:"):
+    if sync_datasets and config.data_source and config.data_source_cluster != cluster:
         here = current_cluster()
-        if ":" not in config.data_source:
+        if config.data_source_cluster is None:
             # data_source is a local path; use it directly as the source.
             # Note: this tool targets POSIX (Linux/macOS) systems only; Windows drive-letter
             # paths (e.g. C:\...) are not supported.

@@ -115,14 +115,13 @@ async def pull_datasets_if_needed(
     """
     with set_context(console_lock, asyncio.Lock()):
         if (
-            config.data_source
-            and (source_cluster := config.data_source_cluster)
+            (source_cluster := config.data_source_cluster)
+            and (source_path := config.data_source_path)
             and source_cluster != here
             # Jobs on the source cluster read the data at `data_source` directly, so only pull
             # when another target cluster needs a copy of it.
             and any(cluster != source_cluster for cluster in cluster_to_remote)
         ):
-            source_path = config.data_source.partition(":")[2]
             # Fetch the data from the source cluster and copy it to the local datasets_path.
             source_remote = cluster_to_remote.get(source_cluster) or (
                 await get_remote_without_2fa_prompt(source_cluster)

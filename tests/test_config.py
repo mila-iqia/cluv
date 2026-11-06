@@ -426,9 +426,16 @@ ALREADY_IN_ENV = "new-value"
 
 
 @pytest.mark.parametrize(
-    ("data_source", "cluster"),
-    [(None, None), ("/data/imagenet", None), ("mila:/network/datasets/imagenet", "mila")],
+    ("data_source", "cluster", "path"),
+    [
+        (None, None, None),
+        ("/data/imagenet", None, "/data/imagenet"),
+        ("mila:/network/datasets/imagenet", "mila", "/network/datasets/imagenet"),
+    ],
 )
-def test_data_source_cluster(data_source: str | None, cluster: str | None) -> None:
+def test_data_source_cluster_and_path(
+    data_source: str | None, cluster: str | None, path: str | None
+) -> None:
     config = CluvConfig(results_path="logs", data_source=data_source)
     assert config.data_source_cluster == cluster
+    assert config.data_source_path == path

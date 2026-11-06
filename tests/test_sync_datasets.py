@@ -77,7 +77,9 @@ async def test_pull_datasets_only_when_another_cluster_needs_them(
 async def test_push_datasets_except_to_the_source_cluster(
     cluster: str, should_push: bool, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(sync_module, sync_module.current_cluster.__name__, lambda: None)
+    monkeypatch.setattr(
+        sync_module, sync_module.get_datasets_path.__name__, lambda: Path("/local/datasets")
+    )
     monkeypatch.setattr(sync_module, sync_module.read_cache.__name__, CacheContent)
     monkeypatch.setattr(sync_module, sync_module.write_cache.__name__, mock.Mock())
     monkeypatch.setattr(sync_module, sync_module.install_uv.__name__, mock.AsyncMock())

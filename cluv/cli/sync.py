@@ -312,19 +312,17 @@ async def sync_per_cluster_part(
     # Jobs on the source cluster read the data at `data_source` directly (see
     # `current_cluster_config`), so there is nothing to push to it.
     if sync_datasets and config.data_source and config.data_source_cluster != cluster:
-        here = current_cluster()
         if config.data_source_cluster is None:
             # data_source is a local path; use it directly as the source.
             # Note: this tool targets POSIX (Linux/macOS) systems only; Windows drive-letter
             # paths (e.g. C:\...) are not supported.
             local_dataset_path = Path(os.path.expandvars(config.data_source))
         else:
-            local_dataset_path = (
-                config.get_cluster_config(here) if here else config
-            ).datasets_path
+            # Where `pull_datasets_if_needed` put the data, or the `data_source` path itself when
+            # running on the source cluster.
+            local_dataset_path = get_datasets_path()
             if not local_dataset_path:
                 raise RuntimeError("data_source is set, so datasets_path should also be set!")
-            local_dataset_path = Path(os.path.expandvars(str(local_dataset_path)))
         await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
         _save()
 

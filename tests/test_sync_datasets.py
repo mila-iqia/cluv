@@ -12,7 +12,8 @@ from unittest import mock
 
 import pytest
 
-from cluv.config import CluvConfig
+from cluv.cache import ProjectStateOnCluster
+from cluv.config import CluvConfig, PartialClusterConfig
 from cluv.remote import Remote
 
 sync_module = importlib.import_module("cluv.cli.sync")
@@ -63,3 +64,24 @@ async def test_pull_datasets_only_when_another_cluster_needs_them(
     await sync_module.pull_datasets_if_needed(here, config, cluster_to_remote)
 
     assert mock_pull.await_count == (1 if should_pull else 0)
+
+
+async def test_push_datasets_to_a_cluster_without_datasets_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Pushing the data to a cluster that has no `datasets_path` raises an error.
+
+    Without this error, rsync would copy the data to a folder named `None` on that cluster.
+    """
+    # If no error is raised, these mocks keep `mkdir` and `rsync` from reaching narval.
+    monkeypatch.setattr(Remote, "run", mock.AsyncMock())
+    monkeypatch.setattr(sync_module, "run", mock.AsyncMock())
+    config = CluvConfig(
+        results_path="/results",
+        data_source="mila:/network/datasets/imagenet",
+        clusters={"narval": PartialClusterConfig()},
+    )
+    with pytest.raises(RuntimeError, match="datasets_path"):
+        await sync_module._push_datasets_to_remote(
+            tmp_path, Remote(hostname="narval"), config, ProjectStateOnCluster()
+        )

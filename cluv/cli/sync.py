@@ -692,6 +692,12 @@ async def _push_datasets_to_remote(
     local_source: Path, remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
 ):
     """Push dataset from a local path to the remote cluster's datasets_path."""
+    datasets_path = config.get_cluster_config(remote.hostname).datasets_path
+    if not datasets_path:
+        raise RuntimeError(
+            f"`cluv.datasets_path` must be set in the Cluv config section of pyproject.toml to "
+            f"push datasets to {remote.hostname}."
+        )
     last_datasets_dir_edit_time = datetime.datetime.fromtimestamp(local_source.stat().st_mtime)
 
     # Skip if we pushed after the last edit to the local source path.
@@ -703,7 +709,7 @@ async def _push_datasets_to_remote(
             f"changed since. Skipping."
         )
         return
-    datasets_path_template = str(config.get_cluster_config(remote.hostname).datasets_path)
+    datasets_path_template = str(datasets_path)
     resolved_path = (
         await remote.get_output(
             f"bash --login -c 'echo {datasets_path_template}'", hide=True, display=False

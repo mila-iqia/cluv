@@ -1,7 +1,7 @@
 """Tests for the dataset part of `cluv sync`, with a `data_source` on a remote cluster.
 
 Jobs on the source cluster read the data at `data_source` directly, so syncing with only that
-cluster must not copy the data to this machine and back (issue #200).
+cluster must not copy the data to this machine and back.
 """
 
 from __future__ import annotations

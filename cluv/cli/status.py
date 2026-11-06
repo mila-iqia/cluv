@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json as json_lib
+import dataclasses
+import contextlib
 import asyncio
 import logging
 import shlex
@@ -541,31 +544,30 @@ async def get_job_infos(
     return {jid: info for cluster_result in results for jid, info in cluster_result.items()}
 
 
-async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> None:
-    """Show status of clusters and jobs.
+async def status(
+    table: Literal["clusters", "jobs", "all"], all_jobs: bool, json: bool = False
+) -> None:
+    """Show status of clusters and jobs."""
 
-    Parameters:
-        table: Which table(s) to show: "clusters", "jobs", or "all".
-
-    Returns:
-        None
-
-    The "clusters" table shows live info about each cluster's GPU availability and storage usage,
-    along with counts of all the user's pending/running jobs on that cluster (from `squeue`).
-
-    The "jobs" table shows one row per job from the cache, with live status info (state,
-    elapsed time, wait time).
-    """
-    console.print()
-    console.rule("[bold cyan]cluv status[/bold cyan]")
-    console.print()
+    # Suppress headers if JSON output is requested
+    if not json:
+        console.print()
+        console.rule("[bold cyan]cluv status[/bold cyan]")
+        console.print()
 
     clusters = get_cluv_config().clusters_names
     disabled_clusters = get_disabled_clusters()
 
+    # Dictionary to hold data for JSON output
+    json_data = {}
+
     if table in ("clusters", "all"):
-        # Query clusters in parallel
-        with console.status("Fetching clusters status..."):
+        # Suppress the rich loading spinner if JSON is requested
+        spinner_ctx = (
+            console.status("Fetching clusters status...") if not json else contextlib.nullcontext()
+        )
+
+        with spinner_ctx:
             clusters_status: list[ClusterStatus] = [
                 d
                 for d in await asyncio.gather(
@@ -573,26 +575,60 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
                 )
             ]
 
-        # Show a tip message if all clusters are offline.
-        if clusters_status and all(not c.online for c in clusters_status):
-            console.print(
-                (
-                    "No active connections to any clusters found. "
-                    "Run [bold]cluv login[/bold] first."
-                ),
-                style="yellow",
-            )
+        if not json:
+            if clusters_status and all(not c.online for c in clusters_status):
+                console.print(
+                    (
+                        "No active connections to any clusters found. "
+                        "Run [bold]cluv login[/bold] first."
+                    ),
+                    style="yellow",
+                )
 
-        console.print(_build_cluster_table(clusters_status, disabled_clusters))
-        console.print(_build_cluster_table_legend())
-        console.print()
+            console.print(_build_cluster_table(clusters_status, disabled_clusters))
+            console.print(_build_cluster_table_legend())
+            console.print()
+        else:
+            # Convert dataclasses to dicts for JSON serialization
+            json_data["clusters"] = [dataclasses.asdict(c) for c in clusters_status]
 
     if table in ("jobs", "all"):
         cached_jobs = load_jobs()
-        with console.status("Fetching jobs status..."):
+
+        spinner_ctx = (
+            console.status("Fetching jobs status...") if not json else contextlib.nullcontext()
+        )
+
+        with spinner_ctx:
             jobs_status = await get_job_infos(cached_jobs, clusters, disabled_clusters)
 
-        max_jobs = None if all_jobs else DEFAULT_SHOW_JOBS
-        console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, max_jobs))
-        console.print(_build_job_table_legend(max_jobs, len(cached_jobs)))
-        console.print()
+        if not json:
+            max_jobs = None if all_jobs else DEFAULT_SHOW_JOBS
+            console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, max_jobs))
+            console.print(_build_job_table_legend(max_jobs, len(cached_jobs)))
+            console.print()
+        else:
+            # Handle jobs serialization (handling possible custom classes)
+            json_data["jobs"] = {
+                "cached": [
+                    dataclasses.asdict(j) if dataclasses.is_dataclass(j) else str(j)
+                    for j in cached_jobs
+                ],
+                "status": [
+                    dataclasses.asdict(j) if dataclasses.is_dataclass(j) else str(j)
+                    for j in jobs_status
+                ]
+                if isinstance(jobs_status, list)
+                else str(jobs_status),
+            }
+
+    # Output the JSON payload cleanly
+    if json:
+        # Helper to convert datetimes to strings so json.dumps doesn't crash
+        def json_serial(obj):
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            return str(obj)
+
+        # Print standard JSON to stdout
+        print(json_lib.dumps(json_data, default=json_serial, indent=2))

@@ -314,6 +314,16 @@ def add_sync_args(subparsers: Subparsers):
         default=True,
         help="Push datasets from data_source to each cluster. Requires data_source in config.",
     )
+    sync_parser.add_argument(
+        "--fetch-results",
+        dest="fetch_results",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Fetch each cluster's results back to this machine. Use --no-fetch-results "
+            "when the results are large or slow to read."
+        ),
+    )
     # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
     # sync_parser.add_argument(
     #     "--",

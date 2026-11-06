@@ -64,21 +64,19 @@ async def sync(
     """
     disabled = get_disabled_clusters()
     print_disabled_clusters(disabled)
-    here = current_cluster()
 
+    # The current cluster stays in `cluster_to_remote` (mapped to None) when it is a target: there
+    # is nothing to sync with it, but it may need a copy of the dataset.
     if clusters:
-        # Filter out explicitly-requested clusters that are disabled, and the current cluster
-        # (nothing to sync with ourselves).
-        enabled_clusters = [c for c in clusters if c not in disabled and c != here]
+        # Filter out explicitly-requested clusters that are disabled.
+        enabled_clusters = [c for c in clusters if c not in disabled]
         cluster_to_remote = (
             await get_cluster_to_remote(enabled_clusters) if enabled_clusters else {}
         )
     else:
         # No cluster passed: sync with every cluster we have an active SSH connection to.
         cluster_to_remote = await get_cluster_to_remote(None)
-        cluster_to_remote = {
-            c: r for c, r in cluster_to_remote.items() if c not in disabled and c != here
-        }
+        cluster_to_remote = {c: r for c, r in cluster_to_remote.items() if c not in disabled}
 
     remotes = [remote for remote in cluster_to_remote.values() if remote]
     if not remotes:
@@ -87,7 +85,7 @@ async def sync(
             "Use `cluv login` to login and create reusable connections."
         )
 
-    await sync_common_part(remotes, sync_datasets=sync_datasets)
+    await sync_common_part(cluster_to_remote, sync_datasets=sync_datasets)
 
     remotes_to_sync = _remotes_to_actually_sync(remotes)
     skipped = [r.hostname for r in remotes if r not in remotes_to_sync]
@@ -107,26 +105,33 @@ async def sync(
     return remotes
 
 
-async def pull_datasets_if_needed(here: str | None, config: CluvConfig, all_remotes: list[Remote]):
+async def pull_datasets_if_needed(
+    here: str | None, config: CluvConfig, cluster_to_remote: dict[str, Remote | None]
+):
+    """Copies the data from the `data_source` cluster to this machine, if a target needs it.
+
+    `cluster_to_remote` maps each target cluster to its `Remote`, and the current cluster to None
+    when it is a target.
+    """
     with set_context(console_lock, asyncio.Lock()):
         if (
             config.data_source
             and (source_cluster := config.data_source_cluster)
             and source_cluster != here
             # Jobs on the source cluster read the data at `data_source` directly, so only pull
-            # when another cluster needs a copy of it.
-            and any(r.hostname != source_cluster for r in all_remotes)
+            # when another target cluster needs a copy of it.
+            and any(cluster != source_cluster for cluster in cluster_to_remote)
         ):
             source_path = config.data_source.partition(":")[2]
             # Fetch the data from the source cluster and copy it to the local datasets_path.
-            source_remote = next(
-                (r for r in all_remotes if r.hostname == source_cluster),
-                await get_remote_without_2fa_prompt(source_cluster),
+            source_remote = cluster_to_remote.get(source_cluster) or (
+                await get_remote_without_2fa_prompt(source_cluster)
             )
             if not source_remote:
+                connected = [r.hostname for r in cluster_to_remote.values() if r]
                 raise RuntimeError(
                     f"[red]Unable to sync datasets, need a connection to the source cluster "
-                    f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
+                    f"({source_cluster})[/red]. Current connections: {connected}\n"
                     f"Use `cluv login {source_cluster}` to create a reusable connection to the "
                     f"source cluster."
                 )
@@ -213,15 +218,20 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
-async def sync_common_part(remotes: list[Remote], sync_datasets: bool = True) -> None:
+async def sync_common_part(
+    cluster_to_remote: dict[str, Remote | None], sync_datasets: bool = True
+) -> None:
     """Sync steps that only need to happen once, regardless of how many clusters we're syncing
     or submitting to: push the local commit, and pull the dataset from its source cluster if
     needed.
+
+    `cluster_to_remote` maps each target cluster to its `Remote`, and the current cluster to None
+    when it is a target.
     """
     config = get_cluv_config()
     await run_git_push_if_needed()
     if sync_datasets:
-        await pull_datasets_if_needed(current_cluster(), config, remotes)
+        await pull_datasets_if_needed(current_cluster(), config, cluster_to_remote)
 
 
 async def sync_per_cluster_part(

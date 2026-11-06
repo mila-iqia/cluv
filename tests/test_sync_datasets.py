@@ -35,11 +35,25 @@ def config(monkeypatch: pytest.MonkeyPatch) -> CluvConfig:
 
 
 @pytest.mark.parametrize(
-    ("targets", "should_pull"),
-    [(["mila"], False), (["mila", "narval"], True), (["narval"], True)],
+    ("here", "targets", "should_pull"),
+    [
+        (None, ["mila"], False),
+        (None, ["mila", "narval"], True),
+        (None, ["narval"], True),
+        # The current cluster is a target, and it needs a copy of the data.
+        ("narval", ["narval"], True),
+        # The current cluster isn't a target, so it doesn't need a copy of the data.
+        ("narval", ["mila"], False),
+        # The current cluster is the source: the data is already here.
+        ("mila", ["narval"], False),
+    ],
 )
 async def test_pull_datasets_only_when_another_cluster_needs_them(
-    targets: list[str], should_pull: bool, config: CluvConfig, monkeypatch: pytest.MonkeyPatch
+    here: str | None,
+    targets: list[str],
+    should_pull: bool,
+    config: CluvConfig,
+    monkeypatch: pytest.MonkeyPatch,
 ):
     monkeypatch.setattr(
         sync_module,
@@ -51,7 +65,9 @@ async def test_pull_datasets_only_when_another_cluster_needs_them(
     )
     monkeypatch.setattr(sync_module, "_pull_datasets", mock_pull := mock.AsyncMock())
 
-    await sync_module.pull_datasets_if_needed(None, config, [Remote(hostname=c) for c in targets])
+    # The current cluster is mapped to None, as in `get_cluster_to_remote`.
+    cluster_to_remote = {c: None if c == here else Remote(hostname=c) for c in targets}
+    await sync_module.pull_datasets_if_needed(here, config, cluster_to_remote)
 
     assert mock_pull.await_count == (1 if should_pull else 0)
 

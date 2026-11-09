@@ -4,6 +4,7 @@ from typing import Literal
 import pytest
 
 from cluv.cli import status
+from cluv.cli.status import _bar
 from cluv.cli.sync import get_active_remotes
 from cluv.utils import console
 
@@ -57,3 +58,16 @@ async def test_cluv_status(table: Literal["clusters", "jobs", "all"], all_jobs: 
         # There should be "Cluster", some whitespace, and then "Job ID" in one of the lines.
         # This is somewhat reliable, those columns don't seem to wrap around.
         assert re.search(r"Cluster\s+Job ID", output)
+
+
+def test_bar_shows_used_and_total_size():
+    """Storage bars show the used/total size, not just a percentage (#252)."""
+    text = _bar(148, 500).plain
+    assert "148/500 GiB" in text
+    assert "30%" in text
+
+
+def test_bar_without_quota_shows_no_size():
+    """When the quota is unknown (0), don't print a misleading 0/0 GiB."""
+    text = _bar(0, 0).plain
+    assert "GiB" not in text

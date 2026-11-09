@@ -101,9 +101,12 @@ async def sync(
         f"[green]Synchronizing with the following clusters:[/green] "
         f"{[remote.hostname for remote in remotes]}"
     )
-    await asyncio.gather(
-        *(sync_per_cluster_part(remote, sync_datasets=sync_datasets) for remote in remotes_to_sync)
+    results = await asyncio.gather(
+        *(_sync_one_cluster(remote, sync_datasets=sync_datasets) for remote in remotes_to_sync)
     )
+    failed = [remote.hostname for remote, ok in zip(remotes_to_sync, results) if not ok]
+    if failed:
+        raise SystemExit(f"Sync failed for: {', '.join(failed)}")
     return remotes
 
 
@@ -219,6 +222,26 @@ async def sync_common_part(remotes: list[Remote], sync_datasets: bool = True) ->
     await run_git_push_if_needed()
     if sync_datasets:
         await pull_datasets_if_needed(current_cluster(), config, remotes)
+
+
+async def _sync_one_cluster(remote: Remote, sync_datasets: bool = True) -> bool:
+    """Sync one cluster and report a single success/failure line for it.
+
+    The sync steps already print git/uv/rsync output, but nothing says whether the
+    cluster actually ended up on the expected commit. Report one line per cluster and
+    let the other clusters keep syncing when one fails.
+
+    Returns True when the cluster synced successfully, False otherwise.
+    """
+    cluster = remote.hostname
+    current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
+    try:
+        await sync_per_cluster_part(remote, sync_datasets=sync_datasets)
+    except Exception as exc:  # noqa: BLE001 - report per cluster and keep the others going
+        console.log(f"[red]{cluster}: FAILED: {exc}[/red]")
+        return False
+    console.log(f"[green]{cluster}: ok {current_git_commit}[/green]")
+    return True
 
 
 async def sync_per_cluster_part(

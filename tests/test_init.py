@@ -416,6 +416,26 @@ class TestAskQuestions:
         assert answers.datasets_path == "$SCRATCH/data"
 
 
+@pytest.mark.parametrize(
+    ("cluster", "example"),
+    [
+        ("rorqual", "def-yourpi"),
+        ("narval", "def-yourpi"),
+        ("tamia", "aip-yourpi"),
+        ("killarney", "aip-yourpi"),
+        ("mila", None),
+    ],
+)
+def test_accounts_instruction_gives_an_example(cluster: str, example: str | None) -> None:
+    """The question about the accounts shows a DRAC or PAICE account name, but none for Mila."""
+    instruction = CLUV_INIT_MODULE._accounts_instruction(cluster)
+
+    if example:
+        assert f"(e.g. {example}; " in instruction
+    else:
+        assert "e.g." not in instruction
+
+
 @pytest.mark.parametrize("quiet", [True, False])
 def test_init_cli_passes_quiet(
     quiet: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

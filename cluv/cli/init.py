@@ -20,6 +20,8 @@ DEFAULT_RESULTS_PATH = "$SCRATCH/logs/cluv"
 DEFAULT_SCRATCH_PROJECT_DIR = "$SCRATCH/repos/cluv"
 DEFAULT_RESULTS_LINKNAME = "logs"
 MILA_CLUSTER = "mila"
+# The other clusters of the template, except Mila, are DRAC clusters.
+PAICE_CLUSTERS = ("tamia", "killarney", "vulcan")
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # Repository root when running cluv from a source checkout.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -218,7 +220,7 @@ def ask_questions(template: str, defaults: InitAnswers) -> InitAnswers:
         accounts = ask_text(
             f"Which Slurm accounts do you use on {cluster}?",
             default=", ".join(default_accounts[cluster]),
-            instruction="(separate accounts with commas; leave empty for none)",
+            instruction=_accounts_instruction(cluster),
         )
         answers.accounts[cluster] = accounts.replace(",", " ").split()
     answers.results_path = ask_text(
@@ -492,6 +494,19 @@ def _default_accounts(
         if (cluster := _cluster_name(section))
     }
     return {cluster: template_accounts[cluster] for cluster in clusters}
+
+
+def _accounts_instruction(cluster: str) -> str:
+    """The instruction of the question about the Slurm accounts on the cluster.
+
+    It gives an example of account name, except on the Mila cluster, where the template has no
+    account.
+    """
+    instruction = "separate accounts with commas; leave empty for none"
+    if cluster == MILA_CLUSTER:
+        return f"({instruction})"
+    example = "aip-yourpi" if cluster in PAICE_CLUSTERS else "def-yourpi"
+    return f"(e.g. {example}; {instruction})"
 
 
 def _accounts(section: list[str]) -> list[str]:

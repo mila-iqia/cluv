@@ -11,9 +11,6 @@ import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-import milatools.cli
-import milatools.utils.parallel_progress
-
 from cluv.cache import ProjectStateOnCluster, get_disabled_clusters, read_cache, write_cache
 from cluv.cli.disable import print_disabled_clusters
 from cluv.cli.login import get_remote_without_2fa_prompt, login
@@ -22,8 +19,6 @@ from cluv.job import get_datasets_path
 from cluv.remote import Remote, list_remote_run_dirs, run
 from cluv.utils import console, console_lock, current_cluster, set_context
 
-milatools.cli.console = console
-milatools.utils.parallel_progress.console = console
 logger = logging.getLogger(__name__)
 
 __all__ = ["sync", "install_uv", "clone_project", "fetch_results"]

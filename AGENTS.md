@@ -16,7 +16,7 @@ Hard assumptions:
   creates the reusable connections (so later commands never trigger 2FA prompts).
 - **Not supported on Windows** (needs an SSH client with multiplexing support).
 
-Published on PyPI as `cluster-uv`; the module is `cluv`, the CLI is `cluv`.
+Published on PyPI as `cluster-uv`; the module and the CLI are `cluv`.
 User-facing docs live in `docs/` (mkdocs-material, published at https://mila-iqia.github.io/cluv/).
 
 ## Commands (working on this repo)
@@ -25,8 +25,8 @@ User-facing docs live in `docs/` (mkdocs-material, published at https://mila-iqi
 uv sync                        # install dependencies (also installs the examples workspace members)
 uv run cluv <command>          # run cluv from the checkout (-v / -vv for more logging, -q quiet)
 
-uv run pytest                  # unit tests (doctests in cluv/ modules run too)
-uv run pytest -m "not integration"   # skip tests that need live SSH connections to real clusters
+uv run pytest                  # everything (integration tests run when logged in to clusters, skip otherwise)
+uv run pytest -m "not integration"   # unit tests only (no SSH required)
 uv run pytest tests/test_submit.py   # a single test file
 uv run pre-commit run --all-files    # ruff check --fix + ruff format + misc hooks
 
@@ -34,8 +34,14 @@ uv run mkdocs serve --livereload     # serve the docs from docs/
 ```
 
 Pytest runs with `--doctest-modules` (docstring examples in `cluv/` count as tests — keep them
-runnable) and pytest-xdist in parallel (`--dist=loadgroup`). Tests marked `integration` parametrize
-over a `cluster`/`remote` fixture that uses whichever clusters are currently logged in.
+runnable) and pytest-xdist in parallel. The two kinds of tests:
+
+- **Unit tests** never touch the network: pure functionsare tested against captured fixture text,
+  and the commands run against fake or monkeypatched `Remote`s.
+- **Integration tests** (`@pytest.mark.integration`) do the real thing: sync, submit and
+  query actual clusters over the live SSH connections from `cluv login`. The `cluster`/`remote`
+  fixtures in `tests/conftest.py` parametrize them over every currently-connected cluster and
+  skip the rest (in CI they run only on a self-hosted runner with real connections).
 
 ## Using cluv
 
@@ -47,9 +53,8 @@ Full flag reference: `cluv <command> --help` and `docs/commands.md`.
 - `cluv sync [clusters...]` — clone/checkout + `uv sync` on each cluster,
   fetch results back.
 - `cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]` — sync, then `sbatch`
-  on the cluster (clean git tree required, or `--autocommit`). The racing idea: `cluster=first`,
-  multiple configured allocations, and `--vram` all fan the submission out into many jobs and
-  keep only the first one to start; `--chunking` splits a long job into checkpointed chunks.
+  on the cluster (clean git tree required, or `--autocommit`). Multiple jobs can be submitted at
+  once by giving multiple `sbatch-args`, it races several jobs and keeps only the first one to start.
 - `cluv run <cluster> <command...>` — sync + `uv run <command>` on one cluster.
 - `cluv sh <command...>` — raw shell command on every connected cluster.
 - `cluv status [clusters|jobs|all]` — GPU / storage / queue overview, plus a table of submitted jobs.
@@ -84,15 +89,14 @@ machine they belong to.
 Commands build on each other: `run` and `submit` call `sync`, and all remote I/O goes through
 `cluv/remote.py` — `Remote(hostname)` reuses the SSH ControlMaster sockets opened by `cluv login`.
 
-- `submit.py` (+ `submit_utils/` for `--chunking` and `--vram`) — merges sbatch flags
-  (CLI > per-cluster > global), syncs, submits, then races the jobs. `get_sbatch_command()`'s
-  nested `bash --login -c '...'` quoting (so `$SCRATCH` expands remotely but program args
-  don't) is easy to break — read it first.
-- `sync.py` — the push/clone/`uv sync`/fetch-results pipeline; skips disabled clusters, clusters
+- `submit.py` - merges sbatch flags (CLI > per-cluster > global), syncs, submits, then races the jobs.
+  `get_sbatch_command()`'s nested `bash --login -c '...'` quoting (so `$SCRATCH` expands remotely but
+  program args don't) is easy to break — read it first.
+- `sync.py` - the push/clone/`uv sync`/fetch-results pipeline; skips disabled clusters, clusters
   sharing a filesystem with one already synced, and work the cache shows is already done.
-- `status.py` + `slurm.py` — one SSH round-trip per cluster; keep the Slurm-output parsers in
+- `status.py` + `slurm.py` - one SSH round-trip per cluster; keep the Slurm-output parsers in
   `slurm.py` pure (no I/O, unit-tested on fixture text), rendering separate in `status.py`.
-- `cache.py` — state that survives between commands under `~/.cache/cluv/<project>/`:
+- `cache.py` - state that survives between commands under `~/.cache/cluv/<project>/`:
   per-cluster sync state, disabled clusters, cached GPU types, job history, submission logs.
 
 ### Docs, tests, examples, scripts

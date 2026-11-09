@@ -1,7 +1,12 @@
+import dataclasses
+import json
 import os
 import re
 import subprocess
-from pathlib import Path
+import sys
+from pathlib import Path, PurePosixPath
+
+import questionary
 
 from cluv.config import find_pyproject, has_cluv_config, load_cluv_config
 from cluv.ssh import get_ssh_hostnames
@@ -11,20 +16,27 @@ __all__ = ["init"]
 
 SCRIPTS_DIR_PATH = "scripts"
 DEFAULT_RESULTS_PATH = "$SCRATCH/logs/cluv"
+# The template's `project_dir` on the clusters that can't run jobs from $HOME.
+DEFAULT_SCRATCH_PROJECT_DIR = "$SCRATCH/repos/cluv"
 DEFAULT_RESULTS_LINKNAME = "logs"
+MILA_CLUSTER = "mila"
+# The other clusters of the template, except Mila, are DRAC clusters.
+PAICE_CLUSTERS = ("tamia", "killarney", "vulcan")
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # Repository root when running cluv from a source checkout.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def init(path: Path | None = None) -> None:
+def init(path: Path | None = None, quiet: bool = False) -> None:
     """Initialize a new project with cluv.
 
     This does the following:
 
     * Runs `uv init --package --build-backend hatch --python 3.11` to initialize a new uv project
       in the current directory (if there isn't one already).
-    * Adds a default configuration for Cluv in the `[tool.cluv]` section of pyproject.toml.
+    * Adds a configuration for Cluv in the `[tool.cluv]` section of pyproject.toml, from the
+      answers to a few questions. When `quiet` is True, or when stdin isn't a terminal, no question
+      is asked and the default answers are used.
     * Adds job script templates in the `scripts/` directory of the project.
     """
     console.print()
@@ -51,8 +63,8 @@ def init(path: Path | None = None) -> None:
     console.print("Reading pyproject.toml...")
     pyproject_path = find_pyproject()
 
-    # If it doesn't exist, add a cluv config section with the default settings and clusters.
-    check_cluv_config(pyproject_path)
+    # If it doesn't exist, add a cluv config section made from the answers to a few questions.
+    check_cluv_config(pyproject_path, ask=not quiet and sys.stdin.isatty())
     config = load_cluv_config(pyproject_path)
 
     # Compare the cluster names in the config to the SSH hostnames.
@@ -116,10 +128,11 @@ def run_uv_init() -> None:
     console.print("✅ uv: project initialized.", style="green")
 
 
-def check_cluv_config(pyproject_path: Path) -> None:
+def check_cluv_config(pyproject_path: Path, ask: bool = False) -> None:
     """
     Check if the pyproject.toml file contains a cluv config.
-    If not, add a default config section with the default clusters and settings.
+    If not, add a config section made from the template and the answers to a few questions.
+    When `ask` is False, the default answers are used.
     """
     if has_cluv_config(pyproject_path):
         console.print("✅ Project already have a cluv config in pyproject.toml.", style="green")
@@ -128,11 +141,128 @@ def check_cluv_config(pyproject_path: Path) -> None:
     console.print(
         "No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config..."
     )
-    console.print("Adding config for cluv tool :")
+    template = _load_cluv_config_template()
+    clusters = _cluster_names(template)
+    project_root = pyproject_path.parent
+    answers = default_answers(clusters, project_root.name)
+    if ask:
+        answers = ask_questions(clusters, answers)
+    cluv_config = make_cluv_config(template, answers, _scratch_project_dir(project_root))
 
-    cluv_config_template = _load_cluv_config_template()
-    cluv_config = _update_clug_config_template(cluv_config_template, pyproject_path.parent.name)
+    console.print("Adding config for cluv tool :")
     add_cluv_config_section(pyproject_path, cluv_config)
+
+
+@dataclasses.dataclass
+class InitAnswers:
+    """The answers to the questions of `cluv init`. An empty string or list means "not set"."""
+
+    clusters: list[str]
+    results_path: str
+    # Only used when the Mila cluster isn't selected: the template has the accounts of Mila members.
+    drac_accounts: list[str] = dataclasses.field(default_factory=list)
+    paice_accounts: list[str] = dataclasses.field(default_factory=list)
+    project_dir: str = ""
+    data_source: str = ""
+    datasets_path: str = ""
+
+
+def default_answers(clusters: list[str], project_name: str) -> InitAnswers:
+    """The answers used when no question is asked.
+
+    The clusters are those with a `Host` entry in ~/.ssh/config, since cluv connects to a cluster
+    with `ssh <cluster>`. When none of the clusters has an entry, all the clusters are kept.
+    """
+    ssh_hostnames = get_ssh_hostnames()
+    return InitAnswers(
+        clusters=[cluster for cluster in clusters if cluster in ssh_hostnames] or clusters,
+        results_path=f"$SCRATCH/logs/{project_name}",
+    )
+
+
+def ask_questions(clusters: list[str], defaults: InitAnswers) -> InitAnswers:
+    """Asks the questions of `cluv init` in the terminal, with `defaults` as default answers."""
+
+    def ask_text(message: str, **kwargs) -> str:
+        return questionary.text(message, **kwargs).unsafe_ask().strip()
+
+    def ask_accounts(clusters_kind: str, example: str) -> list[str]:
+        accounts = ask_text(
+            f"Which Slurm accounts do you use on the {clusters_kind} clusters?",
+            instruction=f"(e.g. {example}; separate accounts with commas; leave empty for none)",
+        )
+        return accounts.replace(",", " ").split()
+
+    def required(text: str) -> bool | str:
+        return bool(text.strip()) or "This value is required."
+
+    answers = dataclasses.replace(defaults)
+    answers.clusters = questionary.checkbox(
+        "Which clusters do you want to use?",
+        choices=[questionary.Choice(c, checked=c in defaults.clusters) for c in clusters],
+        validate=lambda selected: bool(selected) or "Select at least one cluster.",
+    ).unsafe_ask()
+    if MILA_CLUSTER not in answers.clusters:
+        if any(cluster not in PAICE_CLUSTERS for cluster in answers.clusters):
+            answers.drac_accounts = ask_accounts("DRAC", "def-yourpi")
+        if any(cluster in PAICE_CLUSTERS for cluster in answers.clusters):
+            answers.paice_accounts = ask_accounts("PAICE", "aip-yourpi")
+    answers.results_path = ask_text(
+        "Where should the job results go on the clusters?",
+        default=defaults.results_path,
+        validate=required,
+    )
+    answers.project_dir = ask_text(
+        "Where should the project go on the clusters?",
+        instruction="(leave empty for the same path as on this machine, relative to $HOME)",
+    )
+    answers.data_source = ask_text(
+        "Where are the datasets that cluv should copy to all the clusters?",
+        instruction="(<cluster>:<path>, or a path on this machine; leave empty if there are none)",
+    )
+    if answers.data_source:
+        answers.datasets_path = ask_text(
+            "Where should the datasets go on the clusters?", validate=required
+        )
+    return answers
+
+
+def make_cluv_config(template: str, answers: InitAnswers, scratch_project_dir: str) -> str:
+    """Fills the template's `[tool.cluv]` section with the answers to the questions.
+
+    `scratch_project_dir` replaces the template's `project_dir` on the clusters that can't run
+    jobs from $HOME.
+    """
+    config = template.replace(f'"{DEFAULT_RESULTS_PATH}"', _toml_string(answers.results_path))
+    config = config.replace(f'"{DEFAULT_SCRATCH_PROJECT_DIR}"', _toml_string(scratch_project_dir))
+    for key in ("project_dir", "data_source", "datasets_path"):
+        if value := getattr(answers, key):
+            # Uncomment the template's line for that setting, with the answer as value.
+            # A replacement string would have its backslashes interpreted by re.sub, so `line`
+            # is returned by a function, which re.sub inserts as is.
+            line = f"{key} = {_toml_string(value)}"
+            config = re.sub(rf"^# {key} = .*$", lambda _: line, config, count=1, flags=re.M)
+
+    # A `project_dir` set for one cluster overrides the global one. So the template's `project_dir`
+    # of the clusters that can't run jobs from $HOME is only kept when the global one is in $HOME.
+    project_in_home = not answers.project_dir or answers.project_dir.startswith(("$HOME", "~"))
+    lines = []
+    for section in _split_sections(config):
+        cluster = _cluster_name(section)
+        if cluster is None:
+            lines += section
+            continue
+        if cluster not in answers.clusters:
+            continue
+        if not project_in_home:
+            section = [line for line in section if not line.startswith("project_dir = ")]
+        if MILA_CLUSTER not in answers.clusters:
+            accounts = (
+                answers.paice_accounts if cluster in PAICE_CLUSTERS else answers.drac_accounts
+            )
+            section = _set_accounts(section, accounts)
+        lines += section
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def add_cluv_config_section(pyproject_path: Path, section_lines: str) -> None:
@@ -311,11 +441,58 @@ def _load_cluv_config_template() -> str:
     return "\n".join(pyproject_lines[start:end]).strip() + "\n"
 
 
-def _update_clug_config_template(template_config: str, project_name: str) -> str:
+def _split_sections(config: str) -> list[list[str]]:
+    """Splits the lines of a TOML text in sections, each starting with a `[table]` line."""
+    sections: list[list[str]] = []
+    for line in config.splitlines():
+        if line.startswith("[") or not sections:
+            sections.append([])
+        sections[-1].append(line)
+    return sections
+
+
+def _cluster_name(section: list[str]) -> str | None:
+    """The cluster of a `[tool.cluv.clusters.<cluster>]` section, or None for another section."""
+    match = re.fullmatch(r"\[tool\.cluv\.clusters\.([\w-]+)\]", section[0])
+    return match.group(1) if match else None
+
+
+def _cluster_names(config: str) -> list[str]:
+    """The clusters that have a section in the config, in order."""
+    return [cluster for section in _split_sections(config) if (cluster := _cluster_name(section))]
+
+
+def _set_accounts(section: list[str], accounts: list[str]) -> list[str]:
+    """Replaces the Slurm accounts in the section of a cluster.
+
+    The template's `sbatch_args` of the clusters only set accounts, so these lines are replaced.
     """
-    Update the template cluv config with the project info.
+    section = [line for line in section if not line.startswith("sbatch_args = ")]
+    if accounts:
+        tables = [f"{{ account = {_toml_string(account)} }}" for account in accounts]
+        value = tables[0] if len(tables) == 1 else f"[{', '.join(tables)}]"
+        section.insert(1, f"sbatch_args = {value}")
+    return section
+
+
+def _scratch_project_dir(project_root: Path) -> str:
+    """Where to put the project on the clusters that can't run jobs from $HOME.
+
+    That's `$SCRATCH/repos/<name of the git repo>`, followed by the path of the project in the git
+    repo when the project is in a subfolder of the repo.
     """
-    return template_config.replace(DEFAULT_RESULTS_PATH, f"$SCRATCH/logs/{project_name}")
+    project_root = project_root.resolve()
+    git_root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=project_root, capture_output=True, text=True
+    ).stdout.strip()
+    repo_root = Path(git_root) if git_root else project_root
+    path_in_repo = project_root.relative_to(repo_root).as_posix()
+    return str(PurePosixPath("$SCRATCH/repos", repo_root.name, path_in_repo))
+
+
+def _toml_string(value: str) -> str:
+    """Quotes the value as a TOML string. (A JSON string is also a valid TOML string.)"""
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _get_script_templates_path() -> Path:

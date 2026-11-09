@@ -155,6 +155,9 @@ def main(argv: list[str] | None = None) -> None:
     if subcommand == "status" and quiet:
         console.print("Warning: --quiet has no effect with the 'status' command.", style="yellow")
         quiet = False
+    if subcommand == "init":
+        # `cluv init --quiet` doesn't ask any question: it uses the default answers.
+        args_dict["quiet"] = quiet
     console.quiet = quiet
 
     try:
@@ -384,6 +387,11 @@ def add_init_args(subparsers: Subparsers):
     init_parser = subparsers.add_parser(
         "init",
         help="Initialize the current project across clusters.",
+        description=(
+            "Initialize the current project across clusters. Asks a few questions to write the "
+            "cluv config. With -q/--quiet, or when stdin isn't a terminal, no question is asked "
+            "and the default answers are used."
+        ),
         formatter_class=rich_argparse.RichHelpFormatter,
     )
     init_parser.add_argument(

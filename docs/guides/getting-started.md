@@ -27,13 +27,18 @@ cluv init ~/my-project
 This adds a `[tool.cluv]` section to your `pyproject.toml` and job script templates in
 `scripts/`. It only creates what's missing, so it's safe to re-run.
 
+Before writing the config, `cluv init` asks which clusters you use, your Slurm accounts (when you
+don't use the Mila cluster), and where to put your results, your project and your datasets on the
+clusters. Press Enter to keep the default answer. With `--quiet`, `cluv init` asks nothing and
+uses the default answers.
+
 **Read the output carefully**: every warning points to something you'll probably want to fix in the next section.
 
 ## Adapt the config to your needs
 
-The generated config aims to work on as many clusters as possible out of the box, with some values
-(like allocation accounts) set for core Mila students. Open `pyproject.toml` and go through the
-steps below to adapt it to your access and your workload.
+The generated config uses your answers to `cluv init`, and defaults for everything else. Open
+`pyproject.toml` and go through the steps below to adapt it further to your access and your
+workload.
 
 The config has two levels: settings in `[tool.cluv]` apply to every cluster, and each
 `[tool.cluv.clusters.<name>]` table can override them for one cluster. See the
@@ -42,8 +47,9 @@ The config has two levels: settings in `[tool.cluv]` apply to every cluster, and
 ### Keep only your clusters
 
 Each `[tool.cluv.clusters.<name>]` table declares a cluster that cluv can log into, sync to and
-submit to. The `<name>` must match a `Host` in your `~/.ssh/config`. The template lists Mila and
-the DRAC and PAICE clusters. An empty table is enough to enable a cluster with the global defaults:
+submit to. The `<name>` must match a `Host` in your `~/.ssh/config`. `cluv init` adds the clusters
+you selected, among Mila and the DRAC and PAICE clusters. An empty table is enough to enable a
+cluster with the global defaults:
 
 ```toml title="pyproject.toml"
 [tool.cluv.clusters.mila]
@@ -65,8 +71,9 @@ For the clusters you don't want to use (no access, missing SSH entry, ...), you 
 
 ### Set your allocation accounts
 
-Some clusters require an `--account` for every job. The template uses Mila's allocations
-(`rrg-bengioy-ad`, `def-bengioy`), which are available to core Mila students. Adjust them to the
+Some clusters require an `--account` for every job. If you selected the Mila cluster in
+`cluv init`, the config uses Mila's allocations (`rrg-bengioy-ad`, `def-bengioy`), which are
+available to core Mila students. Otherwise, it uses the accounts you gave. Adjust them to the
 allocations you actually have access to:
 
 - **Add** your PI's accounts (`def-*` or `rrg-*` for DRAC clusters, `aip-*` for PAICE clusters).
@@ -146,7 +153,7 @@ usually don't need to change them:
   `results_path`, so you can browse results from the project folder.
 - `project_dir` (by default, the same path relative to `$HOME` as on your machine): where the
   project is cloned on each cluster. Some clusters don't allow jobs to run from `$HOME` (e.g.
-  Killarney, Trillium), so the template puts the project in `$SCRATCH/repos/cluv` there.
+  Killarney, Trillium), so `cluv init` puts the project in `$SCRATCH/repos/<repo-name>` there.
 
 ```toml title="pyproject.toml"
 [tool.cluv.clusters.trillium]

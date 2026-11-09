@@ -1,27 +1,47 @@
 """Unit tests for cluv/cli/init.py check functions."""
 
+import dataclasses
 import importlib
 import os
+import subprocess
 import textwrap
+import tomllib
 from pathlib import Path
 
 import pytest
+import questionary
 
+import cluv.__main__ as cluv_main
 from cluv.cli.init import (
     DEFAULT_RESULTS_LINKNAME,
     DEFAULT_RESULTS_PATH,
     SCRIPTS_DIR_PATH,
+    InitAnswers,
+    ask_questions,
     check_cluv_config,
     check_git,
     check_home_dir,
     check_job_script,
     check_symlink_to_scratch,
+    default_answers,
+    make_cluv_config,
 )
-from cluv.config import load_cluv_config
+from cluv.config import CluvConfig, load_cluv_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLUV_INIT_MODULE = importlib.import_module("cluv.cli.init")
 JOB_SCRIPT_PATH = f"{SCRIPTS_DIR_PATH}/job.sh"
+TEMPLATE = CLUV_INIT_MODULE._load_cluv_config_template()
+TEMPLATE_CLUSTERS = CLUV_INIT_MODULE._cluster_names(TEMPLATE)
+SCRATCH_PROJECT_DIR = "$SCRATCH/repos/my_project"
+
+
+def parse_config(text: str) -> CluvConfig:
+    """Parses a `[tool.cluv]` section. Unlike `load_cluv_config`, doesn't set local env vars."""
+    return CluvConfig.model_validate(tomllib.loads(text)["tool"]["cluv"], extra="forbid")
+
+
+TEMPLATE_CONFIG = parse_config(TEMPLATE)
 
 
 class TestCheckHomeDir:
@@ -50,8 +70,12 @@ class TestGitCheck:
 
 
 class TestCheckCluvConfig:
-    def test_add_missing_cluv_config(self, tmp_path: Path) -> None:
+    def test_add_missing_cluv_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """check_cluv_config() should add a cluv config section if the toml doesn't have it"""
+        # With no cluster in ~/.ssh/config, all the clusters of the template are kept.
+        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
         p = tmp_path / "pyproject.toml"
         p.touch()
 
@@ -63,7 +87,28 @@ class TestCheckCluvConfig:
         assert config.results_path == expected_results_path
         assert config.env == expected_config.env
         assert config.clusters_names == expected_config.clusters_names
-        assert config.clusters == expected_config.clusters
+        for cluster, expected_cluster_config in expected_config.clusters.items():
+            if expected_cluster_config.project_dir:
+                # The project goes in a folder named after the project, not after cluv (#251).
+                expected_cluster_config = dataclasses.replace(
+                    expected_cluster_config, project_dir=f"$SCRATCH/repos/{tmp_path.name}"
+                )
+            assert config.clusters[cluster] == expected_cluster_config
+
+    def test_add_cluv_config_from_answers(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """check_cluv_config(ask=True) writes the config from the answers to the questions."""
+        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+        answer_questions(monkeypatch, clusters=["rorqual"], texts={"DRAC": "def-yourpi"})
+        p = tmp_path / "pyproject.toml"
+        p.touch()
+
+        check_cluv_config(p, ask=True)
+        config = load_cluv_config(p)
+
+        assert config.clusters_names == ["rorqual"]
+        assert config.clusters["rorqual"].sbatch_args == {"account": "def-yourpi"}
 
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
@@ -83,6 +128,205 @@ class TestCheckCluvConfig:
 
         assert config.clusters_names == ["mila"]
         assert config.results_path == "results"
+
+
+def make_config(**answers) -> tuple[str, CluvConfig]:
+    """Runs make_cluv_config() with these answers. Returns the config text and the parsed config."""
+    answers.setdefault("clusters", TEMPLATE_CLUSTERS)
+    answers.setdefault("results_path", "$SCRATCH/logs/my_project")
+    text = make_cluv_config(TEMPLATE, InitAnswers(**answers), SCRATCH_PROJECT_DIR)
+    return text, parse_config(text)
+
+
+class TestMakeCluvConfig:
+    def test_mila_member_gets_the_template_accounts(self) -> None:
+        """With the Mila cluster, the accounts of Mila members are kept from the template."""
+        _, config = make_config()
+
+        assert config.clusters_names == TEMPLATE_CLUSTERS
+        for cluster in TEMPLATE_CLUSTERS:
+            expected_sbatch_args = TEMPLATE_CONFIG.clusters[cluster].sbatch_args
+            assert config.clusters[cluster].sbatch_args == expected_sbatch_args
+
+    def test_other_users_get_their_own_accounts(self) -> None:
+        """Without the Mila cluster, the accounts given by the user replace those of Mila."""
+        text, config = make_config(
+            clusters=["tamia", "rorqual", "narval"],
+            drac_accounts=["def-yourpi", "rrg-yourpi-ad"],
+            paice_accounts=["aip-yourpi"],
+        )
+
+        assert config.clusters_names == ["tamia", "rorqual", "narval"]
+        drac_sbatch_args = [{"account": "def-yourpi"}, {"account": "rrg-yourpi-ad"}]
+        assert config.clusters["rorqual"].sbatch_args == drac_sbatch_args
+        assert config.clusters["narval"].sbatch_args == drac_sbatch_args
+        assert config.clusters["tamia"].sbatch_args == {"account": "aip-yourpi"}
+        assert "bengioy" not in text
+
+    def test_other_users_without_accounts(self) -> None:
+        _, config = make_config(clusters=["tamia", "rorqual"])
+
+        assert config.clusters["tamia"].sbatch_args == {}
+        assert config.clusters["rorqual"].sbatch_args == {}
+
+    @pytest.mark.parametrize("project_dir", ["", "$HOME/code/my_project"])
+    def test_project_in_scratch_on_clusters_that_refuse_home(self, project_dir: str) -> None:
+        """Clusters that can't run jobs from $HOME get the project in $SCRATCH/repos (#251)."""
+        _, config = make_config(project_dir=project_dir)
+
+        for cluster in TEMPLATE_CLUSTERS:
+            needs_scratch = TEMPLATE_CONFIG.clusters[cluster].project_dir is not None
+            expected_project_dir = SCRATCH_PROJECT_DIR if needs_scratch else None
+            assert config.clusters[cluster].project_dir == expected_project_dir
+
+    def test_no_cluster_project_dir_when_the_project_is_not_in_home(self) -> None:
+        """A `project_dir` outside of $HOME is used as is on all the clusters."""
+        _, config = make_config(project_dir="$SCRATCH/code/my_project")
+
+        assert config.project_dir == "$SCRATCH/code/my_project"
+        assert all(cluster.project_dir is None for cluster in config.clusters.values())
+
+    def test_optional_settings(self) -> None:
+        text, config = make_config()
+        assert config.data_source is None
+        assert config.datasets_path is None
+        # The lines of the template stay commented, so they can be filled in later.
+        assert "\n# data_source = " in text
+        assert "\n# datasets_path = " in text
+
+        _, config = make_config(
+            data_source="mila:/network/datasets/x", datasets_path="$SCRATCH/data"
+        )
+        assert config.data_source == "mila:/network/datasets/x"
+        assert config.datasets_path == "$SCRATCH/data"
+
+
+class TestScratchProjectDir:
+    def test_project_at_the_root_of_its_repo(self, tmp_path: Path) -> None:
+        subprocess.run(["git", "init", "-q", "my_repo"], cwd=tmp_path, check=True)
+
+        assert CLUV_INIT_MODULE._scratch_project_dir(tmp_path / "my_repo") == (
+            "$SCRATCH/repos/my_repo"
+        )
+
+    def test_subproject(self, tmp_path: Path) -> None:
+        """The path of a subproject in the repo is kept, so cluv can find the repo from it."""
+        subprocess.run(["git", "init", "-q", "my_repo"], cwd=tmp_path, check=True)
+        subproject = tmp_path / "my_repo" / "examples" / "my_example"
+        subproject.mkdir(parents=True)
+
+        assert CLUV_INIT_MODULE._scratch_project_dir(subproject) == (
+            "$SCRATCH/repos/my_repo/examples/my_example"
+        )
+
+    def test_project_outside_of_a_git_repo(self, tmp_path: Path) -> None:
+        assert CLUV_INIT_MODULE._scratch_project_dir(tmp_path) == (
+            f"$SCRATCH/repos/{tmp_path.name}"
+        )
+
+
+class TestDefaultAnswers:
+    def test_clusters_from_the_ssh_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        ssh_hostnames = {"rorqual", "mila", "github.com"}
+        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: ssh_hostnames)
+
+        answers = default_answers(TEMPLATE_CLUSTERS, "my_project")
+
+        assert answers.clusters == ["mila", "rorqual"]
+        assert answers.results_path == "$SCRATCH/logs/my_project"
+
+    def test_all_clusters_without_any_in_the_ssh_config(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+
+        assert default_answers(TEMPLATE_CLUSTERS, "my_project").clusters == TEMPLATE_CLUSTERS
+
+
+class FakeQuestion:
+    """Stands in for a questionary question: returns a fixed answer."""
+
+    def __init__(self, answer):
+        self.answer = answer
+
+    def unsafe_ask(self):
+        return self.answer
+
+
+def answer_questions(
+    monkeypatch: pytest.MonkeyPatch, clusters: list[str], texts: dict[str, str]
+) -> list[str]:
+    """Makes questionary answer `clusters` to the checkbox question, and `texts[word]` to the text
+    questions whose message contains `word` (their default answer otherwise).
+
+    Returns the list of the text questions that get asked.
+    """
+    asked: list[str] = []
+
+    def text(message: str, default: str = "", **kwargs) -> FakeQuestion:
+        asked.append(message)
+        return FakeQuestion(next((a for word, a in texts.items() if word in message), default))
+
+    monkeypatch.setattr(questionary, "checkbox", lambda message, **kwargs: FakeQuestion(clusters))
+    monkeypatch.setattr(questionary, "text", text)
+    return asked
+
+
+class TestAskQuestions:
+    defaults = InitAnswers(clusters=TEMPLATE_CLUSTERS, results_path="$SCRATCH/logs/my_project")
+
+    def test_accounts_are_asked_without_the_mila_cluster(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        texts = {"DRAC": "def-yourpi, rrg-yourpi-ad", "PAICE": "aip-yourpi"}
+        answer_questions(monkeypatch, clusters=["rorqual", "tamia"], texts=texts)
+
+        answers = ask_questions(TEMPLATE_CLUSTERS, self.defaults)
+
+        assert answers == dataclasses.replace(
+            self.defaults,
+            clusters=["rorqual", "tamia"],
+            drac_accounts=["def-yourpi", "rrg-yourpi-ad"],
+            paice_accounts=["aip-yourpi"],
+        )
+
+    def test_accounts_are_not_asked_with_the_mila_cluster(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        asked = answer_questions(monkeypatch, clusters=["mila", "rorqual"], texts={})
+
+        answers = ask_questions(TEMPLATE_CLUSTERS, self.defaults)
+
+        assert not any("accounts" in message for message in asked)
+        assert answers == dataclasses.replace(self.defaults, clusters=["mila", "rorqual"])
+
+    def test_datasets_path_is_only_asked_with_a_data_source(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        asked = answer_questions(monkeypatch, clusters=["mila"], texts={})
+        assert ask_questions(TEMPLATE_CLUSTERS, self.defaults).datasets_path == ""
+        assert not any("datasets go" in message for message in asked)
+
+        texts = {"copy": "mila:/network/datasets/x", "datasets go": "$SCRATCH/data"}
+        answer_questions(monkeypatch, clusters=["mila"], texts=texts)
+        answers = ask_questions(TEMPLATE_CLUSTERS, self.defaults)
+        assert answers.data_source == "mila:/network/datasets/x"
+        assert answers.datasets_path == "$SCRATCH/data"
+
+
+@pytest.mark.parametrize("quiet", [True, False])
+def test_init_cli_passes_quiet(
+    quiet: bool, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cluv init -q` passes quiet=True to init(), which then asks no question."""
+    init_calls = []
+    monkeypatch.setattr(cluv_main, "init", lambda **kwargs: init_calls.append(kwargs))
+    # main() sets `console.quiet`: setting it here makes monkeypatch restore it after the test.
+    monkeypatch.setattr(cluv_main.console, "quiet", False)
+
+    cluv_main.main(["init", str(tmp_path), *(["-q"] if quiet else [])])
+
+    assert init_calls == [{"path": tmp_path, "quiet": quiet}]
 
 
 class TestSymlinkCheck:

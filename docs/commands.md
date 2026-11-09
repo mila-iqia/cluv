@@ -72,8 +72,8 @@ To write the `[tool.cluv]` section, `cluv init` asks a few questions:
 
 - **The clusters to use.** The clusters that have a `Host` entry in your `~/.ssh/config` are
   selected by default.
-- **Your Slurm accounts** on the DRAC and PAICE clusters, only when you don't select the Mila
-  cluster. With the Mila cluster, the config uses the accounts of Mila members.
+- **Your Slurm accounts on each selected cluster.** When you select the Mila cluster, the answers
+  are pre-filled with the accounts of Mila members, which you can change or complete.
 - **Where to put the job results and the project** on the clusters (`results_path` and
   `project_dir`).
 - **The datasets to copy to all the clusters**, if any (`data_source` and `datasets_path`).

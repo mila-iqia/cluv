@@ -20,8 +20,6 @@ DEFAULT_RESULTS_PATH = "$SCRATCH/logs/cluv"
 DEFAULT_SCRATCH_PROJECT_DIR = "$SCRATCH/repos/cluv"
 DEFAULT_RESULTS_LINKNAME = "logs"
 MILA_CLUSTER = "mila"
-# The other clusters of the template, except Mila, are DRAC clusters.
-PAICE_CLUSTERS = ("tamia", "killarney", "vulcan")
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # Repository root when running cluv from a source checkout.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -142,11 +140,10 @@ def check_cluv_config(pyproject_path: Path, ask: bool = False) -> None:
         "No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config..."
     )
     template = _load_cluv_config_template()
-    clusters = _cluster_names(template)
     project_root = pyproject_path.parent
-    answers = default_answers(clusters, project_root.name)
+    answers = default_answers(template, project_root.name)
     if ask:
-        answers = ask_questions(clusters, answers)
+        answers = ask_questions(template, answers)
     cluv_config = make_cluv_config(template, answers, _scratch_project_dir(project_root))
 
     console.print("Adding config for cluv tool :")
@@ -159,39 +156,34 @@ class InitAnswers:
 
     clusters: list[str]
     results_path: str
-    # Only used when the Mila cluster isn't selected: the template has the accounts of Mila members.
-    drac_accounts: list[str] = dataclasses.field(default_factory=list)
-    paice_accounts: list[str] = dataclasses.field(default_factory=list)
+    # The Slurm accounts to use on each cluster.
+    accounts: dict[str, list[str]] = dataclasses.field(default_factory=dict)
     project_dir: str = ""
     data_source: str = ""
     datasets_path: str = ""
 
 
-def default_answers(clusters: list[str], project_name: str) -> InitAnswers:
+def default_answers(template: str, project_name: str) -> InitAnswers:
     """The answers used when no question is asked.
 
     The clusters are those with a `Host` entry in ~/.ssh/config, since cluv connects to a cluster
     with `ssh <cluster>`. When none of the clusters has an entry, all the clusters are kept.
     """
     ssh_hostnames = get_ssh_hostnames()
+    all_clusters = _cluster_names(template)
+    clusters = [cluster for cluster in all_clusters if cluster in ssh_hostnames] or all_clusters
     return InitAnswers(
-        clusters=[cluster for cluster in clusters if cluster in ssh_hostnames] or clusters,
+        clusters=clusters,
         results_path=f"$SCRATCH/logs/{project_name}",
+        accounts=_default_accounts(template, clusters),
     )
 
 
-def ask_questions(clusters: list[str], defaults: InitAnswers) -> InitAnswers:
+def ask_questions(template: str, defaults: InitAnswers) -> InitAnswers:
     """Asks the questions of `cluv init` in the terminal, with `defaults` as default answers."""
 
     def ask_text(message: str, **kwargs) -> str:
         return questionary.text(message, **kwargs).unsafe_ask().strip()
-
-    def ask_accounts(clusters_kind: str, example: str) -> list[str]:
-        accounts = ask_text(
-            f"Which Slurm accounts do you use on the {clusters_kind} clusters?",
-            instruction=f"(e.g. {example}; separate accounts with commas; leave empty for none)",
-        )
-        return accounts.replace(",", " ").split()
 
     def required(text: str) -> bool | str:
         return bool(text.strip()) or "This value is required."
@@ -199,14 +191,21 @@ def ask_questions(clusters: list[str], defaults: InitAnswers) -> InitAnswers:
     answers = dataclasses.replace(defaults)
     answers.clusters = questionary.checkbox(
         "Which clusters do you want to use?",
-        choices=[questionary.Choice(c, checked=c in defaults.clusters) for c in clusters],
+        choices=[
+            questionary.Choice(c, checked=c in defaults.clusters) for c in _cluster_names(template)
+        ],
         validate=lambda selected: bool(selected) or "Select at least one cluster.",
     ).unsafe_ask()
-    if MILA_CLUSTER not in answers.clusters:
-        if any(cluster not in PAICE_CLUSTERS for cluster in answers.clusters):
-            answers.drac_accounts = ask_accounts("DRAC", "def-yourpi")
-        if any(cluster in PAICE_CLUSTERS for cluster in answers.clusters):
-            answers.paice_accounts = ask_accounts("PAICE", "aip-yourpi")
+    # The suggested accounts depend on whether the Mila cluster was just selected.
+    default_accounts = _default_accounts(template, answers.clusters)
+    answers.accounts = {}
+    for cluster in answers.clusters:
+        accounts = ask_text(
+            f"Which Slurm accounts do you use on {cluster}?",
+            default=", ".join(default_accounts[cluster]),
+            instruction="(separate accounts with commas; leave empty for none)",
+        )
+        answers.accounts[cluster] = accounts.replace(",", " ").split()
     answers.results_path = ask_text(
         "Where should the job results go on the clusters?",
         default=defaults.results_path,
@@ -256,10 +255,9 @@ def make_cluv_config(template: str, answers: InitAnswers, scratch_project_dir: s
             continue
         if not project_in_home:
             section = [line for line in section if not line.startswith("project_dir = ")]
-        if MILA_CLUSTER not in answers.clusters:
-            accounts = (
-                answers.paice_accounts if cluster in PAICE_CLUSTERS else answers.drac_accounts
-            )
+        accounts = answers.accounts.get(cluster, [])
+        # Only rewritten when the accounts changed, to keep the comment of the template's line.
+        if accounts != _accounts(section):
             section = _set_accounts(section, accounts)
         lines += section
     return "\n".join(lines).rstrip() + "\n"
@@ -460,6 +458,32 @@ def _cluster_name(section: list[str]) -> str | None:
 def _cluster_names(config: str) -> list[str]:
     """The clusters that have a section in the config, in order."""
     return [cluster for section in _split_sections(config) if (cluster := _cluster_name(section))]
+
+
+def _default_accounts(template: str, clusters: list[str]) -> dict[str, list[str]]:
+    """The default Slurm accounts on each cluster.
+
+    The template has the accounts of Mila members, so they are only used when the Mila cluster is
+    selected. Otherwise, there is no default account.
+    """
+    if MILA_CLUSTER not in clusters:
+        return {cluster: [] for cluster in clusters}
+    template_accounts = {
+        cluster: _accounts(section)
+        for section in _split_sections(template)
+        if (cluster := _cluster_name(section))
+    }
+    return {cluster: template_accounts[cluster] for cluster in clusters}
+
+
+def _accounts(section: list[str]) -> list[str]:
+    """The Slurm accounts in the section of a cluster."""
+    return [
+        account
+        for line in section
+        if line.startswith("sbatch_args = ")
+        for account in re.findall(r'account = "([^"]*)"', line)
+    ]
 
 
 def _set_accounts(section: list[str], accounts: list[str]) -> list[str]:

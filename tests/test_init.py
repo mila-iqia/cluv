@@ -33,6 +33,8 @@ CLUV_INIT_MODULE = importlib.import_module("cluv.cli.init")
 JOB_SCRIPT_PATH = f"{SCRIPTS_DIR_PATH}/job.sh"
 TEMPLATE = CLUV_INIT_MODULE._load_cluv_config_template()
 TEMPLATE_CLUSTERS = CLUV_INIT_MODULE._cluster_names(TEMPLATE)
+# The accounts of Mila members on each cluster, from the template.
+TEMPLATE_ACCOUNTS = CLUV_INIT_MODULE._default_accounts(TEMPLATE, TEMPLATE_CLUSTERS)
 SCRATCH_PROJECT_DIR = "$SCRATCH/repos/my_project"
 
 
@@ -100,7 +102,7 @@ class TestCheckCluvConfig:
     ) -> None:
         """check_cluv_config(ask=True) writes the config from the answers to the questions."""
         monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
-        answer_questions(monkeypatch, clusters=["rorqual"], texts={"DRAC": "def-yourpi"})
+        answer_questions(monkeypatch, clusters=["rorqual"], texts={"on rorqual?": "def-yourpi"})
         p = tmp_path / "pyproject.toml"
         p.touch()
 
@@ -139,35 +141,40 @@ def make_config(**answers) -> tuple[str, CluvConfig]:
 
 
 class TestMakeCluvConfig:
-    def test_mila_member_gets_the_template_accounts(self) -> None:
-        """With the Mila cluster, the accounts of Mila members are kept from the template."""
-        _, config = make_config()
+    def test_unchanged_accounts_keep_the_lines_of_the_template(self) -> None:
+        text, config = make_config(accounts=TEMPLATE_ACCOUNTS)
 
         assert config.clusters_names == TEMPLATE_CLUSTERS
         for cluster in TEMPLATE_CLUSTERS:
             expected_sbatch_args = TEMPLATE_CONFIG.clusters[cluster].sbatch_args
             assert config.clusters[cluster].sbatch_args == expected_sbatch_args
+        assert "Mila doesn't have an allocation on Narval anymore." in text
 
-    def test_other_users_get_their_own_accounts(self) -> None:
-        """Without the Mila cluster, the accounts given by the user replace those of Mila."""
-        text, config = make_config(
-            clusters=["tamia", "rorqual", "narval"],
-            drac_accounts=["def-yourpi", "rrg-yourpi-ad"],
-            paice_accounts=["aip-yourpi"],
-        )
+    def test_changed_accounts_replace_those_of_the_template(self) -> None:
+        accounts = {
+            **TEMPLATE_ACCOUNTS,
+            "rorqual": ["rrg-bengioy-ad", "def-yourpi"],
+            "narval": [],
+            "tamia": ["aip-yourpi"],
+        }
+        text, config = make_config(accounts=accounts)
+
+        assert config.clusters["rorqual"].sbatch_args == [
+            {"account": "rrg-bengioy-ad"},
+            {"account": "def-yourpi"},
+        ]
+        assert config.clusters["narval"].sbatch_args == {}
+        assert config.clusters["tamia"].sbatch_args == {"account": "aip-yourpi"}
+        # The comment on the account of Narval goes away with that account.
+        assert "allocation on Narval" not in text
+
+    def test_no_accounts(self) -> None:
+        """Without the Mila cluster, none of the accounts of Mila members stays in the config."""
+        text, config = make_config(clusters=["tamia", "rorqual", "narval"])
 
         assert config.clusters_names == ["tamia", "rorqual", "narval"]
-        drac_sbatch_args = [{"account": "def-yourpi"}, {"account": "rrg-yourpi-ad"}]
-        assert config.clusters["rorqual"].sbatch_args == drac_sbatch_args
-        assert config.clusters["narval"].sbatch_args == drac_sbatch_args
-        assert config.clusters["tamia"].sbatch_args == {"account": "aip-yourpi"}
+        assert all(cluster.sbatch_args == {} for cluster in config.clusters.values())
         assert "bengioy" not in text
-
-    def test_other_users_without_accounts(self) -> None:
-        _, config = make_config(clusters=["tamia", "rorqual"])
-
-        assert config.clusters["tamia"].sbatch_args == {}
-        assert config.clusters["rorqual"].sbatch_args == {}
 
     @pytest.mark.parametrize("project_dir", ["", "$HOME/code/my_project"])
     def test_project_in_scratch_on_clusters_that_refuse_home(self, project_dir: str) -> None:
@@ -230,17 +237,29 @@ class TestDefaultAnswers:
         ssh_hostnames = {"rorqual", "mila", "github.com"}
         monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: ssh_hostnames)
 
-        answers = default_answers(TEMPLATE_CLUSTERS, "my_project")
+        answers = default_answers(TEMPLATE, "my_project")
 
         assert answers.clusters == ["mila", "rorqual"]
         assert answers.results_path == "$SCRATCH/logs/my_project"
+        # With the Mila cluster, the accounts of Mila members from the template.
+        assert answers.accounts == {"mila": [], "rorqual": ["rrg-bengioy-ad"]}
+
+    def test_no_default_accounts_without_the_mila_cluster(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: {"rorqual", "narval"})
+
+        assert default_answers(TEMPLATE, "my_project").accounts == {"rorqual": [], "narval": []}
 
     def test_all_clusters_without_any_in_the_ssh_config(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
 
-        assert default_answers(TEMPLATE_CLUSTERS, "my_project").clusters == TEMPLATE_CLUSTERS
+        answers = default_answers(TEMPLATE, "my_project")
+
+        assert answers.clusters == TEMPLATE_CLUSTERS
+        assert answers.accounts == TEMPLATE_ACCOUNTS
 
 
 class FakeQuestion:
@@ -255,16 +274,16 @@ class FakeQuestion:
 
 def answer_questions(
     monkeypatch: pytest.MonkeyPatch, clusters: list[str], texts: dict[str, str]
-) -> list[str]:
+) -> dict[str, str]:
     """Makes questionary answer `clusters` to the checkbox question, and `texts[word]` to the text
     questions whose message contains `word` (their default answer otherwise).
 
-    Returns the list of the text questions that get asked.
+    Returns the text questions that get asked, with their default answers.
     """
-    asked: list[str] = []
+    asked: dict[str, str] = {}
 
     def text(message: str, default: str = "", **kwargs) -> FakeQuestion:
-        asked.append(message)
+        asked[message] = default
         return FakeQuestion(next((a for word, a in texts.items() if word in message), default))
 
     monkeypatch.setattr(questionary, "checkbox", lambda message, **kwargs: FakeQuestion(clusters))
@@ -273,43 +292,63 @@ def answer_questions(
 
 
 class TestAskQuestions:
-    defaults = InitAnswers(clusters=TEMPLATE_CLUSTERS, results_path="$SCRATCH/logs/my_project")
+    defaults = InitAnswers(
+        clusters=TEMPLATE_CLUSTERS,
+        results_path="$SCRATCH/logs/my_project",
+        accounts=TEMPLATE_ACCOUNTS,
+    )
 
-    def test_accounts_are_asked_without_the_mila_cluster(
+    def test_accounts_are_prefilled_with_those_of_mila_members(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        texts = {"DRAC": "def-yourpi, rrg-yourpi-ad", "PAICE": "aip-yourpi"}
-        answer_questions(monkeypatch, clusters=["rorqual", "tamia"], texts=texts)
+        clusters = ["mila", "rorqual", "narval", "tamia"]
+        texts = {"on rorqual?": "rrg-bengioy-ad, def-yourpi"}
+        asked = answer_questions(monkeypatch, clusters=clusters, texts=texts)
 
-        answers = ask_questions(TEMPLATE_CLUSTERS, self.defaults)
+        answers = ask_questions(TEMPLATE, self.defaults)
 
-        assert answers == dataclasses.replace(
-            self.defaults,
-            clusters=["rorqual", "tamia"],
-            drac_accounts=["def-yourpi", "rrg-yourpi-ad"],
-            paice_accounts=["aip-yourpi"],
-        )
+        prefilled = {
+            cluster: asked[f"Which Slurm accounts do you use on {cluster}?"]
+            for cluster in clusters
+        }
+        assert prefilled == {
+            "mila": "",
+            "rorqual": "rrg-bengioy-ad",
+            "narval": "def-bengioy",
+            "tamia": "",
+        }
+        assert answers.accounts == {
+            "mila": [],
+            "rorqual": ["rrg-bengioy-ad", "def-yourpi"],
+            "narval": ["def-bengioy"],
+            "tamia": [],
+        }
 
-    def test_accounts_are_not_asked_with_the_mila_cluster(
+    def test_accounts_are_not_prefilled_without_the_mila_cluster(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        asked = answer_questions(monkeypatch, clusters=["mila", "rorqual"], texts={})
+        texts = {"on rorqual?": "def-yourpi, rrg-yourpi-ad", "on tamia?": "aip-yourpi"}
+        asked = answer_questions(monkeypatch, clusters=["rorqual", "tamia"], texts=texts)
 
-        answers = ask_questions(TEMPLATE_CLUSTERS, self.defaults)
+        answers = ask_questions(TEMPLATE, self.defaults)
 
-        assert not any("accounts" in message for message in asked)
-        assert answers == dataclasses.replace(self.defaults, clusters=["mila", "rorqual"])
+        assert asked["Which Slurm accounts do you use on rorqual?"] == ""
+        assert asked["Which Slurm accounts do you use on tamia?"] == ""
+        assert answers.accounts == {
+            "rorqual": ["def-yourpi", "rrg-yourpi-ad"],
+            "tamia": ["aip-yourpi"],
+        }
 
     def test_datasets_path_is_only_asked_with_a_data_source(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         asked = answer_questions(monkeypatch, clusters=["mila"], texts={})
-        assert ask_questions(TEMPLATE_CLUSTERS, self.defaults).datasets_path == ""
+        assert ask_questions(TEMPLATE, self.defaults).datasets_path == ""
         assert not any("datasets go" in message for message in asked)
 
         texts = {"copy": "mila:/network/datasets/x", "datasets go": "$SCRATCH/data"}
         answer_questions(monkeypatch, clusters=["mila"], texts=texts)
-        answers = ask_questions(TEMPLATE_CLUSTERS, self.defaults)
+        answers = ask_questions(TEMPLATE, self.defaults)
         assert answers.data_source == "mila:/network/datasets/x"
         assert answers.datasets_path == "$SCRATCH/data"
 

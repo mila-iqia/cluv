@@ -156,6 +156,9 @@ class InitAnswers:
 
     clusters: list[str]
     results_path: str
+    # Whether the user has access to the Mila cluster. If so, the accounts of Mila members are
+    # suggested on all the clusters.
+    mila_access: bool = False
     # The Slurm accounts to use on each cluster.
     accounts: dict[str, list[str]] = dataclasses.field(default_factory=dict)
     project_dir: str = ""
@@ -167,15 +170,18 @@ def default_answers(template: str, project_name: str) -> InitAnswers:
     """The answers used when no question is asked.
 
     The clusters are those with a `Host` entry in ~/.ssh/config, since cluv connects to a cluster
-    with `ssh <cluster>`. When none of the clusters has an entry, all the clusters are kept.
+    with `ssh <cluster>`. When none of the clusters has an entry, all the clusters are kept. The
+    user is assumed to have access to the Mila cluster when it is one of these clusters.
     """
     ssh_hostnames = get_ssh_hostnames()
     all_clusters = _cluster_names(template)
     clusters = [cluster for cluster in all_clusters if cluster in ssh_hostnames] or all_clusters
+    mila_access = MILA_CLUSTER in clusters
     return InitAnswers(
         clusters=clusters,
         results_path=f"$SCRATCH/logs/{project_name}",
-        accounts=_default_accounts(template, clusters),
+        mila_access=mila_access,
+        accounts=_default_accounts(template, clusters, mila_access),
     )
 
 
@@ -189,15 +195,24 @@ def ask_questions(template: str, defaults: InitAnswers) -> InitAnswers:
         return bool(text.strip()) or "This value is required."
 
     answers = dataclasses.replace(defaults)
+    answers.mila_access = questionary.confirm(
+        "Do you have access to the Mila cluster?", default=defaults.mila_access
+    ).unsafe_ask()
+
+    def selected_by_default(cluster: str) -> bool:
+        if cluster == MILA_CLUSTER:
+            return answers.mila_access
+        return cluster in defaults.clusters
+
     answers.clusters = questionary.checkbox(
         "Which clusters do you want to use?",
         choices=[
-            questionary.Choice(c, checked=c in defaults.clusters) for c in _cluster_names(template)
+            questionary.Choice(cluster, checked=selected_by_default(cluster))
+            for cluster in _cluster_names(template)
         ],
         validate=lambda selected: bool(selected) or "Select at least one cluster.",
     ).unsafe_ask()
-    # The suggested accounts depend on whether the Mila cluster was just selected.
-    default_accounts = _default_accounts(template, answers.clusters)
+    default_accounts = _default_accounts(template, answers.clusters, answers.mila_access)
     answers.accounts = {}
     for cluster in answers.clusters:
         accounts = ask_text(
@@ -460,13 +475,16 @@ def _cluster_names(config: str) -> list[str]:
     return [cluster for section in _split_sections(config) if (cluster := _cluster_name(section))]
 
 
-def _default_accounts(template: str, clusters: list[str]) -> dict[str, list[str]]:
+def _default_accounts(
+    template: str, clusters: list[str], mila_access: bool
+) -> dict[str, list[str]]:
     """The default Slurm accounts on each cluster.
 
-    The template has the accounts of Mila members, so they are only used when the Mila cluster is
-    selected. Otherwise, there is no default account.
+    The template has the accounts of Mila members, so they are only used for the users who have
+    access to the Mila cluster, even when the Mila cluster isn't selected. For the other users,
+    there is no default account.
     """
-    if MILA_CLUSTER not in clusters:
+    if not mila_access:
         return {cluster: [] for cluster in clusters}
     template_accounts = {
         cluster: _accounts(section)

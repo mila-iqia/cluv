@@ -27,8 +27,9 @@ cluv init ~/my-project
 This adds a `[tool.cluv]` section to your `pyproject.toml` and job script templates in
 `scripts/`. It only creates what's missing, so it's safe to re-run.
 
-Before writing the config, `cluv init` asks which clusters you use, your Slurm accounts on each of
-them, and where to put your results, your project and your datasets on the clusters. Press Enter
+Before writing the config, `cluv init` asks whether you have access to the Mila cluster, which
+clusters you use, your Slurm accounts on each of them, and where to put your results, your project
+and your datasets on the clusters. Press Enter
 to keep the default answer. With `--quiet`, `cluv init` asks nothing and
 uses the default answers.
 
@@ -72,7 +73,7 @@ For the clusters you don't want to use (no access, missing SSH entry, ...), you 
 ### Set your allocation accounts
 
 Some clusters require an `--account` for every job. `cluv init` asks for your accounts on each
-cluster. When you select the Mila cluster, it suggests Mila's allocations (`rrg-bengioy-ad`,
+cluster. If you have access to the Mila cluster, it suggests Mila's allocations (`rrg-bengioy-ad`,
 `def-bengioy`), which are available to core Mila students. To change the accounts later, adjust
 them to the allocations you actually have access to:
 

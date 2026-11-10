@@ -21,6 +21,8 @@ User-facing docs live in `docs/` (mkdocs-material, published at https://mila-iqi
 
 ## Commands (working on this repo)
 
+Full flag reference: `cluv <command> --help` and `docs/commands.md`.
+
 ```bash
 uv sync                        # install dependencies (also installs the examples workspace members)
 uv run cluv <command>          # run cluv from the checkout (-v / -vv for more logging, -q quiet)
@@ -33,7 +35,7 @@ uv run pre-commit run --all-files    # ruff check --fix + ruff format + misc hoo
 uv run mkdocs serve --livereload     # serve the docs from docs/
 ```
 
-Pytest runs with `--doctest-modules` (docstring examples in `cluv/` count as tests — keep them
+Pytest runs with `--doctest-modules` (docstring examples in `cluv/` count as tests, keep them
 runnable) and pytest-xdist in parallel. The two kinds of tests:
 
 - **Unit tests** never touch the network: pure functions are tested against against fixture data,
@@ -42,25 +44,6 @@ runnable) and pytest-xdist in parallel. The two kinds of tests:
   query actual clusters over the live SSH connections from `cluv login`. The `cluster`/`remote`
   fixtures in `tests/conftest.py` parametrize them over every currently-connected cluster and
   skip the rest (in CI they run only on a self-hosted runner with real connections).
-
-## Using cluv
-
-Full flag reference: `cluv <command> --help` and `docs/commands.md`.
-
-- `cluv init [path]`, generate a `[tool.cluv]` config + job-script templates. Safe to re-run.
-- `cluv login [clusters...]`, open the reusable SSH connections (sequentially, to avoid
-  concurrent 2FA prompts).
-- `cluv sync [clusters...]`, clone/checkout + `uv sync` on each cluster, fetch results back.
-- `cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]`, sync, then `sbatch`
-  on the cluster (clean git tree required, or `--autocommit`). Multiple jobs can be submitted at
-  once by giving multiple `sbatch-args`, it races several jobs and keeps only the first one to start.
-  Merges sbatch flags (CLI > per-cluster > global)
-- `cluv run <cluster> <command...>`, sync + `uv run <command>` on one cluster.
-- `cluv sh <command...>`, raw shell command on every connected cluster.
-- `cluv status [clusters|jobs|all]`, GPU / storage / queue overview, plus a list of submitted cluv jobs.
-- `cluv clean [clusters...]`, delete cluster-side results the user already deleted locally.
-- `cluv disable <cluster> [period]` / `cluv enable`, temporarily skip a cluster without touching the config.
-- Hydra sweeps: `python main.py -m launcher=cluv ...` via the plugin in `hydra_plugins/cluv/`.
 
 ## Code structure
 
@@ -118,8 +101,6 @@ sync state, disabled clusters, cached GPU types, job history, submission logs...
 
 - Make small, clean commits regularly; each commit covers a single action or theme.
 - Write minimalist, clean, pythonic code; avoid being overly general or abstract.
-- ruff with `line-length = 99` (via pre-commit); docstrings double as `--help` and mkdocs
-  content, keep them consistent with the surrounding code.
 - **Isolate in a worktree before editing.** Multiple agents and humans share this checkout:
   use your agent's worktree tool (or `git worktree add`) instead of the shared checkout, and
   commit/push from the worktree so the work survives its cleanup.

@@ -25,7 +25,6 @@ Full flag reference: `cluv <command> --help` and `docs/commands.md`.
 
 ```bash
 uv sync                        # install dependencies (also installs the examples workspace members)
-uv run cluv <command>          # run cluv from the checkout (-v / -vv for more logging, -q quiet)
 
 uv run pytest                  # everything (integration tests run when logged in to clusters, skip otherwise)
 uv run pytest -m "not integration"   # unit tests only (no SSH required)
@@ -36,9 +35,10 @@ uv run mkdocs serve --livereload     # serve the docs from docs/
 ```
 
 Pytest runs with `--doctest-modules` (docstring examples in `cluv/` count as tests, keep them
-runnable) and pytest-xdist in parallel. The two kinds of tests:
+runnable) and pytest-xdist in parallel. Tests marked `@pytest.mark.slow` are skipped unless
+`--slow` is passed. The two kinds of tests:
 
-- **Unit tests** never touch the network: pure functions are tested against against fixture data,
+- **Unit tests** never touch the network: pure functions are tested against fixture data,
   and the commands run against fake or monkeypatched `Remote`s.
 - **Integration tests** (`@pytest.mark.integration`) do the real thing: sync, submit and
   query actual clusters over the live SSH connections from `cluv login`. The `cluster`/`remote`
@@ -50,7 +50,7 @@ runnable) and pytest-xdist in parallel. The two kinds of tests:
 ### Entry points
 
 - **CLI**: `cluv/__main__.py` builds an argparse parser (one `add_<cmd>_args()` per subcommand)
-  and dispatches to `cluv/cli/<cmd>.py`. `submit` also parse remaining args (with cluv's own flags
+  and dispatches to `cluv/cli/<cmd>.py`. `submit` also parses remaining args (with cluv's own flags
   "rescued" back out of it).
 - **Hydra plugin**: `hydra_plugins/cluv/` with `CluvLauncher` (the `hydra` extra) reuses the same
   sync/submit machinery, plus a `${cluv:...}` config resolver.
@@ -66,16 +66,18 @@ machine they belong to.
 
 ### Commands (`cluv/cli/`, one file per command)
 
-Commands build on each other: `run` and `submit` call `sync`, and all remote I/O goes through
-`Remote(hostname)` to reuses the SSH ControlMaster sockets opened by `cluv login`.
+Commands build on each other: all remote I/O goes through `Remote(hostname)` to
+reuse the SSH ControlMaster sockets opened by `cluv login`.
 
-Use `cache.py` for state that survives between commands under `~/.cache/cluv/<project>/` (per-cluster
-sync state, disabled clusters, cached GPU types, job history, submission logs...).
+Use `cache.py` for state that survives between commands, in the project cache dir chosen by
+`platformdirs` (per-cluster sync state, disabled clusters, cached GPU types, job history, submission
+logs...).
 
 ### Docs, tests, examples, scripts
 
 - `docs/`, mkdocs-material site: `commands.md` (per-command reference), `guides/`,
-  `hydra-launcher.md`, `troubleshooting.md`.
+  `hydra-launcher.md`, `troubleshooting.md`, and `reference/` (mkdocstrings pages;
+  `reference/cli/` pulls each command module's docstrings in automatically).
 - `tests/`, one file per module/feature; `conftest.py` has the `cluster`/`remote` fixtures and
   the `$HOME`/`$SCRATCH` mocking.
 - `examples/`, sample projects (uv workspace members, tested by `tests/test_examples*`);

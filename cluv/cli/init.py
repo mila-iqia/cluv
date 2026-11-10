@@ -198,8 +198,12 @@ def ask_questions(template: str, defaults: InitAnswers) -> InitAnswers:
     def ask_text(message: str, **kwargs) -> str:
         return questionary.text(message, **kwargs).unsafe_ask().strip()
 
-    def required(text: str) -> bool | str:
-        return bool(text.strip()) or "This value is required."
+    def path(text: str) -> bool | str:
+        # cluv replaces the $VARIABLES in paths, but not `~`.
+        return "~" not in text or "Write $HOME instead of ~."
+
+    def required_path(text: str) -> bool | str:
+        return path(text) if text.strip() else "This value is required."
 
     answers = dataclasses.replace(defaults)
     answers.mila_access = questionary.confirm(
@@ -237,19 +241,21 @@ def ask_questions(template: str, defaults: InitAnswers) -> InitAnswers:
     answers.results_path = ask_text(
         "Where should the job results go on the clusters?",
         default=defaults.results_path,
-        validate=required,
+        validate=required_path,
     )
     answers.project_dir = ask_text(
         "Where should the project go on the clusters?",
         instruction="(leave empty for the same path as on this machine, relative to $HOME)",
+        validate=path,
     )
     answers.data_source = ask_text(
         "Where are the datasets that cluv should copy to all the clusters?",
         instruction="(<cluster>:<path>, or a path on this machine; leave empty if there are none)",
+        validate=path,
     )
     if answers.data_source:
         answers.datasets_path = ask_text(
-            "Where should the datasets go on the clusters?", validate=required
+            "Where should the datasets go on the clusters?", validate=required_path
         )
     return answers
 

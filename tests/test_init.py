@@ -489,6 +489,36 @@ class TestAskQuestions:
         assert answers.data_source == "mila:/network/datasets/x"
         assert answers.datasets_path == "$SCRATCH/data"
 
+    def test_path_questions_refuse_tilde(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """cluv replaces the $VARIABLES in paths, but not `~`. So the questions about paths refuse
+        `~`. The paths of the results and of the datasets are also required."""
+        answer_questions(monkeypatch, mila_access=True, clusters=["mila"], texts={"copy": "/data"})
+        fake_text = questionary.text
+        validators = {}
+
+        def text(message: str, **kwargs) -> FakeQuestion:
+            validators[message] = kwargs.get("validate")
+            return fake_text(message, **kwargs)
+
+        monkeypatch.setattr(questionary, "text", text)
+
+        ask_questions(TEMPLATE, self.defaults)
+
+        path_questions = [message for message in validators if message.startswith("Where")]
+        assert len(path_questions) == 4
+        required = {
+            "Where should the job results go on the clusters?",
+            "Where should the datasets go on the clusters?",
+        }
+        assert required <= set(path_questions)
+        for message in path_questions:
+            validate = validators[message]
+            assert validate("~/data") == "Write $HOME instead of ~.", message
+            assert validate("mila:~/data") == "Write $HOME instead of ~.", message
+            assert validate("$HOME/data") is True, message
+            expected = "This value is required." if message in required else True
+            assert validate("") == expected, message
+
 
 @pytest.mark.parametrize(
     ("cluster", "example"),

@@ -36,7 +36,7 @@ uv run mkdocs serve --livereload     # serve the docs from docs/
 Pytest runs with `--doctest-modules` (docstring examples in `cluv/` count as tests — keep them
 runnable) and pytest-xdist in parallel. The two kinds of tests:
 
-- **Unit tests** never touch the network: pure functionsare tested against captured fixture text,
+- **Unit tests** never touch the network: pure functions are tested against against fixture data,
   and the commands run against fake or monkeypatched `Remote`s.
 - **Integration tests** (`@pytest.mark.integration`) do the real thing: sync, submit and
   query actual clusters over the live SSH connections from `cluv login`. The `cluster`/`remote`
@@ -47,20 +47,19 @@ runnable) and pytest-xdist in parallel. The two kinds of tests:
 
 Full flag reference: `cluv <command> --help` and `docs/commands.md`.
 
-- `cluv init [path]` — generate a `[tool.cluv]` config + job-script templates. Safe to re-run.
-- `cluv login [clusters...]` — open the reusable SSH connections (sequentially, to avoid
+- `cluv init [path]`, generate a `[tool.cluv]` config + job-script templates. Safe to re-run.
+- `cluv login [clusters...]`, open the reusable SSH connections (sequentially, to avoid
   concurrent 2FA prompts).
-- `cluv sync [clusters...]` — clone/checkout + `uv sync` on each cluster,
-  fetch results back.
-- `cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]` — sync, then `sbatch`
+- `cluv sync [clusters...]`, clone/checkout + `uv sync` on each cluster, fetch results back.
+- `cluv submit <cluster> [<job.sh>] [sbatch-args...] [-- program-args...]`, sync, then `sbatch`
   on the cluster (clean git tree required, or `--autocommit`). Multiple jobs can be submitted at
   once by giving multiple `sbatch-args`, it races several jobs and keeps only the first one to start.
-- `cluv run <cluster> <command...>` — sync + `uv run <command>` on one cluster.
-- `cluv sh <command...>` — raw shell command on every connected cluster.
-- `cluv status [clusters|jobs|all]` — GPU / storage / queue overview, plus a table of submitted jobs.
-- `cluv clean [clusters...]` — delete cluster-side results the user already deleted locally.
-- `cluv disable <cluster> [period]` / `cluv enable` — temporarily skip a cluster everywhere
-  without touching the config.
+  Merges sbatch flags (CLI > per-cluster > global)
+- `cluv run <cluster> <command...>`, sync + `uv run <command>` on one cluster.
+- `cluv sh <command...>`, raw shell command on every connected cluster.
+- `cluv status [clusters|jobs|all]`, GPU / storage / queue overview, plus a list of submitted cluv jobs.
+- `cluv clean [clusters...]`, delete cluster-side results the user already deleted locally.
+- `cluv disable <cluster> [period]` / `cluv enable`, temporarily skip a cluster without touching the config.
 - Hydra sweeps: `python main.py -m launcher=cluv ...` via the plugin in `hydra_plugins/cluv/`.
 
 ## Code structure
@@ -68,46 +67,37 @@ Full flag reference: `cluv <command> --help` and `docs/commands.md`.
 ### Entry points
 
 - **CLI**: `cluv/__main__.py` builds an argparse parser (one `add_<cmd>_args()` per subcommand)
-  and dispatches to `cluv/cli/<cmd>.py` (coroutines run through `asyncio.run`). `submit`'s
-  argument parsing (`argparse.REMAINDER`, with cluv's own flags "rescued" back out of it) is
-  subtle — read it before changing it.
-- **Hydra plugin**: `hydra_plugins/cluv/` — `CluvLauncher` (the `hydra` extra) reuses the same
+  and dispatches to `cluv/cli/<cmd>.py`. `submit` also parse remaining args (with cluv's own flags
+  "rescued" back out of it).
+- **Hydra plugin**: `hydra_plugins/cluv/` with `CluvLauncher` (the `hydra` extra) reuses the same
   sync/submit machinery, plus a `${cluv:...}` config resolver.
-- **In-job runtime**: `cluv/job.py` — what *user code inside jobs* imports for unique run ids
-  and results/datasets paths, keyed off the `CLUV_CLUSTER` and `GIT_COMMIT` env vars that
-  `cluv submit` injects.
+- **In-job runtime**: `cluv/job.py` with what *user code inside jobs* imports for unique run ids
+  and results/datasets paths, and env vars that `cluv submit` injects.
 
 ### Configuration
 
 Users write `[tool.cluv]` (globals) and `[tool.cluv.clusters.<name>]` (overrides) in their
-`pyproject.toml`; `cluv/config.py` validates them into a cached Pydantic model and merges them
+`pyproject.toml`. `cluv/config.py` validates them into a cached Pydantic model and merges them
 per cluster. Paths are `PurePosixPath`s containing `$SCRATCH`-style vars, expanded only on the
 machine they belong to.
 
 ### Commands (`cluv/cli/`, one file per command)
 
 Commands build on each other: `run` and `submit` call `sync`, and all remote I/O goes through
-`cluv/remote.py` — `Remote(hostname)` reuses the SSH ControlMaster sockets opened by `cluv login`.
+`Remote(hostname)` to reuses the SSH ControlMaster sockets opened by `cluv login`.
 
-- `submit.py` - merges sbatch flags (CLI > per-cluster > global), syncs, submits, then races the jobs.
-  `get_sbatch_command()`'s nested `bash --login -c '...'` quoting (so `$SCRATCH` expands remotely but
-  program args don't) is easy to break — read it first.
-- `sync.py` - the push/clone/`uv sync`/fetch-results pipeline; skips disabled clusters, clusters
-  sharing a filesystem with one already synced, and work the cache shows is already done.
-- `status.py` + `slurm.py` - one SSH round-trip per cluster; keep the Slurm-output parsers in
-  `slurm.py` pure (no I/O, unit-tested on fixture text), rendering separate in `status.py`.
-- `cache.py` - state that survives between commands under `~/.cache/cluv/<project>/`:
-  per-cluster sync state, disabled clusters, cached GPU types, job history, submission logs.
+Use `cache.py` for state that survives between commands under `~/.cache/cluv/<project>/` (per-cluster
+sync state, disabled clusters, cached GPU types, job history, submission logs...).
 
 ### Docs, tests, examples, scripts
 
-- `docs/` — mkdocs-material site: `commands.md` (per-command reference), `guides/`,
+- `docs/`, mkdocs-material site: `commands.md` (per-command reference), `guides/`,
   `hydra-launcher.md`, `troubleshooting.md`.
-- `tests/` — one file per module/feature; `conftest.py` has the `cluster`/`remote` fixtures and
+- `tests/`, one file per module/feature; `conftest.py` has the `cluster`/`remote` fixtures and
   the `$HOME`/`$SCRATCH` mocking.
-- `examples/` — sample projects (uv workspace members, tested by `tests/test_examples*`);
+- `examples/`, sample projects (uv workspace members, tested by `tests/test_examples*`);
   update them when a feature they use changes.
-- `scripts/` — `job.sh` / `safe_job.sh` templates that `cluv init` copies into new projects.
+- `scripts/`, `job.sh` / `safe_job.sh` templates that `cluv init` copies into new projects.
 
 ## Cross-cutting patterns
 

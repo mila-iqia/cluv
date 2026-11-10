@@ -84,6 +84,17 @@ class TestCheckCluvConfig:
         assert config.clusters_names == ["mila"]
         assert config.results_path == "results"
 
+    def test_keep_existing_cluv_toml_config(self, tmp_path: Path) -> None:
+        """check_cluv_config() should not add a section to pyproject.toml if cluv.toml has a config"""
+        p = tmp_path / "pyproject.toml"
+        p.write_text('[project]\nname = "foo"\n')
+        (tmp_path / "cluv.toml").write_text('results_path = "results"\n')
+
+        check_cluv_config(p)
+
+        assert p.read_text() == '[project]\nname = "foo"\n'
+        assert load_cluv_config(p).results_path == "results"
+
 
 class TestSymlinkCheck:
     def test_no_symlink_if_scratch_not_set(self, tmp_path, monkeypatch) -> None:

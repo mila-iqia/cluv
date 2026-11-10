@@ -29,9 +29,8 @@ This adds a `[tool.cluv]` section to your `pyproject.toml` and job script templa
 
 Before writing the config, `cluv init` asks whether you have access to the Mila cluster, which
 clusters you use, your Slurm accounts on each of them, and where to put your results, your project
-and your datasets on the clusters. Press Enter
-to keep the default answer. With `--quiet`, `cluv init` asks nothing and
-uses the default answers.
+and your datasets on the clusters. Press Enter to keep the default answer. With `--quiet`,
+`cluv init` asks nothing and uses the default answers.
 
 **Read the output carefully**: every warning points to something you'll probably want to fix in the next section.
 

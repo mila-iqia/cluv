@@ -145,7 +145,12 @@ def check_cluv_config(pyproject_path: Path, ask: bool = False) -> None:
     project_root = pyproject_path.parent
     answers = default_answers(template, project_root.name)
     if ask:
-        answers = ask_questions(template, answers)
+        try:
+            answers = ask_questions(template, answers)
+        except (KeyboardInterrupt, EOFError):
+            # Ctrl-C raises KeyboardInterrupt, and Ctrl-D raises EOFError.
+            console.print("Cancelled: no cluv config was written.", style="yellow")
+            sys.exit(1)
     cluv_config = make_cluv_config(template, answers, _scratch_project_dir(project_root))
 
     console.print("Adding config for cluv tool :")
@@ -215,13 +220,19 @@ def ask_questions(template: str, defaults: InitAnswers) -> InitAnswers:
         validate=lambda selected: bool(selected) or "Select at least one cluster.",
     ).unsafe_ask()
     default_accounts = _default_accounts(template, answers.clusters, answers.mila_access)
+    # The last answer for each kind of cluster (Mila, PAICE or DRAC). When the template has no
+    # account for a cluster, that answer pre-fills the question about the cluster, since clusters
+    # of the same kind often share accounts.
+    last_answers: dict[str, str] = {}
     answers.accounts = {}
     for cluster in answers.clusters:
+        kind = _cluster_kind(cluster)
         accounts = ask_text(
             f"Which Slurm accounts do you use on {cluster}?",
-            default=", ".join(default_accounts[cluster]),
+            default=", ".join(default_accounts[cluster]) or last_answers.get(kind, ""),
             instruction=_accounts_instruction(cluster),
         )
+        last_answers[kind] = accounts
         answers.accounts[cluster] = accounts.replace(",", " ").split()
     answers.results_path = ask_text(
         "Where should the job results go on the clusters?",
@@ -259,9 +270,11 @@ def make_cluv_config(template: str, answers: InitAnswers, scratch_project_dir: s
             line = f"{key} = {_toml_string(value)}"
             config = re.sub(rf"^# {key} = .*$", lambda _: line, config, count=1, flags=re.M)
 
-    # A `project_dir` set for one cluster overrides the global one. So the template's `project_dir`
-    # of the clusters that can't run jobs from $HOME is only kept when the global one is in $HOME.
-    project_in_home = not answers.project_dir or answers.project_dir.startswith(("$HOME", "~"))
+    # A `project_dir` set for one cluster overrides the global one. For the clusters that can't
+    # run jobs from $HOME, the template sets a `project_dir` in $SCRATCH. That cluster
+    # `project_dir` is only removed when the global `project_dir` is in $SCRATCH too, because the
+    # clusters could refuse the jobs with any other global `project_dir`.
+    project_in_scratch = answers.project_dir.split("/")[0] in ("$SCRATCH", "${SCRATCH}")
     lines = []
     for section in _split_sections(config):
         cluster = _cluster_name(section)
@@ -270,8 +283,8 @@ def make_cluv_config(template: str, answers: InitAnswers, scratch_project_dir: s
             continue
         if cluster not in answers.clusters:
             continue
-        if not project_in_home:
-            section = [line for line in section if not line.startswith("project_dir = ")]
+        if project_in_scratch:
+            section = _remove_project_dir(section)
         accounts = answers.accounts.get(cluster, [])
         # Only rewritten when the accounts changed, to keep the comment of the template's line.
         if accounts != _accounts(section):
@@ -496,15 +509,22 @@ def _default_accounts(
     return {cluster: template_accounts[cluster] for cluster in clusters}
 
 
+def _cluster_kind(cluster: str) -> str:
+    """The kind of the cluster: "mila", "paice" or "drac"."""
+    if cluster == MILA_CLUSTER:
+        return "mila"
+    return "paice" if cluster in PAICE_CLUSTERS else "drac"
+
+
 def _accounts_instruction(cluster: str) -> str:
     """The instruction of the question about the Slurm accounts on the cluster.
 
-    It gives an example of account name, except on the Mila cluster, where the template has no
-    account.
+    The instruction gives an example of account name. On the Mila cluster, where jobs usually don't
+    need an account, the instruction says so instead.
     """
     instruction = "separate accounts with commas; leave empty for none"
     if cluster == MILA_CLUSTER:
-        return f"({instruction})"
+        return f"(usually not needed on the Mila cluster; {instruction})"
     example = "aip-yourpi" if cluster in PAICE_CLUSTERS else "def-yourpi"
     return f"(e.g. {example}; {instruction})"
 
@@ -517,6 +537,22 @@ def _accounts(section: list[str]) -> list[str]:
         if line.startswith("sbatch_args = ")
         for account in re.findall(r'account = "([^"]*)"', line)
     ]
+
+
+def _remove_project_dir(section: list[str]) -> list[str]:
+    """Removes the `project_dir` line from the section of a cluster.
+
+    The comment lines right above the `project_dir` line explain that line, so these comment lines
+    are removed too.
+    """
+    lines: list[str] = []
+    for line in section:
+        if line.startswith("project_dir = "):
+            while lines and lines[-1].startswith("#"):
+                lines.pop()
+        else:
+            lines.append(line)
+    return lines
 
 
 def _set_accounts(section: list[str], accounts: list[str]) -> list[str]:

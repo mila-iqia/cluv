@@ -119,6 +119,26 @@ class TestCheckCluvConfig:
         assert config.clusters_names == ["rorqual"]
         assert config.clusters["rorqual"].sbatch_args == {"account": "def-yourpi"}
 
+    @pytest.mark.parametrize("error", [KeyboardInterrupt, EOFError])
+    def test_cancel_the_questions(
+        self, error: type[BaseException], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ctrl-C (KeyboardInterrupt) or Ctrl-D (EOFError) during the questions stops `cluv init`
+        without writing a cluv config."""
+        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+
+        def cancel(*args, **kwargs):
+            raise error
+
+        monkeypatch.setattr(CLUV_INIT_MODULE, "ask_questions", cancel)
+        p = tmp_path / "pyproject.toml"
+        p.touch()
+
+        with pytest.raises(SystemExit):
+            check_cluv_config(p, ask=True)
+
+        assert p.read_text() == ""
+
     def test_keep_existing_cluv_config(self, tmp_path: Path) -> None:
         """check_cluv_config() should not overwrite an existing cluv config"""
         p = tmp_path / "pyproject.toml"
@@ -148,6 +168,15 @@ def make_config(**answers) -> tuple[str, CluvConfig]:
 
 
 class TestMakeCluvConfig:
+    def test_template_only_sets_accounts_in_the_sbatch_args_of_clusters(self) -> None:
+        """make_cluv_config() changes the accounts of a cluster by writing a new `sbatch_args` line
+        with only these accounts. Any other sbatch flag in that line of the template would be
+        lost."""
+        for cluster, cluster_config in TEMPLATE_CONFIG.clusters.items():
+            sbatch_args = cluster_config.sbatch_args
+            for flags in sbatch_args if isinstance(sbatch_args, list) else [sbatch_args]:
+                assert set(flags) <= {"account"}, f"Flags other than `account` on {cluster}."
+
     def test_unchanged_accounts_keep_the_lines_of_the_template(self) -> None:
         text, config = make_config(accounts=TEMPLATE_ACCOUNTS)
 
@@ -183,9 +212,13 @@ class TestMakeCluvConfig:
         assert all(cluster.sbatch_args == {} for cluster in config.clusters.values())
         assert "bengioy" not in text
 
-    @pytest.mark.parametrize("project_dir", ["", "$HOME/code/my_project"])
+    @pytest.mark.parametrize(
+        "project_dir",
+        ["", "$HOME/code/my_project", "${HOME}/code/my_project", "/home/me/code/my_project"],
+    )
     def test_project_in_scratch_on_clusters_that_refuse_home(self, project_dir: str) -> None:
-        """Clusters that can't run jobs from $HOME get the project in $SCRATCH/repos (#251)."""
+        """Unless the global `project_dir` is in $SCRATCH, the clusters that can't run jobs from
+        $HOME get the project in $SCRATCH/repos (#251)."""
         _, config = make_config(project_dir=project_dir)
 
         for cluster in TEMPLATE_CLUSTERS:
@@ -193,12 +226,18 @@ class TestMakeCluvConfig:
             expected_project_dir = SCRATCH_PROJECT_DIR if needs_scratch else None
             assert config.clusters[cluster].project_dir == expected_project_dir
 
-    def test_no_cluster_project_dir_when_the_project_is_not_in_home(self) -> None:
-        """A `project_dir` outside of $HOME is used as is on all the clusters."""
-        _, config = make_config(project_dir="$SCRATCH/code/my_project")
+    @pytest.mark.parametrize(
+        "project_dir", ["$SCRATCH/code/my_project", "${SCRATCH}/code/my_project"]
+    )
+    def test_no_cluster_project_dir_when_the_project_is_in_scratch(self, project_dir: str) -> None:
+        """A global `project_dir` in $SCRATCH is used as is on all the clusters."""
+        text, config = make_config(project_dir=project_dir)
 
-        assert config.project_dir == "$SCRATCH/code/my_project"
+        assert config.project_dir == project_dir
         assert all(cluster.project_dir is None for cluster in config.clusters.values())
+        # The comments about the `project_dir` of these clusters are removed too.
+        assert "Killarney refuses to run jobs" not in text
+        assert "Keep the project on $SCRATCH instead." not in text
 
     def test_optional_settings(self) -> None:
         text, config = make_config()
@@ -402,6 +441,41 @@ class TestAskQuestions:
             "tamia": ["aip-yourpi"],
         }
 
+    def test_accounts_are_prefilled_with_the_answer_for_the_previous_cluster_of_the_same_kind(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When the template has no account for a cluster, the answer for the previous cluster of
+        the same kind (PAICE or DRAC) pre-fills the question."""
+        clusters = ["tamia", "killarney", "rorqual", "fir", "narval"]
+        texts = {
+            "on tamia?": "aip-yourpi",
+            "on rorqual?": "def-yourpi, rrg-yourpi-ad",
+            "on fir?": "def-yourpi",
+        }
+        asked = answer_questions(monkeypatch, mila_access=False, clusters=clusters, texts=texts)
+
+        answers = ask_questions(TEMPLATE, self.defaults)
+
+        prefilled = {
+            cluster: asked[f"Which Slurm accounts do you use on {cluster}?"]
+            for cluster in clusters
+        }
+        assert prefilled == {
+            "tamia": "",
+            "killarney": "aip-yourpi",
+            # The answer for a PAICE cluster doesn't pre-fill the question for a DRAC cluster.
+            "rorqual": "",
+            "fir": "def-yourpi, rrg-yourpi-ad",
+            "narval": "def-yourpi",
+        }
+        assert answers.accounts == {
+            "tamia": ["aip-yourpi"],
+            "killarney": ["aip-yourpi"],
+            "rorqual": ["def-yourpi", "rrg-yourpi-ad"],
+            "fir": ["def-yourpi"],
+            "narval": ["def-yourpi"],
+        }
+
     def test_datasets_path_is_only_asked_with_a_data_source(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -427,13 +501,15 @@ class TestAskQuestions:
     ],
 )
 def test_accounts_instruction_gives_an_example(cluster: str, example: str | None) -> None:
-    """The question about the accounts shows a DRAC or PAICE account name, but none for Mila."""
+    """The question about the accounts shows a DRAC or PAICE account name. For the Mila cluster,
+    the question says instead that an account is usually not needed."""
     instruction = CLUV_INIT_MODULE._accounts_instruction(cluster)
 
     if example:
         assert f"(e.g. {example}; " in instruction
     else:
         assert "e.g." not in instruction
+        assert "(usually not needed on the Mila cluster; " in instruction
 
 
 @pytest.mark.parametrize("quiet", [True, False])

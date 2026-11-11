@@ -18,6 +18,7 @@ def in_a_job(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.Fi
             """\
             [tool.cluv]
             results_path = "$SCRATCH/logs/example"
+            data_source = "mila:/network/datasets/example"
             datasets_path = "$SCRATCH/datasets/example"
 
             [tool.cluv.clusters.mila]
@@ -46,6 +47,16 @@ def test_current_run_info_in_every_task(in_a_job: None, request: pytest.FixtureR
     assert run_info.cluster == "mila"
     assert run_info.run_id == "mila_1234"
     assert run_info.results_path.name == "mila_1234"
+
+
+@pytest.mark.parametrize("in_a_job", [0], indirect=True)
+def test_datasets_path_on_the_data_source_cluster(in_a_job: None) -> None:
+    """Jobs on the cluster in `data_source` read the data at the `data_source` path directly."""
+    run_info = current_run_info()
+    assert run_info is not None
+    assert run_info.cluster_config.datasets_path == Path("/network/datasets/example")
+    assert run_info.datasets_path == Path("/network/datasets/example")
+    assert cluv.job.get_datasets_path() == Path("/network/datasets/example")
 
 
 def test_current_run_info_outside_of_a_job(monkeypatch: pytest.MonkeyPatch) -> None:

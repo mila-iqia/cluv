@@ -16,7 +16,8 @@ datasets_path = "$SCRATCH/datasets/cifar10"
 ```
 
 - `data_source` is where Cluv pulls the dataset from.
-- `datasets_path` is where Cluv stores it on each cluster.
+- `datasets_path` is where Cluv stores it on each cluster, except the source cluster (see
+  [Run sync](#run-sync)).
 
 You can override `datasets_path` per cluster:
 
@@ -61,8 +62,24 @@ cluv sync
 
 With dataset sync enabled (default), Cluv will:
 
-1. Pull data from `data_source` to your local/current cluster `datasets_path` (remote source only).
+1. Pull data from `data_source` to the `datasets_path` of the machine where you run Cluv (remote
+   source only).
 2. Push that dataset to each target cluster at its configured `datasets_path`.
+
+Cluv skips the copies that aren't needed:
+
+- It doesn't push the data to the source cluster. Jobs there read the data at the `data_source`
+  path directly: on the source cluster, `cluv.job.get_datasets_path()` returns that path instead of
+  `datasets_path`.
+- It only pulls the data when a target other than the source cluster needs it. The cluster where you
+  run Cluv counts as a target when you name it, when you run `cluv sync` without naming any cluster,
+  or when you run `cluv submit first`.
+
+For example, with `data_source = "mila:/network/datasets/imagenet"`:
+
+- `cluv submit mila`, run from your laptop or from narval, copies no data.
+- `cluv submit narval`, run on narval, pulls the data to narval.
+- `cluv sync narval`, run on mila, pushes the data from `/network/datasets/imagenet` to narval.
 
 ## Optional: skip dataset replication for one run
 

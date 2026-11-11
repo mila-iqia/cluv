@@ -295,7 +295,7 @@ def _state_text(state: str) -> Text:
 
 
 def _bar(used: float, total: float, width: int = 10) -> Text:
-    """Return a coloured block-character progress bar."""
+    """Return a coloured block-character progress bar, with the used/total size in GiB."""
     ratio = used / total if total else 0
     filled = int(ratio * width)
     bar_str = "▰" * filled + "▱" * (width - filled)
@@ -306,7 +306,10 @@ def _bar(used: float, total: float, width: int = 10) -> Text:
         colour = "yellow"
     else:
         colour = "red"
-    return Text(f"{bar_str} {pct:4.0f}%", style=colour)
+    if not total:
+        # Quota unknown: a "0/0 GiB" size would be misleading.
+        return Text(f"{bar_str} {pct:4.0f}%", style=colour)
+    return Text(f"{bar_str} {used:.0f}/{total:.0f} GiB ({pct:.0f}%)", style=colour)
 
 
 def _gpu_bar(idle: int, total: int, width: int = 10) -> Text:

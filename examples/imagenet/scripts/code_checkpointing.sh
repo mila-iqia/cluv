@@ -53,10 +53,13 @@ if [[ -n "$GIT_COMMIT" ]]; then
     #   srun: warning: can't honor --ntasks-per-node set to 1 which doesn't match the requested
     #   tasks 4 with the maximum number of requested nodes 1. Ignoring --ntasks-per-node.
     # The clone would then run once per GPU, concurrently, into the same directory.
+    # NOTE: Also need to do a weird rsync of the venv from the project root to the slurm-tmpdir venv,
+    # otherwise we get weird "× Failed to download `nvidia-cufile-cu12==1.13.1.3`" errors (ex on Vulcan)
     srun --ntasks-per-node=1 --ntasks=${SLURM_JOB_NUM_NODES:-1} bash -c "\
         git clone --quiet $project_root \$SLURM_TMPDIR/$project_dirname && \
         cd \$SLURM_TMPDIR/$project_dirname && \
         git checkout --quiet --detach $GIT_COMMIT && \
+        rsync -a "$project_root/.venv" "$SLURM_TMPDIR/$project_dirname/.venv" && \
         uv sync --directory=$UV_DIR"
 elif [[ -n "$(git -C "$project_root" status --porcelain)" ]]; then
     echo "Warning: GIT_COMMIT is not set and the repo at $project_root has uncommitted changes." >&2

@@ -39,11 +39,17 @@ runnable) and pytest-xdist in parallel. Tests marked `@pytest.mark.slow` are ski
 `--slow` is passed. The two kinds of tests:
 
 - **Unit tests** never touch the network: pure functions are tested against fixture data,
-  and the commands run against fake or monkeypatched `Remote`s.
+  and the commands run against fake or monkeypatched `Remote`s. Use them for logic cluv computes
+  locally (config merging, sbatch flag parsing, time chunking, path building, output formatting, etc.).
 - **Integration tests** (`@pytest.mark.integration`) do the real thing: sync, submit and
-  query actual clusters over the live SSH connections from `cluv login`. The `cluster`/`remote`
-  fixtures in `tests/conftest.py` parametrize them over every currently-connected cluster and
-  skip the rest (in CI they run only on a self-hosted runner with real connections).
+  query actual clusters over the live SSH connections from `cluv login`. Use them when correctness
+  depends on what a real cluster does: the remote commands themselves (`git`, `uv`, `sbatch`...),
+  path expansion on the remote, cluster quirks (`sbatch` wrappers, shared  filesystems, etc.), or an
+  end-to-end flow like sync → submit → fetch results. When a test only needs to check that a job
+  would be accepted, submit it with `sbatch --test-only` (as `tests/test_examples.py` does) so
+  Slurm validates it without queuing it or waiting for compute. The `cluster`/`remote` fixtures in
+  `tests/conftest.py` parametrize them  over every currently-connected cluster and skip the rest (in
+  CI they run only on a self-hosted runner with real connections), never assume a particular cluster is connected.
 
 ## Code structure
 
@@ -66,8 +72,8 @@ machine they belong to.
 
 ### Commands (`cluv/cli/`, one file per command)
 
-Commands build on each other: all remote I/O goes through `Remote(hostname)` to
-reuse the SSH ControlMaster sockets opened by `cluv login`.
+Commands build on each other: all remote I/O goes through `Remote(hostname)` to reuse the SSH
+ControlMaster sockets opened by `cluv login`.
 
 Use `cache.py` for state that survives between commands, in the project cache dir chosen by
 `platformdirs` (per-cluster sync state, disabled clusters, cached GPU types, job history, submission
@@ -83,6 +89,9 @@ logs...).
 - `examples/`, sample projects (uv workspace members, tested by `tests/test_examples*`);
   update them when a feature they use changes.
 - `scripts/`, `job.sh` / `safe_job.sh` templates that `cluv init` copies into new projects.
+
+Each command argument need to be documented in `docs/commands.md` (and the relevant guide/example)
+in the same change.
 
 ## Cross-cutting patterns
 

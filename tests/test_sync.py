@@ -120,3 +120,41 @@ async def test_cluv_sync_with_data_path(monkeypatch: pytest.MonkeyPatch, fake_sc
         )
     )
     assert this_cluster_files == other_cluster_files
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+@pytest.mark.xdist_group("mila")
+async def test_cluv_sync_with_only_the_data_source_cluster(
+    monkeypatch: pytest.MonkeyPatch, fake_scratch: Path
+):
+    """`cluv sync` with only the `data_source` cluster as target doesn't copy the dataset.
+
+    Jobs on that cluster read the data at `data_source` directly, so the data is neither pulled to
+    this machine nor pushed back to that cluster.
+    """
+    assert not current_cluster(), "test needs to run locally for now."
+    source_cluster = "mila"
+    assert await get_remote_without_2fa_prompt(source_cluster), (
+        f"No connection to {source_cluster} cluster, which is needed for this test."
+    )
+
+    # The hydra example syncs CIFAR-10 from mila.
+    monkeypatch.chdir("examples/hydra_example")
+    config = get_cluv_config()
+    assert config.data_source_cluster == source_cluster
+    monkeypatch.setattr(config, "local", LocalConfig(env={"SCRATCH": str(fake_scratch)}))
+    monkeypatch.setattr(sync_module, get_cluv_config.__name__, lambda: config)
+    # Avoid re-fetching results to this fake_scratch directory.
+    monkeypatch.setattr(
+        sync_module, fetch_results.__name__, unittest.mock.AsyncMock(return_value=[])
+    )
+
+    here_datasets_path = get_datasets_path()
+    assert here_datasets_path and here_datasets_path.is_relative_to(fake_scratch)
+    assert not here_datasets_path.exists(), "Datasets path should not exist before sync."
+
+    # A push to mila would also fail here, since there is no local copy of the data to push.
+    await sync([source_cluster])
+
+    assert not here_datasets_path.exists(), "The dataset was pulled to this machine."

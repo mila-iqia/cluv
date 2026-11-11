@@ -175,7 +175,7 @@ async def test_sync_only_syncs_once_but_returns_every_remote(monkeypatch: pytest
     mock_login.assert_awaited_once_with(["trillium", "trillium-gpu"])
     mock_head_is_up_to_date.assert_awaited_once()
     mock_get_cluv_config.assert_called()
-    # `sync()` resolves `current_cluster()` once itself and once more inside
-    # `sync_common_part()` (each is independently self-contained); not exactly once, but exercised.
+    # `current_cluster()` is resolved in both `get_cluster_to_remote()` and `sync_common_part()`
+    # (each is independently self-contained); not exactly once, but exercised.
     mock_current_cluster.assert_called()
     mock_get_disabled_clusters.assert_called_once()

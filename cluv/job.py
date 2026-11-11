@@ -9,14 +9,13 @@ the job is running on.
 
 from __future__ import annotations
 
-import dataclasses
 import functools
 import os
 import re
 import subprocess
 import warnings
 from dataclasses import dataclass
-from pathlib import Path, PurePath
+from pathlib import Path
 
 import cluv
 import cluv.config
@@ -71,19 +70,13 @@ class RunInfo:
         return cluster_info.datasets_path
 
     @property
-    def cluster_config(self) -> cluv.config.ClusterConfig:
-        cluv_config = cluv.config.get_cluv_config()
-        cluster_config = cluv_config.get_cluster_config(self.cluster)
-
+    def cluster_config(self) -> cluv.config.ClusterConfig[Path] | cluv.config.ClusterConfig:
         if current_cluster() == self.cluster:
-            return dataclasses.replace(
-                cluster_config,
-                **{
-                    f.name: Path(os.path.expandvars(v))
-                    for f in dataclasses.fields(cluster_config)
-                    if isinstance(v := getattr(cluster_config, f.name), PurePath)
-                },
-            )
+            # With the env vars expanded, and the `data_source` path as `datasets_path` on the
+            # source cluster.
+            cluster_config = cluv.config.current_cluster_config()
+            assert cluster_config
+            return cluster_config
         return cluv.config.get_cluv_config().get_cluster_config(self.cluster)
 
 

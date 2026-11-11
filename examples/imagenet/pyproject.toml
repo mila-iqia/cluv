@@ -35,13 +35,14 @@ results_path = "$SCRATCH/logs/imagenet"
 results_symlink = "logs"
 # Where to read the ILSVRC2012 archives from when synchronizing data to all clusters.
 data_source = "mila:/network/datasets/imagenet"
-# Where the archives should be replicated on all clusters. `prepare_data.py` reads them from here
-# and extracts them into each node's $SLURM_TMPDIR.
+# Where the archives should be replicated on all clusters except mila, the cluster in `data_source`
+# (jobs on mila read the archives at the `data_source` path). `prepare_data.py` reads the archives
+# from here and extracts them into each node's $SLURM_TMPDIR.
 #
-# NOTE: `cluv sync` rsyncs *into* this path on every cluster, so it has to be somewhere you own -
-# don't point it at a read-only shared dataset folder. Several clusters do have a shared copy of
-# ImageNet (see the README); to read that instead of your own, override `datasets_path` for that
-# cluster and run `cluv sync --no-sync-datasets`.
+# NOTE: `cluv sync` rsyncs *into* this path on every cluster except mila, so this path has to be
+# somewhere you own - don't point it at a read-only shared dataset folder. Several clusters do have
+# a shared copy of ImageNet (see the README); to read that instead of your own, override
+# `datasets_path` for that cluster and run `cluv sync --no-sync-datasets`.
 datasets_path = "$SCRATCH/datasets/imagenet"
 
 [tool.cluv.env]

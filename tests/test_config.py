@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 from milatools.cli.init_command import DRAC_CLUSTERS
 
-from cluv.config import ClusterConfig, PartialClusterConfig, get_cluv_config, load_cluv_config
+from cluv.config import (
+    ClusterConfig,
+    CluvConfig,
+    PartialClusterConfig,
+    get_cluv_config,
+    load_cluv_config,
+)
 
 
 def write_pyproject(tmp_path: Path, content: str) -> Path:
@@ -417,3 +423,19 @@ ALREADY_IN_ENV = "new-value"
     assert cfg.local.env == {"FOO": "$BAR/baz", "ALREADY_IN_ENV": "new-value"}
     assert os.environ["FOO"] == "$BAR/baz"
     assert os.environ["ALREADY_IN_ENV"] == "new-value"
+
+
+@pytest.mark.parametrize(
+    ("data_source", "cluster", "path"),
+    [
+        (None, None, None),
+        ("/data/imagenet", None, "/data/imagenet"),
+        ("mila:/network/datasets/imagenet", "mila", "/network/datasets/imagenet"),
+    ],
+)
+def test_data_source_cluster_and_path(
+    data_source: str | None, cluster: str | None, path: str | None
+) -> None:
+    config = CluvConfig(results_path="logs", data_source=data_source)
+    assert config.data_source_cluster == cluster
+    assert config.data_source_path == path

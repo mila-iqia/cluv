@@ -828,6 +828,9 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "extras": None,
+                "all_extras": False,
+                "no_extras": None,
             }
         )
 
@@ -863,6 +866,9 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "extras": None,
+                "all_extras": False,
+                "no_extras": None,
             }
         )
 
@@ -885,6 +891,9 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "extras": None,
+                "all_extras": False,
+                "no_extras": None,
             }
         )
 
@@ -912,6 +921,9 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "extras": None,
+                "all_extras": False,
+                "no_extras": None,
             }
         )
 
@@ -934,6 +946,9 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": True,
+                "extras": None,
+                "all_extras": False,
+                "no_extras": None,
             }
         )
 
@@ -961,6 +976,9 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "extras": None,
+                "all_extras": False,
+                "no_extras": None,
             }
         )
 
@@ -987,6 +1005,9 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "extras": None,
+                "all_extras": False,
+                "no_extras": None,
             }
         )
 
@@ -1008,6 +1029,24 @@ class TestSubmitCliParsing:
 
         assert mock_submit.call_args.kwargs["fetch_results"] is False
         assert mock_submit.call_args.kwargs["sbatch_args"] == ["--time=1:00:00"]
+
+    def test_extras_flags_are_passed_to_submit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`--extra` (repeatable), `--all-extras` and `--no-extra` reach `submit`, also after the
+        job script (where they end up in `sbatch_args` first)."""
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(
+            ["submit", "tamia", "job.sh", "--extra", "a", "--extra=b", "--time=1:00:00"]
+            + ["--all-extras", "--no-extra", "sim"]
+        )
+
+        kwargs = mock_submit.call_args.kwargs
+        assert kwargs["extras"] == ["a", "b"]
+        assert kwargs["all_extras"] is True
+        assert kwargs["no_extras"] == ["sim"]
+        assert kwargs["sbatch_args"] == ["--time=1:00:00"]
 
 
 async def test_failed_sync_commands_are_logged(tmp_path: Path) -> None:
@@ -1798,3 +1837,43 @@ async def test_submit_first_considers_current_cluster(
         assert returned_job.job_id == this_cluster_jobid
     else:
         assert returned_job.job_id == other_cluster_jobid
+
+
+async def test_extras_are_passed_down_to_uv_sync(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The extras given to `cluv submit` must reach the `uv sync` that its sync step runs on the
+    cluster, through the same functions as in a real `cluv submit`, like
+    `test_no_fetch_results_still_creates_the_results_dir`."""
+    config = CluvConfig(
+        results_path="/scratch/me/results",
+        clusters={"foo": PartialClusterConfig(project_dir="/home/me/proj")},
+    )
+    monkeypatch.setattr(sync_module, get_cluv_config.__name__, lambda: config)
+    monkeypatch.setattr(cluv.cache, cluv.cache._get_cache_dir.__name__, lambda: tmp_path)
+    for step in (
+        sync_module.install_uv,
+        sync_module.clone_project,
+        sync_module.fetch_results,
+        sync_module.create_results_dir_with_symlink_to_scratch,
+    ):
+        monkeypatch.setattr(sync_module, step.__name__, mock.AsyncMock())
+    monkeypatch.setattr(
+        sync_module, sync_module.run_uv_sync.__name__, mock_run_uv_sync := mock.AsyncMock()
+    )
+
+    await wait_for_first_running_job(
+        {"foo": []},
+        cluster_to_remote={"foo": Remote(hostname="foo")},
+        found_running_job=asyncio.Event(),
+        _skip_sync=False,
+        sync_datasets=True,
+        fetch_results=True,
+        extras=["a"],
+        all_extras=True,
+        no_extras=["sim"],
+        initial_delay=0,
+    )
+
+    kwargs = mock_run_uv_sync.await_args.kwargs
+    assert (kwargs["extras"], kwargs["all_extras"], kwargs["no_extras"]) == (["a"], True, ["sim"])

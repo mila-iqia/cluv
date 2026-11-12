@@ -166,6 +166,9 @@ async def submit(
     sync_datasets: bool = True,
     fetch_results: bool = True,
     parsable: bool = False,
+    extras: list[str] | None = None,
+    all_extras: bool = False,
+    no_extras: list[str] | None = None,
 ) -> Job | None:
     """Submit a job to the given cluster (or all clusters if `cluster=="first"`),
     and return the Job object if successful.
@@ -176,6 +179,10 @@ async def submit(
     If `parsable` is True, print only the job ID (or '<cluster>:<job_id>' when `cluster`
     is 'first') to stdout, for programmatic use, instead of the usual human-readable summary.
     Everything else (logs, the live jobs table, command outputs) is silenced, as with `--quiet`.
+
+    `extras`, `all_extras` and `no_extras` are passed to the `uv sync` of the sync that precedes the
+    submission, as in `cluv sync`: the job's own `uv sync` builds its venv from the uv cache that
+    this one warms, which matters when the compute nodes are offline.
 
     Returns None if the submission failed.
     """
@@ -251,6 +258,9 @@ async def submit(
                 _skip_sync=_skip_sync,
                 sync_datasets=sync_datasets,
                 fetch_results=fetch_results,
+                extras=extras,
+                all_extras=all_extras,
+                no_extras=no_extras,
             )
             if winning_job is None:
                 console.log("All job submissions have failed! Exiting.")
@@ -307,6 +317,9 @@ async def wait_for_first_running_job(
     _skip_sync: bool,
     sync_datasets: bool,
     fetch_results: bool,
+    extras: list[str] | None = None,
+    all_extras: bool = False,
+    no_extras: list[str] | None = None,
     initial_delay: int = 10,
     max_wait_time_seconds: int = 60,
 ) -> SubmissionProgress[Job] | None:
@@ -333,6 +346,9 @@ async def wait_for_first_running_job(
                 _skip_sync=_skip_sync,
                 sync_datasets=sync_datasets,
                 fetch_results=fetch_results,
+                extras=extras,
+                all_extras=all_extras,
+                no_extras=no_extras,
             )
             for cluster_name, cluster_job_submissions in cluster_to_job_submissions.items()
         ),
@@ -469,6 +485,9 @@ async def sync_and_submit_jobs_to_cluster(
     _skip_sync: bool = False,
     sync_datasets: bool = True,
     fetch_results: bool = True,
+    extras: list[str] | None = None,
+    all_extras: bool = False,
+    no_extras: list[str] | None = None,
 ) -> list[SubmissionProgress[Job]]:
     """Sync then submit every submission for one cluster, in parallel.
 
@@ -492,7 +511,12 @@ async def sync_and_submit_jobs_to_cluster(
         try:
             with logging_commands_to(tuple(row.log_path for row in job_submissions)):
                 await sync_per_cluster_part(
-                    remote, sync_datasets=sync_datasets, sync_results=fetch_results
+                    remote,
+                    sync_datasets=sync_datasets,
+                    sync_results=fetch_results,
+                    extras=extras,
+                    all_extras=all_extras,
+                    no_extras=no_extras,
                 )
         except Exception as exc:
             console.log(f"Failed to sync with cluster {cluster}: {exc}")

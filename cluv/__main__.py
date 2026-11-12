@@ -137,8 +137,21 @@ def main(argv: list[str] | None = None) -> None:
                         ]
                         args_dict[flag] = value
                 continue
-            action = submit_parser._option_string_actions.get(f"--{dashed}")
-            if action is None:
+            action = next((a for a in submit_parser._actions if a.dest == flag), None)
+            if action is None or not action.option_strings:
+                continue
+            dashed = action.option_strings[0].removeprefix("--")
+            if isinstance(action, argparse._AppendAction):
+                # Repeatable flags (`--extra`): both `--extra=foo` and `--extra foo` are rescued.
+                remaining_sbatch_args = []
+                sbatch_args = iter(args_dict["sbatch_args"])
+                for arg in sbatch_args:
+                    name, eq, value = arg.partition("=")
+                    if name != f"--{dashed}":
+                        remaining_sbatch_args.append(arg)
+                    elif eq or (value := next(sbatch_args, None)) is not None:
+                        args_dict[flag] = [*(args_dict[flag] or []), value]
+                args_dict["sbatch_args"] = remaining_sbatch_args
                 continue
             remaining_sbatch_args = []
             for arg in args_dict["sbatch_args"]:
@@ -239,6 +252,7 @@ def add_submit_args(subparsers: Subparsers):
             "slow to read."
         ),
     )
+    _add_extras_args(submit_parser)
     submit_parser.add_argument(
         "--vram",
         metavar="<amount>",
@@ -290,6 +304,33 @@ def add_status_args(subparsers: Subparsers):
     return status_parser
 
 
+def _add_extras_args(parser: argparse.ArgumentParser):
+    """The `--extra`, `--all-extras` and `--no-extra` flags, passed to `uv sync` on each cluster."""
+    extras_group = parser.add_mutually_exclusive_group()
+    extras_group.add_argument(
+        "--extra",
+        dest="extras",
+        action="append",
+        default=None,
+        metavar="<extra>",
+        help="Passed to `uv sync --extra` on each cluster.",
+    )
+    extras_group.add_argument(
+        "--all-extras",
+        dest="all_extras",
+        action="store_true",
+        help="Passed to `uv sync --all-extras` on each cluster.",
+    )
+    parser.add_argument(
+        "--no-extra",
+        dest="no_extras",
+        action="append",
+        default=None,
+        metavar="<extra>",
+        help="Passed to `uv sync --no-extra` on each cluster (to exclude an extra from --all-extras).",
+    )
+
+
 def add_sync_args(subparsers: Subparsers):
     sync_parser = subparsers.add_parser(
         "sync",
@@ -314,6 +355,7 @@ def add_sync_args(subparsers: Subparsers):
         default=True,
         help="Push datasets from data_source to each cluster. Requires data_source in config.",
     )
+    _add_extras_args(sync_parser)
     # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
     # sync_parser.add_argument(
     #     "--",

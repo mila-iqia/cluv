@@ -129,7 +129,7 @@ Optionally also pushes/pulls datasets, see the ["Syncing datasets across cluster
 
 **Usage**
 ```console
-cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
+cluv sync [clusters] [--sync-datasets | --no-sync-datasets] [--extra <extra>... | --all-extras] [--no-extra <extra>...]
 ```
 
 **Arguments**
@@ -143,6 +143,12 @@ cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
 `--sync-datasets`, `--no-sync-datasets`
 :   Push/pull datasets from `data_source` to each cluster as part of the sync.
     Requires `data_source` to be set in the config. Enabled by default.
+
+`--extra <extra>`, `--all-extras`, `--no-extra <extra>`
+:   Passed as is to the `uv sync` run on each cluster. `--extra` can be repeated, and cannot be
+    combined with `--all-extras`. `--no-extra` excludes an extra, e.g. `--all-extras --no-extra sim`.
+    `uv sync` removes the extras that aren't requested, so changing these re-runs `uv sync` even on
+    an unchanged commit.
 
 ---
 
@@ -196,6 +202,11 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 :   Whether the sync that precedes the submission should also fetch the cluster's results back to
     this machine, as `cluv sync` does. Enabled by default. Use `--no-fetch-results` to submit
     sooner when the results are large or slow to read, and fetch them later with `cluv sync`.
+
+`--extra <extra>`, `--all-extras`, `--no-extra <extra>`
+:   Passed to the `uv sync` run by the sync that precedes the submission, as in [`cluv sync`](#cluv-sync).
+    Give the extras that the job needs: its own `uv sync` builds its environment from the uv cache that this
+    one populates, which matters on clusters whose compute nodes have no internet access.
 
 `--vram=<amount>`
 :   The amount of GPU memory your job needs, for example `--vram=10GB`. One job is submitted for

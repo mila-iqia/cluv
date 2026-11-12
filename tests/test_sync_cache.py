@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 from unittest import mock
 
 import pytest
@@ -70,3 +71,21 @@ async def test_save_does_not_clobber_a_concurrently_written_cluster(
     assert cache.project_states["foo"].last_fetch_watermark == datetime(
         2026, 7, 1, tzinfo=timezone.utc
     )
+
+
+async def test_uv_sync_extras_flags_and_rerun_when_they_change(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(sync_module.subprocess, "getoutput", lambda cmd: "abc123")
+    remote = mock.Mock(hostname="foo", run=mock.AsyncMock())
+    state = ProjectStateOnCluster()
+    path = PurePosixPath("/home/me/proj")
+
+    await sync_module.run_uv_sync(remote, path, state, extras=["a"], no_extras=["sim"])
+    assert remote.run.await_count == 1
+    assert remote.run.await_args.args[0].endswith("sync --quiet --extra a --no-extra sim'")
+
+    # Same commit, same flags: skipped. Different flags: runs again.
+    await sync_module.run_uv_sync(remote, path, state, extras=["a"], no_extras=["sim"])
+    assert remote.run.await_count == 1
+    await sync_module.run_uv_sync(remote, path, state, all_extras=True, no_extras=["sim"])
+    assert remote.run.await_count == 2
+    assert remote.run.await_args.args[0].endswith("sync --quiet --all-extras --no-extra sim'")

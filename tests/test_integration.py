@@ -148,7 +148,8 @@ async def test_submit(remote: Remote):
         else:
             pytest.fail(f"Submitted job {job_id} ended with unexpected status: {job_state!r}")
 
-        await sync(clusters=[remote.hostname])
+        # With an extra: `uv sync` re-runs (same commit as `submit`'s sync, but different extras).
+        await sync(clusters=[remote.hostname], extras=["hydra"])
 
         # TODO: get the results dir based on the `job` object somehow, instead of assuming
         # {cluster}_{job_id} which is just the default for a 'regular' job (no chunking or packing).

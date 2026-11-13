@@ -35,6 +35,9 @@ cluv <command> [options]
 **[`cluv enable`](#cluv-enable)**
 :   Re-enable a previously disabled cluster.
 
+**[`cluv doctor`](#cluv-doctor)**
+:   Diagnose setup issues on each cluster and suggest fixes.
+
 **[`cluv run`](#cluv-run)**
 :   Run a command on a specific cluster.
 
@@ -327,6 +330,43 @@ cluv enable <cluster>
 
 `cluster`
 :   The cluster hostname to re-enable.
+
+---
+
+## [`cluv doctor`](#cluv-doctor)
+
+Run a list of checks on each cluster, and suggest a fix for each one that fails:
+
+- `~/.ssh/config` has an entry for the cluster, with `ControlMaster` and `ServerAliveInterval`.
+- The cluster isn't [disabled](#cluv-disable).
+- The `job_script_path` exists in the project.
+- The SSH connection is up (otherwise, run [`cluv login`](#cluv-login)).
+
+When connected, it also checks that:
+
+- The cluster can authenticate on GitHub (`ssh -T git@github.com`), to clone the project.
+- `project_dir` (if set) exists, and `results_path` has no undefined env vars.
+- The `account`s in `sbatch_args` are among your Slurm allocations.
+
+Exits with a non-zero code if any check fails.
+
+**Usage**
+```console
+$ cluv doctor narval rorqual
+narval
+  ✔ ~/.ssh/config has an entry for narval
+  ✔ SSH config uses ControlMaster and ServerAliveInterval
+  ✔ job script scripts/job.sh exists
+  ✘ ControlMaster socket not running → run `cluv login narval`
+  - remote checks skipped: not connected
+rorqual
+  ✔ all checks passed
+```
+
+**Arguments**
+
+`clusters`
+:   The cluster(s) to check. Leave empty to check all configured clusters.
 
 ---
 

@@ -109,10 +109,12 @@ See the [Hydra launcher](hydra-launcher.md) page for setup and usage.
         clean(<b>cluv clean</b> <br> Clean old logs on clusters)
         run(<b>cluv run</b> <br> Run commands on clusters)
         sh(<b>cluv sh</b> <br> Run raw shell commands on clusters)
+        doctor(<b>cluv doctor</b> <br> Diagnose setup issues)
 
         init ===> login
         init ==> disable
         init ==> enable
+        init ==> doctor
 
         login ===> sync
         login ===> submit
@@ -131,4 +133,5 @@ See the [Hydra launcher](hydra-launcher.md) page for setup and usage.
         click clean "commands/#cluv-clean"
         click run "commands/#cluv-run"
         click sh "commands/#cluv-sh"
+        click doctor "commands/#cluv-doctor"
 ```

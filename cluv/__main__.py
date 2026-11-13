@@ -23,6 +23,7 @@ import simple_parsing
 from . import __version__
 from .cli.clean import clean
 from .cli.disable import disable, enable
+from .cli.doctor import doctor
 from .cli.init import init
 from .cli.login import login
 from .cli.run import run
@@ -97,6 +98,9 @@ def main(argv: list[str] | None = None) -> None:
 
     enable_parser = add_enable_args(subparsers)
     _add_v_arg(enable_parser)
+
+    doctor_parser = add_doctor_args(subparsers)
+    _add_v_arg(doctor_parser)
 
     args = parser.parse_args(argv)
     args_dict = vars(args)
@@ -478,6 +482,22 @@ def add_enable_args(subparsers: Subparsers):
     )
     enable_parser.set_defaults(func=enable)
     return enable_parser
+
+
+def add_doctor_args(subparsers: Subparsers):
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Diagnose setup issues on each cluster and suggest fixes.",
+        formatter_class=rich_argparse.RichHelpFormatter,
+    )
+    doctor_parser.add_argument(
+        "clusters",
+        nargs="*",
+        metavar="<cluster>",
+        help="The cluster(s) to check. Leave empty to check all configured clusters.",
+    )
+    doctor_parser.set_defaults(func=doctor)
+    return doctor_parser
 
 
 def setup_logging(verbose: int | None, quiet: bool = False) -> None:

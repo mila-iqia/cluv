@@ -10,7 +10,7 @@ nav:
   - Commands: commands.md
   - Troubleshooting: troubleshooting.md
   - Guides:
-      - Introduction: guides/introduction.md
+      - Getting started: guides/getting-started.md
       - Syncing datasets: guides/syncing-datasets.md
       - Submitting jobs:
         - Configuring job submission: guides/submit/config.md

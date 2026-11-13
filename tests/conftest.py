@@ -7,7 +7,6 @@ import pytest_asyncio
 import cluv.cli.clean
 import cluv.cli.submit
 import cluv.config
-import cluv.remote
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import find_pyproject, get_cluv_config, set_local_env_vars
 from cluv.remote import Remote, control_socket_is_running
@@ -63,14 +62,12 @@ def fake_scratch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 @pytest.fixture(autouse=True)
 def reset_cluv_config():
     """Reset the cluv config before each test to avoid state leakage."""
-    from cluv.config import get_cluv_config
-
     get_cluv_config.cache_clear()
 
 
 @pytest.fixture(autouse=IN_SELF_HOSTED_GITHUB_CI)
 def use_normal_project_dir_on_cluster_instead_of_action_runners_path(
-    monkeypatch: pytest.MonkeyPatch, reset_cluv_config: None, request: pytest.FixtureRequest
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ):
     """The self-hosted runner is running from ~/action-runners/.../_work/cluv/cluv.
 

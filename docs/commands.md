@@ -64,11 +64,11 @@ Available for all commands.
 Initialize a cluv project.
 
 If the project already have a `pyproject.toml` file, it will add a `[tool.cluv]` section to the file.
+If not, it will create one with [`uv init`](https://docs.astral.sh/uv/reference/cli/#uv-init) and
+add a `[tool.cluv]` section.
 
-If the project does not have a `pyproject.toml` file, it will create one with [`uv init`](https://docs.astral.sh/uv/reference/cli/#uv-init)
-and add a `[tool.cluv]` section.
-
-Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to `$SCRATCH/logs/<project_name>`.
+Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to
+`$SCRATCH/logs/<project_name>`.
 
 Default project structure after [`cluv init`](#cluv-init) (if the project didn't already exist):
 ```
@@ -191,6 +191,11 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 :   Whether the sync that precedes the submission should also replicate `data_source` to the
     cluster's `datasets_path`. Enabled by default. Use `--no-sync-datasets` when the data is already
     on the cluster, or when a separate `cluv sync` is already replicating it.
+
+`--fetch-results`, `--no-fetch-results`
+:   Whether the sync that precedes the submission should also fetch the cluster's results back to
+    this machine, as `cluv sync` does. Enabled by default. Use `--no-fetch-results` to submit
+    sooner when the results are large or slow to read, and fetch them later with `cluv sync`.
 
 `--vram=<amount>`
 :   The amount of GPU memory your job needs, for example `--vram=10GB`. One job is submitted for

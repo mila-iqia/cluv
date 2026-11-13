@@ -64,21 +64,19 @@ async def sync(
     """
     disabled = get_disabled_clusters()
     print_disabled_clusters(disabled)
-    here = current_cluster()
 
+    # The current cluster stays in `cluster_to_remote` (mapped to None) when it is a target: there
+    # is nothing to sync with it, but it may need a copy of the dataset.
     if clusters:
-        # Filter out explicitly-requested clusters that are disabled, and the current cluster
-        # (nothing to sync with ourselves).
-        enabled_clusters = [c for c in clusters if c not in disabled and c != here]
+        # Filter out explicitly-requested clusters that are disabled.
+        enabled_clusters = [c for c in clusters if c not in disabled]
         cluster_to_remote = (
             await get_cluster_to_remote(enabled_clusters) if enabled_clusters else {}
         )
     else:
         # No cluster passed: sync with every cluster we have an active SSH connection to.
         cluster_to_remote = await get_cluster_to_remote(None)
-        cluster_to_remote = {
-            c: r for c, r in cluster_to_remote.items() if c not in disabled and c != here
-        }
+        cluster_to_remote = {c: r for c, r in cluster_to_remote.items() if c not in disabled}
 
     remotes = [remote for remote in cluster_to_remote.values() if remote]
     if not remotes:
@@ -87,7 +85,7 @@ async def sync(
             "Use `cluv login` to login and create reusable connections."
         )
 
-    await sync_common_part(remotes, sync_datasets=sync_datasets)
+    await sync_common_part(cluster_to_remote, sync_datasets=sync_datasets)
 
     remotes_to_sync = _remotes_to_actually_sync(remotes)
     skipped = [r.hostname for r in remotes if r not in remotes_to_sync]
@@ -107,23 +105,32 @@ async def sync(
     return remotes
 
 
-async def pull_datasets_if_needed(here: str | None, config: CluvConfig, all_remotes: list[Remote]):
+async def pull_datasets_if_needed(
+    here: str | None, config: CluvConfig, cluster_to_remote: dict[str, Remote | None]
+):
+    """Copies the data from the `data_source` cluster to this machine, if a target needs it.
+
+    `cluster_to_remote` maps each target cluster to its `Remote`, and the current cluster to None
+    when it is a target.
+    """
     with set_context(console_lock, asyncio.Lock()):
         if (
-            config.data_source
-            and ":" in config.data_source  # "[cluster:]path" (POSIX-only tool)
-            and (source_cluster := config.data_source.split(":", 1)[0]) != here
+            (source_cluster := config.data_source_cluster)
+            and (source_path := config.data_source_path)
+            and source_cluster != here
+            # Jobs on the source cluster read the data at `data_source` directly, so only pull
+            # when another target cluster needs a copy of it.
+            and any(cluster != source_cluster for cluster in cluster_to_remote)
         ):
-            _source_host, _, source_path = config.data_source.partition(":")
             # Fetch the data from the source cluster and copy it to the local datasets_path.
-            source_remote = next(
-                (r for r in all_remotes if r.hostname == source_cluster),
-                await get_remote_without_2fa_prompt(_source_host),
+            source_remote = cluster_to_remote.get(source_cluster) or (
+                await get_remote_without_2fa_prompt(source_cluster)
             )
             if not source_remote:
+                connected = [r.hostname for r in cluster_to_remote.values() if r]
                 raise RuntimeError(
                     f"[red]Unable to sync datasets, need a connection to the source cluster "
-                    f"({source_cluster})[/red]. Current connections: {[r.hostname for r in all_remotes]}\n"
+                    f"({source_cluster})[/red]. Current connections: {connected}\n"
                     f"Use `cluv login {source_cluster}` to create a reusable connection to the "
                     f"source cluster."
                 )
@@ -210,22 +217,28 @@ async def get_active_remotes() -> list[Remote]:
     return remotes
 
 
-async def sync_common_part(remotes: list[Remote], sync_datasets: bool = True) -> None:
+async def sync_common_part(
+    cluster_to_remote: dict[str, Remote | None], sync_datasets: bool = True
+) -> None:
     """Sync steps that only need to happen once, regardless of how many clusters we're syncing
     or submitting to: push the local commit, and pull the dataset from its source cluster if
     needed.
+
+    `cluster_to_remote` maps each target cluster to its `Remote`, and the current cluster to None
+    when it is a target.
     """
     config = get_cluv_config()
     await run_git_push_if_needed()
     if sync_datasets:
-        await pull_datasets_if_needed(current_cluster(), config, remotes)
+        await pull_datasets_if_needed(current_cluster(), config, cluster_to_remote)
 
 
 async def sync_per_cluster_part(
-    cluster_remote: Remote | None, sync_datasets: bool = True
+    cluster_remote: Remote | None, sync_datasets: bool = True, sync_results: bool = True
 ) -> list[Path]:
     """Sync steps specific to one cluster: install uv, clone/update the project, `uv sync`,
-    fetch back new results, and push datasets to it if needed.
+    create the results dir and its `<project>/<results_symlink>` link, fetch back new results
+    (unless `sync_results` is False), and push datasets to the cluster if needed.
 
     Does nothing (and returns an empty list) when `cluster_remote` is None (the current
     cluster), since there's nothing to sync to it.
@@ -274,27 +287,41 @@ async def sync_per_cluster_part(
     )
     _save()
 
-    new_runs = await fetch_results(remote, config, project_state)
-    _save()
+    results_path = await expandvars(remote, cluster_config.results_path)
+
+    # Optional, but useful if it isn't already set up: Create a symlink at project_root/<symlink_name>
+    # that points to the results_path (usually in $SCRATCH). This works with the example job script
+    # templates, which have `--output=logs/%j/slurm-%j.out` (relative to the project root).
+    await create_results_dir_with_symlink_to_scratch(
+        remote,
+        project_dir=project_path,
+        results_symlink=config.results_symlink,
+        results_path=results_path,
+    )
+
+    new_runs: list[Path] = []
+    if sync_results:
+        new_runs = await fetch_results(remote, config, project_state, results_path)
+        _save()
     if new_runs:
         console.print(f"[green]Newly synced runs from [bold]{cluster}[/bold]:[/green]")
         for run_path in new_runs:
             console.print(f"  {run_path}")
 
-    if sync_datasets and config.data_source:
-        here = current_cluster()
-        if ":" not in config.data_source:
+    # Jobs on the source cluster read the data at `data_source` directly (see
+    # `current_cluster_config`), so there is nothing to push to it.
+    if sync_datasets and config.data_source and config.data_source_cluster != cluster:
+        if config.data_source_cluster is None:
             # data_source is a local path; use it directly as the source.
             # Note: this tool targets POSIX (Linux/macOS) systems only; Windows drive-letter
             # paths (e.g. C:\...) are not supported.
             local_dataset_path = Path(os.path.expandvars(config.data_source))
         else:
-            local_dataset_path = (
-                config.get_cluster_config(here) if here else config
-            ).datasets_path
+            # Where `pull_datasets_if_needed` put the data, or the `data_source` path itself when
+            # running on the source cluster.
+            local_dataset_path = get_datasets_path()
             if not local_dataset_path:
                 raise RuntimeError("data_source is set, so datasets_path should also be set!")
-            local_dataset_path = Path(os.path.expandvars(str(local_dataset_path)))
         await _push_datasets_to_remote(local_dataset_path, remote, config, project_state)
         _save()
 
@@ -523,6 +550,7 @@ async def clone_project(
 
         # Set the checked out commit for that project on that cluster. This will be written to the
         # cache to avoid unnecessary syncs later.
+        await _update_submodules(remote, cluster_repo_dir, gitenv)
         project_state.checked_out_git_commit = current_git_commit
         return
 
@@ -547,6 +575,7 @@ async def clone_project(
             hide=False,
             env=gitenv,
         )
+        await _update_submodules(remote, cluster_repo_dir, gitenv)
         project_state.checked_out_git_commit = current_git_commit
         return
 
@@ -580,6 +609,7 @@ async def clone_project(
             hide=False,
             env=gitenv,
         )
+        await _update_submodules(remote, cluster_repo_dir, gitenv)
         project_state.checked_out_git_commit = current_git_commit
         return
 
@@ -598,7 +628,19 @@ async def clone_project(
         hide=False,
         env=gitenv,
     )
+    await _update_submodules(remote, cluster_repo_dir, gitenv)
     project_state.checked_out_git_commit = current_git_commit
+
+
+async def _update_submodules(remote: Remote, repo_dir: PurePosixPath, gitenv: dict[str, str]):
+    """Checks out the submodules (recursively) at the commits recorded in the checked-out commit.
+
+    Without this, `uv sync` fails on projects with path dependencies inside submodules. This is a
+    no-op in repos without submodules.
+    """
+    await remote.run(
+        f"git -C {repo_dir} submodule update --init --recursive", hide=False, env=gitenv
+    )
 
 
 async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets_path: Path):
@@ -649,6 +691,12 @@ async def _push_datasets_to_remote(
     local_source: Path, remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
 ):
     """Push dataset from a local path to the remote cluster's datasets_path."""
+    datasets_path = config.get_cluster_config(remote.hostname).datasets_path
+    if not datasets_path:
+        raise RuntimeError(
+            f"`cluv.datasets_path` must be set in the Cluv config section of pyproject.toml to "
+            f"push datasets to {remote.hostname}."
+        )
     last_datasets_dir_edit_time = datetime.datetime.fromtimestamp(local_source.stat().st_mtime)
 
     # Skip if we pushed after the last edit to the local source path.
@@ -660,7 +708,7 @@ async def _push_datasets_to_remote(
             f"changed since. Skipping."
         )
         return
-    datasets_path_template = str(config.get_cluster_config(remote.hostname).datasets_path)
+    datasets_path_template = str(datasets_path)
     resolved_path = (
         await remote.get_output(
             f"bash --login -c 'echo {datasets_path_template}'", hide=True, display=False
@@ -693,9 +741,15 @@ async def _push_datasets_to_remote(
 
 
 async def fetch_results(
-    remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
+    remote: Remote,
+    config: CluvConfig,
+    project_state: ProjectStateOnCluster,
+    results_path_on_cluster: PurePosixPath,
 ) -> list[Path]:
-    """Fetches results from a remote cluster to local using rsync via the results symlink.
+    """Fetches results from a remote cluster to local using rsync.
+
+    `results_path_on_cluster` must have its env vars already resolved (see `expandvars`), since
+    rsync would otherwise look for a literal `$SCRATCH/...` folder on the cluster.
 
     Returns the list of newly-synced run directories (those that did not exist locally before
     the rsync ran). Also updates `project_state.last_fetch_watermark` (see `cluv clean`).
@@ -708,26 +762,6 @@ async def fetch_results(
         {p for p in results_path_here.iterdir() if p.is_dir()}
         if results_path_here.exists()
         else set()
-    )
-
-    # Resolve any environment variables in the results_path on the remote before rsync, otherwise
-    # it would try to fetch results from a literal $SCRATCH/... folder, which doesn't exist.
-    results_path_on_cluster = str(config.get_cluster_config(remote.hostname).results_path)
-    results_path_on_cluster = await expandvars(remote, results_path_on_cluster)
-
-    project_path_on_cluster = config.get_cluster_config(remote.hostname).project_dir
-    project_path_on_cluster = project_path_on_cluster or PurePosixPath(
-        find_pyproject().parent.relative_to(Path.home())
-    )
-    project_path_on_cluster = await expandvars(remote, project_path_on_cluster)
-    # Optional, but useful if it isn't already set up: Create a symlink at project_root/<symlink_name>
-    # that points to the results_path (usually in $SCRATCH). This works with the example job script
-    # templates, which have `--output=logs/%j/slurm-%j.out` (relative to the project root).
-    await create_results_dir_with_symlink_to_scratch(
-        remote,
-        project_dir=project_path_on_cluster,
-        results_symlink=config.results_symlink,
-        results_path=results_path_on_cluster,
     )
 
     await run(

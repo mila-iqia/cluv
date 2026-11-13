@@ -229,6 +229,17 @@ def add_submit_args(subparsers: Subparsers):
         ),
     )
     submit_parser.add_argument(
+        "--fetch-results",
+        dest="fetch_results",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Fetch the cluster's results back to this machine during the sync that precedes the "
+            "submission. Use --no-fetch-results to submit sooner when the results are large or "
+            "slow to read."
+        ),
+    )
+    submit_parser.add_argument(
         "--vram",
         metavar="<amount>",
         default=None,

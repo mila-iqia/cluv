@@ -3,7 +3,15 @@
 A powerful and lightweight CLI tool to sync UV-based Python projects and submit jobs across HPC
 clusters.
 
-This is a quick overview. For more information, check out the [introduction](guides/introduction.md).
+This is a quick overview. New to cluv? Follow the [Getting started](guides/getting-started.md) guide.
+
+## Who is this for?
+
+Cluv is for you if:
+
+- You have access to one or more HPC clusters running Slurm.
+- You want to easily synchronize and dispatch jobs on all the clusters you have access to.
+- You use [uv](https://docs.astral.sh/uv/) to manage your Python projects and dependencies.
 
 ## Installation
 
@@ -34,6 +42,22 @@ Run this once in a while to get the latest features and bugfixes.
 uv tool update cluster-uv
 ```
 
+## Core Assumptions
+
+Cluv makes a few very important assumptions about your workflow. These are necessary and won't
+change:
+
+1. Your project uses [uv](https://docs.astral.sh/uv/) to manage your Python projects and dependencies.
+2. You have SSH access to each cluster, with ControlMaster sessions configured for passwordless login.
+3. Your project is in a Git repository hosted on GitHub.
+
+!!! warning "Cluv is not supported on Windows"
+    `cluv` is not supported on Windows (Windows SSH clients don't support the necessary features).
+    Use WSL2 instead.
+
+Cluv is not meant to be a _magic_ package that does everything for you. It is a lightweight wrapper around `uv` that makes it easier to work with multiple Slurm clusters, but it does not replace your SSH configuration or GitHub setup. If you need help with those, see the [Troubleshooting](troubleshooting.md) page.
+
+
 ## Usage
 
 To view all available commands, use the `--help` flag:
@@ -41,29 +65,27 @@ To view all available commands, use the `--help` flag:
 cluv --help
 ```
 
-Here are some common workflows:
+### Synchronize a project across clusters
+- [`cluv init`](commands.md#cluv-init): Generate a cluv config for a project.
+- [`cluv login`](commands.md#cluv-login): Connect to all the configured clusters.
+- [`cluv sync`](commands.md#cluv-sync): Sync the project to every connected cluster, and fetch
+  results back.
 
-### Setup cluv in an existing project
+### Dispatch jobs to different Slurm clusters
+- [`cluv submit`](commands.md#cluv-submit)` <cluster> job.sh`: Sync the project and submit a job on
+  a cluster.
+- `cluv submit first job.sh`: Submit the job on every configured cluster at once, keep whichever
+  one starts running first, and cancel the rest.
+- [`cluv run`](commands.md#cluv-run)` <cluster> -- ls logs`: Sync the project and run a command in the
+  project folder on a cluster.
+- [`cluv clean`](commands.md#cluv-clean): Remove results from the clusters once they've been
+  deleted locally. See the ["Cleaning runs"](guides/cleaning-runs.md) page.
 
-```console
-cd ~/my-project  # Cluv requires your project to be located somewhere under your home directory (`$HOME`).
-cluv init
-```
-
-### Establish SSH connections to all clusters
-
-```console
-cluv login
-```
-
-### Sync your project on all clusters
-```console
-cluv sync
-```
-
-Need to set up dataset replication with `cluv sync`? See the
-["Syncing datasets"](guides/syncing-datasets.md) guide.
-
+### Monitor jobs and cluster health
+- [`cluv status`](commands.md#cluv-status): Show an overview of all clusters, including GPU
+  availability, queue status, and job progress.
+- [`cluv sh`](commands.md#cluv-sh)` -- squeue --me`: Run a raw shell command on every connected
+  cluster and show the output.
 
 ### Launch a Hydra sweep on a remote cluster
 
@@ -72,42 +94,6 @@ python main.py -m launcher=cluv lr=0.01,0.001 seed=1,2,3
 ```
 
 See the [Hydra launcher](hydra-launcher.md) page for setup and usage.
-
-
-### Sync your project on a specific cluster
-```console
-cluv sync rorqual
-```
-
-### Clean up old run results from the clusters
-```console
-cluv clean
-```
-
-See the ["Cleaning runs"](guides/cleaning-runs.md) guide for details on how this decides what's safe to delete.
-
-### Submit a job to a specific cluster
-```console
-cluv submit rorqual scripts/job.sh --time=00:10:00 -- python main.py
-```
-
-See the ["Writing a job script"](guides/submit/job-scripts.md) guide for what `job.sh` should contain, and
-["Configuring job submission"](guides/submit/config.md) for how to use the config to submit jobs.
-
-### Run a command in the synced project a specific cluster
-```console
-cluv run mila -- ls logs
-```
-
-### Check the status of your clusters and jobs
-```console
-cluv status
-```
-
-### Run a raw shell command on every connected cluster
-```console
-cluv sh -- squeue --me
-```
 
 ### How the commands are used together
 

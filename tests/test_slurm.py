@@ -15,6 +15,7 @@ from cluv.slurm import (
     parse_savail,
     parse_sinfo_nodes,
     parse_slurm_time,
+    parse_squeue_states,
 )
 
 pytestmark = pytest.mark.timeout(10)
@@ -307,7 +308,18 @@ class TestParseTime:
         ("20_0|COMPLETED\n20_1|RUNNING\n20_[2-5%1]|PENDING", {20: "RUNNING"}),
         ("20_0|COMPLETED\n20_[1-3]|PENDING", {20: "COMPLETED"}),  # the array has started
         ("20_0|FAILED\n20_[1-3]|PENDING", {20: "PENDING"}),
+        ("11502357+0|RUNNING\n11502357+1|RUNNING", {11502357: "RUNNING"}),  # `#SBATCH hetjob`
+        ("30+0|PENDING\n30+1|PENDING\n31|RUNNING", {30: "PENDING", 31: "RUNNING"}),
     ],
 )
 def test_parse_sacct_job_states(output: str, expected: dict[int, str]):
     assert parse_sacct_job_states(output) == expected
+
+
+def test_parse_squeue_states():
+    output = "RUNNING\nPENDING\nPENDING\n\nCOMPLETING\n"
+    assert parse_squeue_states(output) == {"RUNNING": 1, "PENDING": 2, "COMPLETING": 1}
+
+
+def test_parse_squeue_states_empty():
+    assert parse_squeue_states("") == {}

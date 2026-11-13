@@ -10,6 +10,7 @@ dependencies = [
     "platformdirs>=4.9.6",
     "pydantic>=2.0",
     "pyyaml>=6.0.3",
+    "questionary>=2.1.1",
     "rich>=13.0",
     "rich-argparse>=1.7.2",
     "simple-parsing>=0.1.8",
@@ -158,7 +159,7 @@ project_dir = "$SCRATCH/repos/cluv"
 sbatch_args = { account = "rrg-bengioy-ad" }
 # With more than one allocation on a cluster, `cluv submit rorqual` submits one job per allocation
 # and keeps the first one that starts, cancelling the others:
-# sbatch_args = [{ account = "rrg-bengioy-ad" }, { account = "def-bengioy" }]
+# sbatch_args = [{ account = "rrg-yourpi-ad" }, { account = "def-yourpi" }]
 
 [tool.cluv.clusters.fir]
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
@@ -180,5 +181,4 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.narval]
-# Mila doesn't have an allocation on Narval anymore.
-sbatch_args = { account = "def-bengioy" }
+sbatch_args = { account = "def-bengioy" }  # Mila doesn't have an allocation on Narval anymore.

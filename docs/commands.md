@@ -54,7 +54,8 @@ Available for all commands.
     shows debug-level logs. Defaults to warning-level logs only.
 
 `-q`, `--quiet`
-:   Disable command output. Has no effect on `cluv status`.
+:   Disable command output. Has no effect on `cluv status`. With `cluv init`, also skips the
+    questions and uses the default answers.
 
 
 ---
@@ -67,8 +68,24 @@ If the project already have a `pyproject.toml` file, it will add a `[tool.cluv]`
 If not, it will create one with [`uv init`](https://docs.astral.sh/uv/reference/cli/#uv-init) and
 add a `[tool.cluv]` section.
 
-Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to
-`$SCRATCH/logs/<project_name>`.
+To write the `[tool.cluv]` section, `cluv init` asks a few questions:
+
+- **Whether you have access to the Mila cluster.** If so, the Mila cluster is selected by default.
+- **The clusters to use.** The other clusters that have a `Host` entry in your `~/.ssh/config` are
+  selected by default.
+- **Your Slurm accounts on each selected cluster.** If you have access to the Mila cluster, the
+  answers are pre-filled with the accounts of Mila members, which you can change or complete.
+  On a cluster without such accounts, the answer is pre-filled with your answer for the previous
+  cluster of the same kind (DRAC or PAICE).
+- **Where to put the job results and the project** on the clusters (`results_path` and
+  `project_dir`).
+- **The datasets to copy to all the clusters**, if any (`data_source` and `datasets_path`).
+
+With `--quiet`, or when the input isn't a terminal, `cluv init` asks no question and uses the
+default answers.
+
+Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to the
+`results_path` (`$SCRATCH/logs/<project_name>` by default).
 
 Default project structure after [`cluv init`](#cluv-init) (if the project didn't already exist):
 ```

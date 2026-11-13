@@ -159,9 +159,9 @@ def main(argv: list[str] | None = None) -> None:
 
     try:
         if inspect.iscoroutinefunction(function):
-            asyncio.run(function(**args_dict))
+            result = asyncio.run(function(**args_dict))
         else:
-            function(**args_dict)
+            result = function(**args_dict)
     except subprocess.CalledProcessError as err:
         logger.error(f"Command '{err.cmd}' failed with exit code {err.returncode}:")
         if err.output:
@@ -173,6 +173,10 @@ def main(argv: list[str] | None = None) -> None:
         else:
             logger.error("No standard error.")
         sys.exit(err.returncode)
+
+    if subcommand == "submit" and result is None:
+        # `submit` returns None when every submission failed, e.g. in a `first` race (#257).
+        sys.exit(1)
 
 
 def add_submit_args(subparsers: Subparsers):

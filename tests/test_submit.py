@@ -828,6 +828,7 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "test_only": False,
             }
         )
 
@@ -863,6 +864,7 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "test_only": False,
             }
         )
 
@@ -885,6 +887,7 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "test_only": False,
             }
         )
 
@@ -912,6 +915,7 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "test_only": False,
             }
         )
 
@@ -934,6 +938,7 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": True,
+                "test_only": False,
             }
         )
 
@@ -961,6 +966,7 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "test_only": False,
             }
         )
 
@@ -987,6 +993,7 @@ class TestSubmitCliParsing:
                 "sync_datasets": True,
                 "fetch_results": True,
                 "parsable": False,
+                "test_only": False,
             }
         )
 
@@ -1798,3 +1805,17 @@ async def test_submit_first_considers_current_cluster(
         assert returned_job.job_id == this_cluster_jobid
     else:
         assert returned_job.job_id == other_cluster_jobid
+
+
+class TestTestOnlyCliParsing:
+    def test_test_only_flag_is_forwarded_to_submit(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            cluv_main, "submit", mock_submit := mock.AsyncMock(spec=cluv_main.submit)
+        )
+
+        cluv_main.main(["submit", "tamia", "job.sh", "--time=0:10:00", "--test-only", "--", "x"])
+
+        kwargs = mock_submit.call_args.kwargs
+        assert kwargs["test_only"] is True
+        assert kwargs["sbatch_args"] == ["--time=0:10:00"]
+        assert kwargs["program_args"] == ["x"]

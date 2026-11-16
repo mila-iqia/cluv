@@ -31,7 +31,7 @@ from cluv.cli.sync import (
 from cluv.config import ClusterConfig, find_pyproject, get_cluv_config
 from cluv.remote import Remote, command_log_files, run
 from cluv.sbatch_args import SbatchArgs, sbatch_args_from_list, sbatch_args_to_list
-from cluv.slurm import FAILED_JOB_STATES, get_job_states_with_sacct
+from cluv.slurm import FAILED_JOB_STATES, TERMINAL_JOB_STATES, get_job_states_with_sacct
 from cluv.utils import console, gather_dict, group_by_cluster, set_context
 
 logger = logging.getLogger(__name__)
@@ -408,9 +408,7 @@ async def wait_for_jobs_to_cancel(
     }
     delay = initial_delay
 
-    while not all(
-        job.state.startswith(("CANCELLED", "COMPLETED", "FAILED")) for job in job_submissions
-    ):
+    while not all(job.state.startswith(tuple(TERMINAL_JOB_STATES)) for job in job_submissions):
         for job in job_submissions:
             try:
                 await run_scancel([job])

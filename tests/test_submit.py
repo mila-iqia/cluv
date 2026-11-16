@@ -1460,7 +1460,7 @@ async def test_submit_cancels_in_flight_jobs_when_interrupted(
             return subprocess.CompletedProcess(
                 program_and_args, returncode=0, stdout=f"{jobid}", stderr=""
             )
-        if full_command == f"scancel {jobid}":
+        if f"scancel {jobid}" in full_command:
             return subprocess.CompletedProcess(
                 program_and_args, returncode=0, stdout="", stderr=""
             )
@@ -1611,7 +1611,7 @@ async def test_submit_races_the_allocations_of_a_cluster(
                     assert job_id == def_job_id
                     states.append(f"{job_id}|RUNNING")
             return _result("\n".join(states))
-        if full_command == f"scancel {rrg_job_id}":
+        if f"scancel {rrg_job_id}" in full_command:
             cancelled.append(rrg_job_id)
             return _result("")
         pytest.fail(f"Unexpected command: {full_command}")
@@ -1749,7 +1749,7 @@ async def test_submit_first_considers_current_cluster(
         ):
             scancel_received_on_other_cluster = True
             return _result("")
-        if not runs_first_on_current_cluster and full_command == f"scancel {this_cluster_jobid}":
+        if not runs_first_on_current_cluster and f"scancel {this_cluster_jobid}" in full_command:
             scancel_received_on_this_cluster = True
             return _result("")
         print(*run_commands, sep="\n")

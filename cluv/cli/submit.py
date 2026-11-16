@@ -408,12 +408,12 @@ async def wait_for_jobs_to_cancel(
     }
     delay = initial_delay
 
-    while not all(job.state.startswith(tuple(TERMINAL_JOB_STATES)) for job in job_submissions):
-        for job in job_submissions:
-            try:
-                await run_scancel([job])
-            except Exception as err:
-                logging.debug(f"Error running scancel for job {job.job_id}: {err}")
+    def is_done(job: SubmissionProgress[Job]) -> bool:
+        return job.state.startswith(tuple(TERMINAL_JOB_STATES))
+
+    while not all(is_done(job) for job in job_submissions):
+        # Only cancel the jobs that aren't done yet: `scancel` errors out on finished jobs.
+        await run_scancel([job for job in job_submissions if not is_done(job)])
         job_states = await gather_dict(
             {
                 cluster: get_job_states_with_sacct(cluster_to_remote[cluster], cluster_job_ids)
@@ -429,7 +429,7 @@ async def wait_for_jobs_to_cancel(
     console.log(f"Cancelled {len(job_submissions)} job submission(s).")
     for job_submission in job_submissions:
         console.log(
-            f"Job {job_submission.job_id} on custer {job_submission.cluster} that was in state: {job_submission.state}"
+            f"Job {job_submission.job_id} on cluster {job_submission.cluster} that was in state: {job_submission.state}"
         )
 
 

@@ -548,7 +548,8 @@ async def clone_project(
     if _is_github_pr_ref(github_ref):
         await remote.run(
             f"git -C {cluster_repo_dir} fetch {git_remote_name} {github_ref}",
-            hide=False,
+            hide=True,
+            warn=True,
             env=gitenv,
         )
 

@@ -290,7 +290,8 @@ async def submit(
     else:
         console.print(
             f"Successfully submitted job {job.job_id} on cluster {job.cluster}.\n"
-            f"Use `ssh {job.cluster} sacct -j {job.job_id}` to view its status, and `cluv sync"
+            f"Use `ssh {job.cluster} \"bash --login -c 'sacct -j {job.job_id}'\"` to view its"
+            f" status, and `cluv sync"
             f" {job.cluster}` to fetch results once it is complete.",
             style="green",
         )
@@ -445,11 +446,17 @@ async def run_scancel(jobs: list[SubmissionProgress]) -> None:
 
     async def cancel(remote: Remote | None, cluster_rows: list[SubmissionProgress]) -> None:
         job_ids = [job.job_id for job in cluster_rows if job.job_id is not None]
-        scancel_command = f"scancel {' '.join(map(str, job_ids))}"
-        if remote is not None:
-            await remote.get_output(scancel_command, hide=True)
-        else:
-            await run(tuple(shlex.split(scancel_command)), hide=True)
+        # Slurm is only on the PATH of a login shell on some clusters.
+        scancel_command = f"bash --login -c 'scancel {' '.join(map(str, job_ids))}'"
+        try:
+            if remote is not None:
+                await remote.get_output(scancel_command, hide=True)
+            else:
+                await run(tuple(shlex.split(scancel_command)), hide=True)
+        except Exception as err:
+            logger.warning(
+                f"Could not cancel job(s) {job_ids} on {cluster_rows[0].cluster}: {err}"
+            )
 
     await asyncio.gather(
         *(

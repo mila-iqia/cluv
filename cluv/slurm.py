@@ -130,9 +130,7 @@ async def run_sacct(
     additional_args: str = "",
 ) -> str:
     """Run sacct on the given job id, or comma-separated job ids, and return the output."""
-    sacct_command = (
-        f"sacct -j {jobs} --format={format} --parsable2 --noheader --allocations {additional_args}"
-    )
+    sacct_command = f"bash --login -c 'sacct -j {jobs} --format={format} --parsable2 --noheader --allocations {additional_args}'"
     if remote:
         return await remote.get_output(sacct_command, hide=True)
     result = await run(tuple(shlex.split(sacct_command)), hide=True)

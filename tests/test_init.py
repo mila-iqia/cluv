@@ -13,7 +13,6 @@ import questionary
 
 import cluv.__main__ as cluv_main
 from cluv.cli.init import (
-    CLUSTER_DOCS_URLS,
     DEFAULT_RESULTS_LINKNAME,
     DEFAULT_RESULTS_PATH,
     SCRIPTS_DIR_PATH,
@@ -189,6 +188,22 @@ class TestMakeCluvConfig:
             for flags in sbatch_args if isinstance(sbatch_args, list) else [sbatch_args]:
                 assert set(flags) <= {"account"}, f"Flags other than `account` on {cluster}."
 
+    def test_template_has_a_link_under_the_header_of_each_cluster(self) -> None:
+        """make_cluv_config() writes the accounts of a cluster under the header and the link to the
+        documentation of the cluster, so the template needs that link right under the header."""
+        for section in CLUV_INIT_MODULE._split_sections(TEMPLATE):
+            if CLUV_INIT_MODULE._cluster_name(section):
+                assert section[1].startswith("# https://"), f"No link under {section[0]}."
+
+    def test_links_stay_under_the_headers(self) -> None:
+        """The link to the documentation of each cluster stays right under the header of the
+        cluster when the accounts change, and when the `project_dir` of the cluster is removed."""
+        accounts = {cluster: ["def-yourpi"] for cluster in TEMPLATE_CLUSTERS}
+        text, _ = make_config(accounts=accounts, project_dir="$SCRATCH/code/my_project")
+
+        for cluster in TEMPLATE_CLUSTERS:
+            assert f"\n[tool.cluv.clusters.{cluster}]\n# https://" in text, cluster
+
     def test_unchanged_accounts_keep_the_lines_of_the_template(self) -> None:
         text, config = make_config(accounts=TEMPLATE_ACCOUNTS)
 
@@ -225,17 +240,15 @@ class TestMakeCluvConfig:
         assert "bengioy" not in text
 
     def test_clusters_that_are_not_selected_are_commented_out(self) -> None:
-        """The clusters that aren't selected stay in the config, commented out, with a link to the
+        """The clusters that aren't selected stay in the config, commented out, with the link to the
         documentation of each cluster. Removing one `#` from the lines of these clusters enables
         them, with the `env` and the `project_dir` of the template."""
         text, config = make_config(clusters=["rorqual"], accounts={"rorqual": ["def-yourpi"]})
 
         assert config.clusters_names == ["rorqual"]
-        assert set(CLUSTER_DOCS_URLS) == set(TEMPLATE_CLUSTERS)
         for cluster in TEMPLATE_CLUSTERS:
             if cluster != "rorqual":
-                header = f"\n# [tool.cluv.clusters.{cluster}]\n## {CLUSTER_DOCS_URLS[cluster]}\n"
-                assert header in text
+                assert f"\n# [tool.cluv.clusters.{cluster}]\n## https://" in text, cluster
         uncommented = parse_config(uncomment_clusters(text))
         assert uncommented.clusters_names == TEMPLATE_CLUSTERS
         for cluster, template_cluster in TEMPLATE_CONFIG.clusters.items():

@@ -22,19 +22,6 @@ DEFAULT_RESULTS_LINKNAME = "logs"
 MILA_CLUSTER = "mila"
 # The other clusters of the template, except Mila, are DRAC clusters.
 PAICE_CLUSTERS = ("tamia", "killarney", "vulcan")
-# The documentation page of each cluster of the template.
-CLUSTER_DOCS_URLS = {
-    "mila": "https://docs.mila.quebec/",
-    "tamia": "https://docs.alliancecan.ca/wiki/TamIA",
-    "killarney": "https://docs.alliancecan.ca/wiki/Killarney",
-    "vulcan": "https://docs.alliancecan.ca/wiki/Vulcan",
-    "rorqual": "https://docs.alliancecan.ca/wiki/Rorqual",
-    "fir": "https://docs.alliancecan.ca/wiki/Fir",
-    "nibi": "https://docs.alliancecan.ca/wiki/Nibi",
-    "trillium": "https://docs.alliancecan.ca/wiki/Trillium",
-    "trillium-gpu": "https://docs.alliancecan.ca/wiki/Trillium",
-    "narval": "https://docs.alliancecan.ca/wiki/Narval",
-}
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # Repository root when running cluv from a source checkout.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -318,7 +305,7 @@ def make_cluv_config(template: str, answers: InitAnswers, scratch_project_dir: s
         # Only rewritten when the accounts changed, to keep the comment of the template's line.
         if accounts != _accounts(section):
             section = _set_accounts(section, accounts)
-        lines += section if selected else _comment_out(section, CLUSTER_DOCS_URLS[cluster])
+        lines += section if selected else _comment_out(section)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -576,12 +563,12 @@ def _remove_project_dir(section: list[str]) -> list[str]:
     """Removes the `project_dir` line from the section of a cluster.
 
     The comment lines right above the `project_dir` line explain that line, so these comment lines
-    are removed too.
+    are removed too, except the link to the documentation of the cluster under the header.
     """
     lines: list[str] = []
     for line in section:
         if line.startswith("project_dir = "):
-            while lines and lines[-1].startswith("#"):
+            while lines and lines[-1].startswith("#") and not lines[-1].startswith("# https://"):
                 lines.pop()
         else:
             lines.append(line)
@@ -597,19 +584,19 @@ def _set_accounts(section: list[str], accounts: list[str]) -> list[str]:
     if accounts:
         tables = [f"{{ account = {_toml_string(account)} }}" for account in accounts]
         value = tables[0] if len(tables) == 1 else f"[{', '.join(tables)}]"
-        section.insert(1, f"sbatch_args = {value}")
+        # Under the header and the link to the documentation of the cluster.
+        section.insert(2, f"sbatch_args = {value}")
     return section
 
 
-def _comment_out(section: list[str], docs_url: str) -> list[str]:
-    """Comments out the section of a cluster, and adds a link to the documentation of the cluster.
+def _comment_out(section: list[str]) -> list[str]:
+    """Comments out the section of a cluster.
 
     The comment lines of the section get a second `#`, so that removing one `#` from each line
-    gives back the section, with the link as a comment.
+    gives back the section.
     """
-    header, *lines = section
-    commented = [f"# {header}", f"## {docs_url}"]
-    for line in lines:
+    commented = []
+    for line in section:
         if line.startswith("#"):
             commented.append(f"#{line}")
         elif line:

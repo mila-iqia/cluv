@@ -57,9 +57,20 @@ cluster with the global defaults:
 [tool.cluv.clusters.rorqual]
 ```
 
+`cluv init` also adds the clusters that you didn't select, commented out, with a link to the
+documentation of each cluster. To use one of these clusters later, remove one `#` at the start of
+each line of the cluster's table, and replace the example account (`def-yourpi` or `aip-yourpi`),
+if there is one, with your own account:
+
+```toml title="pyproject.toml"
+# [tool.cluv.clusters.narval]
+## https://docs.alliancecan.ca/wiki/Narval
+# sbatch_args = { account = "def-yourpi" }
+```
+
 For the clusters you don't want to use (no access, missing SSH entry, ...), you have two options:
 
-- **Remove their table** from the config.
+- **Remove or comment out their table** in the config.
 - **Disable them** with [`cluv disable`](../commands.md#cluv-disable), without touching the config:
 
     ```console

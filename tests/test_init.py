@@ -13,6 +13,7 @@ import questionary
 
 import cluv.__main__ as cluv_main
 from cluv.cli.init import (
+    CLUSTER_DOCS_URLS,
     DEFAULT_RESULTS_LINKNAME,
     DEFAULT_RESULTS_PATH,
     SCRIPTS_DIR_PATH,
@@ -167,6 +168,17 @@ def make_config(**answers) -> tuple[str, CluvConfig]:
     return text, parse_config(text)
 
 
+def uncomment_clusters(text: str) -> str:
+    """Removes one `#` from the lines of the clusters that are commented out in the config."""
+    lines = []
+    commented = False
+    for line in text.splitlines():
+        if line.startswith(("[", "# [")):
+            commented = line.startswith("#")
+        lines.append(line.removeprefix("#").removeprefix(" ") if commented else line)
+    return "\n".join(lines)
+
+
 class TestMakeCluvConfig:
     def test_template_only_sets_accounts_in_the_sbatch_args_of_clusters(self) -> None:
         """make_cluv_config() changes the accounts of a cluster by writing a new `sbatch_args` line
@@ -211,6 +223,65 @@ class TestMakeCluvConfig:
         assert config.clusters_names == ["tamia", "rorqual", "narval"]
         assert all(cluster.sbatch_args == {} for cluster in config.clusters.values())
         assert "bengioy" not in text
+
+    def test_clusters_that_are_not_selected_are_commented_out(self) -> None:
+        """The clusters that aren't selected stay in the config, commented out, with a link to the
+        documentation of each cluster. Removing one `#` from the lines of these clusters enables
+        them, with the `env` and the `project_dir` of the template."""
+        text, config = make_config(clusters=["rorqual"], accounts={"rorqual": ["def-yourpi"]})
+
+        assert config.clusters_names == ["rorqual"]
+        assert set(CLUSTER_DOCS_URLS) == set(TEMPLATE_CLUSTERS)
+        for cluster in TEMPLATE_CLUSTERS:
+            if cluster != "rorqual":
+                header = f"\n# [tool.cluv.clusters.{cluster}]\n## {CLUSTER_DOCS_URLS[cluster]}\n"
+                assert header in text
+        uncommented = parse_config(uncomment_clusters(text))
+        assert uncommented.clusters_names == TEMPLATE_CLUSTERS
+        for cluster, template_cluster in TEMPLATE_CONFIG.clusters.items():
+            assert uncommented.clusters[cluster].env == template_cluster.env
+            expected_project_dir = SCRATCH_PROJECT_DIR if template_cluster.project_dir else None
+            assert uncommented.clusters[cluster].project_dir == expected_project_dir
+
+    @pytest.mark.parametrize(
+        ("mila_access", "expected_sbatch_args"),
+        [
+            # The accounts of Mila members, or an example account on the clusters without any.
+            (
+                True,
+                {
+                    "mila": {},
+                    "tamia": {"account": "aip-yourpi"},
+                    "fir": {"account": "rrg-bengioy-ad"},
+                    "narval": {"account": "def-bengioy"},
+                },
+            ),
+            # An example account, except on the Mila cluster.
+            (
+                False,
+                {
+                    "mila": {},
+                    "tamia": {"account": "aip-yourpi"},
+                    "fir": {"account": "def-yourpi"},
+                    "narval": {"account": "def-yourpi"},
+                },
+            ),
+        ],
+    )
+    def test_accounts_of_the_clusters_that_are_not_selected(
+        self, mila_access: bool, expected_sbatch_args: dict[str, dict[str, str]]
+    ) -> None:
+        """The clusters that aren't selected get the accounts of Mila members when the user has
+        access to the Mila cluster, as in the questions. The clusters left without an account get
+        an example account, except the Mila cluster, where jobs usually don't need an account."""
+        text, _ = make_config(clusters=["rorqual"], mila_access=mila_access)
+
+        config = parse_config(uncomment_clusters(text))
+
+        sbatch_args = {
+            cluster: config.clusters[cluster].sbatch_args for cluster in expected_sbatch_args
+        }
+        assert sbatch_args == expected_sbatch_args
 
     @pytest.mark.parametrize(
         "project_dir",

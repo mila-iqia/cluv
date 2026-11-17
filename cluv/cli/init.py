@@ -22,6 +22,19 @@ DEFAULT_RESULTS_LINKNAME = "logs"
 MILA_CLUSTER = "mila"
 # The other clusters of the template, except Mila, are DRAC clusters.
 PAICE_CLUSTERS = ("tamia", "killarney", "vulcan")
+# The documentation page of each cluster of the template.
+CLUSTER_DOCS_URLS = {
+    "mila": "https://docs.mila.quebec/",
+    "tamia": "https://docs.alliancecan.ca/wiki/TamIA",
+    "killarney": "https://docs.alliancecan.ca/wiki/Killarney",
+    "vulcan": "https://docs.alliancecan.ca/wiki/Vulcan",
+    "rorqual": "https://docs.alliancecan.ca/wiki/Rorqual",
+    "fir": "https://docs.alliancecan.ca/wiki/Fir",
+    "nibi": "https://docs.alliancecan.ca/wiki/Nibi",
+    "trillium": "https://docs.alliancecan.ca/wiki/Trillium",
+    "trillium-gpu": "https://docs.alliancecan.ca/wiki/Trillium",
+    "narval": "https://docs.alliancecan.ca/wiki/Narval",
+}
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # Repository root when running cluv from a source checkout.
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -265,6 +278,9 @@ def make_cluv_config(template: str, answers: InitAnswers, scratch_project_dir: s
 
     `scratch_project_dir` replaces the template's `project_dir` on the clusters that can't run
     jobs from $HOME.
+
+    The clusters that aren't selected stay in the config, commented out, so that the user can
+    uncomment them later.
     """
     config = template.replace(f'"{DEFAULT_RESULTS_PATH}"', _toml_string(answers.results_path))
     config = config.replace(f'"{DEFAULT_SCRATCH_PROJECT_DIR}"', _toml_string(scratch_project_dir))
@@ -281,21 +297,28 @@ def make_cluv_config(template: str, answers: InitAnswers, scratch_project_dir: s
     # `project_dir` is only removed when the global `project_dir` is in $SCRATCH too, because the
     # clusters could refuse the jobs with any other global `project_dir`.
     project_in_scratch = answers.project_dir.split("/")[0] in ("$SCRATCH", "${SCRATCH}")
+    # No question asks for the accounts of the clusters that aren't selected, so these clusters
+    # get the default answers: the accounts of Mila members for the users who have access to the
+    # Mila cluster, no account for the other users.
+    default_accounts = _default_accounts(template, _cluster_names(template), answers.mila_access)
     lines = []
     for section in _split_sections(config):
         cluster = _cluster_name(section)
         if cluster is None:
             lines += section
             continue
-        if cluster not in answers.clusters:
-            continue
+        selected = cluster in answers.clusters
         if project_in_scratch:
             section = _remove_project_dir(section)
-        accounts = answers.accounts.get(cluster, [])
+        accounts = answers.accounts.get(cluster, []) if selected else default_accounts[cluster]
+        if not selected and not accounts and cluster != MILA_CLUSTER:
+            # An example account shows where to write the user's account before uncommenting the
+            # cluster. Jobs on the Mila cluster usually don't need an account.
+            accounts = [_example_account(cluster)]
         # Only rewritten when the accounts changed, to keep the comment of the template's line.
         if accounts != _accounts(section):
             section = _set_accounts(section, accounts)
-        lines += section
+        lines += section if selected else _comment_out(section, CLUSTER_DOCS_URLS[cluster])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -531,8 +554,12 @@ def _accounts_instruction(cluster: str) -> str:
     instruction = "separate accounts with commas; leave empty for none"
     if cluster == MILA_CLUSTER:
         return f"(usually not needed on the Mila cluster; {instruction})"
-    example = "aip-yourpi" if cluster in PAICE_CLUSTERS else "def-yourpi"
-    return f"(e.g. {example}; {instruction})"
+    return f"(e.g. {_example_account(cluster)}; {instruction})"
+
+
+def _example_account(cluster: str) -> str:
+    """An example of Slurm account name on a PAICE or DRAC cluster."""
+    return "aip-yourpi" if cluster in PAICE_CLUSTERS else "def-yourpi"
 
 
 def _accounts(section: list[str]) -> list[str]:
@@ -572,6 +599,24 @@ def _set_accounts(section: list[str], accounts: list[str]) -> list[str]:
         value = tables[0] if len(tables) == 1 else f"[{', '.join(tables)}]"
         section.insert(1, f"sbatch_args = {value}")
     return section
+
+
+def _comment_out(section: list[str], docs_url: str) -> list[str]:
+    """Comments out the section of a cluster, and adds a link to the documentation of the cluster.
+
+    The comment lines of the section get a second `#`, so that removing one `#` from each line
+    gives back the section, with the link as a comment.
+    """
+    header, *lines = section
+    commented = [f"# {header}", f"## {docs_url}"]
+    for line in lines:
+        if line.startswith("#"):
+            commented.append(f"#{line}")
+        elif line:
+            commented.append(f"# {line}")
+        else:
+            commented.append(line)
+    return commented
 
 
 def _scratch_project_dir(project_root: Path) -> str:

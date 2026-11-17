@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import importlib
 import shlex
 import shutil
@@ -35,6 +36,7 @@ from cluv.cli.submit import (
     submit,
     sync_and_submit_jobs_to_cluster,
     wait_for_first_running_job,
+    wait_for_jobs_to_cancel,
 )
 from cluv.cli.submit_utils.chunking import CHUNK_SIZE, apply_chunking
 from cluv.config import (
@@ -1812,3 +1814,40 @@ def test_submit_exits_nonzero_when_every_submission_fails(
         cluv_main.main(["submit", "first", "--", "python", "main.py"])
 
     assert exc_info.value.code == 1
+
+
+async def test_wait_for_jobs_to_cancel_gives_up_after_timeout(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """If a job never gets cancelled (e.g. `scancel` keeps failing), warn instead of hanging."""
+    job = cluv.cache.Job(
+        cluster="killarney",
+        remote=None,
+        job_script=Path("scripts/job.sh"),
+        sbatch_args={},
+        program_args=[],
+        sbatch_command="sbatch ...",
+        n_chunks=None,
+        git_commit="deadbeef",
+        job_id=1234,
+        submitted_at=datetime.datetime(2026, 1, 1),
+    )
+    row = SubmissionProgress(job=job, log_path=tmp_path / "log.txt", state="RUNNING")
+
+    async def _always_running(_remote, job_ids):
+        return ["RUNNING" for _ in job_ids]
+
+    monkeypatch.setattr(cluv.cli.submit, "run_scancel", unittest.mock.AsyncMock())
+    monkeypatch.setattr(cluv.cli.submit, "get_job_states_with_sacct", _always_running)
+
+    with console.capture() as cap:
+        await asyncio.wait_for(
+            wait_for_jobs_to_cancel(
+                [row], {"killarney": None}, initial_delay=0, timeout_seconds=0.1
+            ),
+            timeout=5,
+        )
+    assert row.state == "RUNNING"
+    output = cap.get()
+    assert "Could not confirm that these jobs were cancelled" in output
+    assert "scancel 1234" in output

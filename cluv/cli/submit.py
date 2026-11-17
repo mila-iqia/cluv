@@ -397,8 +397,13 @@ async def wait_for_jobs_to_cancel(
     cluster_to_remote: dict[str, Remote | None],
     max_wait_time_seconds: int = 60,
     initial_delay: int = 1,
+    timeout_seconds: float = 300,
 ) -> None:
-    """Cancel every (already-submitted) job in `rows`, and wait until they're all done."""
+    """Cancel every (already-submitted) job in `rows`, and wait until they're all done.
+
+    Gives up after `timeout_seconds` (e.g. if `scancel` keeps failing on a cluster), warning
+    about the jobs that might still be alive instead of hanging forever.
+    """
     cluster_to_job_submissions = group_by_cluster(job_submissions)
 
     assert all(job.job_id is not None for job in job_submissions)
@@ -411,21 +416,39 @@ async def wait_for_jobs_to_cancel(
     def is_done(job: SubmissionProgress[Job]) -> bool:
         return job.state.startswith(tuple(TERMINAL_JOB_STATES))
 
-    while not all(is_done(job) for job in job_submissions):
-        # Only cancel the jobs that aren't done yet: `scancel` errors out on finished jobs.
-        await run_scancel([job for job in job_submissions if not is_done(job)])
-        job_states = await gather_dict(
-            {
-                cluster: get_job_states_with_sacct(cluster_to_remote[cluster], cluster_job_ids)
-                for cluster, cluster_job_ids in cluster_to_job_ids.items()
-            }
-        )
-        for cluster, cluster_jobs in cluster_to_job_submissions.items():
-            for job, state in zip(cluster_jobs, job_states[cluster]):
-                job.state = state.strip().split()[0]  # keep only the first word of the state.
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            while not all(is_done(job) for job in job_submissions):
+                # Only cancel the jobs that aren't done yet: `scancel` errors out on finished jobs.
+                await run_scancel([job for job in job_submissions if not is_done(job)])
+                job_states = await gather_dict(
+                    {
+                        cluster: get_job_states_with_sacct(
+                            cluster_to_remote[cluster], cluster_job_ids
+                        )
+                        for cluster, cluster_job_ids in cluster_to_job_ids.items()
+                    }
+                )
+                for cluster, cluster_jobs in cluster_to_job_submissions.items():
+                    for job, state in zip(cluster_jobs, job_states[cluster]):
+                        job.state = state.strip().split()[0]  # keep only the first word.
 
-        await asyncio.sleep(delay)
-        delay = min(delay * 2, max_wait_time_seconds)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, max_wait_time_seconds)
+    except TimeoutError:
+        console.print(
+            f"Could not confirm that these jobs were cancelled after {timeout_seconds:g}s."
+            " Check on them and cancel them manually if needed:",
+            style="yellow",
+        )
+        for job in job_submissions:
+            if not is_done(job):
+                console.print(
+                    f"  job {job.job_id} on {job.cluster} (last state: {job.state}): "
+                    f"ssh {job.cluster} \"bash --login -c 'scancel {job.job_id}'\"",
+                    style="yellow",
+                )
+        return
     console.log(f"Cancelled {len(job_submissions)} job submission(s).")
     for job_submission in job_submissions:
         console.log(

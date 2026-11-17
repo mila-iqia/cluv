@@ -1,4 +1,4 @@
-"""`cluv sync` checks out the project's git submodules on the clusters (before `uv sync`)."""
+"""`cluv sync` clones the project on the clusters at the right commit, with its git submodules."""
 
 import os
 import subprocess
@@ -78,3 +78,27 @@ async def test_clone_project_checks_out_submodules(
     git("push", "-q", cwd=local)
     await clone_project(LocalRemote(), PurePosixPath(cluster_repo_dir), project_state)  # type: ignore
     assert (cluster_repo_dir / "sub" / "data.txt").read_text() == "v2"
+
+
+async def test_clone_project_detached_head_checks_out_same_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A detached HEAD without GITHUB_HEAD_REF is checked out at the same commit on the cluster."""
+    # GitHub sets this during PR CI runs, which would take the PR-branch code path instead.
+    monkeypatch.delenv("GITHUB_HEAD_REF", raising=False)
+
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    git("init", "-q", "-b", "master", cwd=upstream)
+    commit_file(upstream, "pyproject.toml", '[project]\nname = "proj"\n')
+    commit_file(upstream, "data.txt", "v1")
+
+    local = tmp_path / "local"
+    git("clone", "-q", str(upstream), str(local), cwd=tmp_path)
+    # Detach at a commit that isn't the tip of any branch.
+    git("checkout", "-q", "--detach", "HEAD~1", cwd=local)
+    monkeypatch.chdir(local)
+
+    cluster_repo_dir = tmp_path / "cluster" / "proj"
+    await clone_project(LocalRemote(), PurePosixPath(cluster_repo_dir), ProjectStateOnCluster())  # type: ignore
+    assert git("rev-parse", "HEAD", cwd=cluster_repo_dir) == git("rev-parse", "HEAD", cwd=local)

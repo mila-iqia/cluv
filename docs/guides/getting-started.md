@@ -224,9 +224,10 @@ cluv sync                          # Copy the results back into `logs/` (once th
 ```
 
 !!! note
-    `cluv submit` refuses to submit a job when your working directory has uncommitted changes
-    (untracked files are ignored), so that every job can be traced back to the exact commit it ran
-    with. Commit your changes first, or pass `--autocommit` to let cluv commit them for you.
+    `cluv submit` refuses to submit a job when your working directory has uncommitted changes or
+    untracked files, so that every job can be traced back to the exact commit it ran with. Commit
+    your changes first, or pass `--autocommit` to let cluv commit tracked changes for you.
+    Add untracked files with `git add` first, or stash them with `git stash -u`.
 
 ## Next steps
 

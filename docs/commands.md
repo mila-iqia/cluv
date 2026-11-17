@@ -181,7 +181,8 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 **Options**
 
 `--autocommit`
-:   Automatically create a local commit with the tracked changes before submitting, instead of failing when the working tree is dirty.
+:   Automatically create a local commit with tracked changes before submitting. Untracked files
+    still block submission: add them with `git add` first, or stash them with `git stash -u`.
 
 `--chunking`
 :   Split the submitted job into an array of smaller consecutive jobs ("chunks"), based on the requested time.

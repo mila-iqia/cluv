@@ -38,6 +38,7 @@ TEMPLATE_ACCOUNTS = CLUV_INIT_MODULE._default_accounts(
     TEMPLATE, TEMPLATE_CLUSTERS, mila_access=True
 )
 SCRATCH_PROJECT_DIR = "$SCRATCH/repos/my_project"
+HOME_PROJECT_DIR = "$HOME/code/my_project"
 
 
 def parse_config(text: str) -> CluvConfig:
@@ -461,7 +462,7 @@ class TestAskQuestions:
             monkeypatch, mila_access=mila_access, clusters=["rorqual"], texts={}
         )
 
-        ask_questions(TEMPLATE, defaults)
+        ask_questions(TEMPLATE, defaults, HOME_PROJECT_DIR)
 
         assert asked["Do you have access to the Mila cluster?"] == (not mila_access)
         expected_selection = ["mila", "rorqual"] if mila_access else ["rorqual"]
@@ -474,7 +475,7 @@ class TestAskQuestions:
         texts = {"on rorqual?": "rrg-bengioy-ad, def-yourpi"}
         asked = answer_questions(monkeypatch, mila_access=True, clusters=clusters, texts=texts)
 
-        answers = ask_questions(TEMPLATE, self.defaults)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
         prefilled = {
             cluster: asked[f"Which Slurm accounts do you use on {cluster}?"]
@@ -502,7 +503,7 @@ class TestAskQuestions:
             monkeypatch, mila_access=True, clusters=["rorqual", "narval"], texts={}
         )
 
-        answers = ask_questions(TEMPLATE, self.defaults)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
         assert asked["Which Slurm accounts do you use on rorqual?"] == "rrg-bengioy-ad"
         assert asked["Which Slurm accounts do you use on narval?"] == "def-bengioy"
@@ -516,7 +517,7 @@ class TestAskQuestions:
             monkeypatch, mila_access=False, clusters=["rorqual", "tamia"], texts=texts
         )
 
-        answers = ask_questions(TEMPLATE, self.defaults)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
         assert asked["Which Slurm accounts do you use on rorqual?"] == ""
         assert asked["Which Slurm accounts do you use on tamia?"] == ""
@@ -538,7 +539,7 @@ class TestAskQuestions:
         }
         asked = answer_questions(monkeypatch, mila_access=False, clusters=clusters, texts=texts)
 
-        answers = ask_questions(TEMPLATE, self.defaults)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
         prefilled = {
             cluster: asked[f"Which Slurm accounts do you use on {cluster}?"]
@@ -564,12 +565,12 @@ class TestAskQuestions:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         asked = answer_questions(monkeypatch, mila_access=True, clusters=["mila"], texts={})
-        assert ask_questions(TEMPLATE, self.defaults).datasets_path == ""
+        assert ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR).datasets_path == ""
         assert not any("datasets go" in message for message in asked)
 
         texts = {"copy": "mila:/network/datasets/x", "datasets go": "$SCRATCH/data"}
         answer_questions(monkeypatch, mila_access=True, clusters=["mila"], texts=texts)
-        answers = ask_questions(TEMPLATE, self.defaults)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
         assert answers.data_source == "mila:/network/datasets/x"
         assert answers.datasets_path == "$SCRATCH/data"
 
@@ -586,7 +587,7 @@ class TestAskQuestions:
 
         monkeypatch.setattr(questionary, "text", text)
 
-        ask_questions(TEMPLATE, self.defaults)
+        ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
         path_questions = [message for message in validators if message.startswith("Where")]
         assert len(path_questions) == 4
@@ -602,6 +603,26 @@ class TestAskQuestions:
             assert validate("$HOME/data") is True, message
             expected = "This value is required." if message in required else True
             assert validate("") == expected, message
+
+    def test_project_question_shows_where_the_project_goes_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without `project_dir`, the project goes in the same path relative to $HOME as on this
+        machine. The question about `project_dir` shows that path as a placeholder."""
+        answer_questions(monkeypatch, mila_access=True, clusters=["mila"], texts={})
+        fake_text = questionary.text
+        placeholders = {}
+
+        def text(message: str, **kwargs) -> FakeQuestion:
+            placeholders[message] = kwargs.get("placeholder")
+            return fake_text(message, **kwargs)
+
+        monkeypatch.setattr(questionary, "text", text)
+
+        ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+
+        placeholder = placeholders["Where should the project go on the clusters?"]
+        assert [part for _style, part in placeholder] == [HOME_PROJECT_DIR]
 
 
 @pytest.mark.parametrize(

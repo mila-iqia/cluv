@@ -79,7 +79,8 @@ To write the `[tool.cluv]` section, `cluv init` asks a few questions:
   On a cluster without such accounts, the answer is pre-filled with your answer for the previous
   cluster of the same kind (DRAC or PAICE).
 - **Where to put the job results and the project** on the clusters (`results_path` and
-  `project_dir`).
+  `project_dir`). The question about the project shows its default path: the same as on your
+  machine, relative to `$HOME`.
 - **The datasets to copy to all the clusters**, if any (`data_source` and `datasets_path`).
 
 With `--quiet`, or when the input isn't a terminal, `cluv init` asks no question and uses the

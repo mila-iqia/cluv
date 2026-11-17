@@ -146,7 +146,7 @@ def check_cluv_config(pyproject_path: Path, ask: bool = False) -> None:
     answers = default_answers(template, project_root.name)
     if ask:
         try:
-            answers = ask_questions(template, answers)
+            answers = ask_questions(template, answers, _home_project_dir(project_root))
         except (KeyboardInterrupt, EOFError):
             # Ctrl-C raises KeyboardInterrupt, and Ctrl-D raises EOFError.
             console.print("Cancelled: no cluv config was written.", style="yellow")
@@ -192,8 +192,13 @@ def default_answers(template: str, project_name: str) -> InitAnswers:
     )
 
 
-def ask_questions(template: str, defaults: InitAnswers) -> InitAnswers:
-    """Asks the questions of `cluv init` in the terminal, with `defaults` as default answers."""
+def ask_questions(template: str, defaults: InitAnswers, home_project_dir: str) -> InitAnswers:
+    """Asks the questions of `cluv init` in the terminal, with `defaults` as default answers.
+
+    `home_project_dir` is the path of the project on this machine, starting with `$HOME`. Without
+    `project_dir`, the project goes in that path on the clusters, so the question about
+    `project_dir` shows that path while the answer is empty.
+    """
 
     def ask_text(message: str, **kwargs) -> str:
         return questionary.text(message, **kwargs).unsafe_ask().strip()
@@ -245,7 +250,10 @@ def ask_questions(template: str, defaults: InitAnswers) -> InitAnswers:
     )
     answers.project_dir = ask_text(
         "Where should the project go on the clusters?",
-        instruction="(leave empty for the same path as on this machine, relative to $HOME)",
+        instruction="(leave empty for the same path as on this machine)",
+        # prompt_toolkit shows the placeholder (in grey) while the input is empty, and never
+        # returns it: an empty answer leaves `project_dir` commented out in the config.
+        placeholder=[("fg:ansibrightblack", home_project_dir)],
         validate=path,
     )
     answers.data_source = ask_text(
@@ -407,11 +415,7 @@ def check_job_script(project_root: Path, results_path: str) -> None:
     Check if job script templates exist. If not, create them.
     The scripts are templates for users to submit jobs to Slurm with cluv.
     """
-    try:
-        project_root_relative_to_home = project_root.relative_to(Path.home())
-        project_root_for_script = f"$HOME/{project_root_relative_to_home}"
-    except ValueError:
-        project_root_for_script = str(project_root)
+    project_root_for_script = _home_project_dir(project_root)
     scripts_dir = project_root / SCRIPTS_DIR_PATH
     script_templates_path = _get_script_templates_path()
     script_templates = sorted(script_templates_path.glob("*.sh"))
@@ -604,6 +608,18 @@ def _comment_out(section: list[str]) -> list[str]:
         else:
             commented.append(line)
     return commented
+
+
+def _home_project_dir(project_root: Path) -> str:
+    """The path of the project, with `$HOME` instead of the home directory.
+
+    That's where the project goes on the clusters when `project_dir` isn't set. A project outside
+    of the home directory keeps its absolute path.
+    """
+    try:
+        return f"$HOME/{project_root.relative_to(Path.home()).as_posix()}"
+    except ValueError:
+        return str(project_root)
 
 
 def _scratch_project_dir(project_root: Path) -> str:

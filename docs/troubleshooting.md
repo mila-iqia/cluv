@@ -98,3 +98,4 @@ ssh -T git@github.com
 ```
 
 You should see a `Hi <username>! You've successfully authenticated` message.
+[`cluv init`](commands.md#cluv-init) also runs this check on each cluster that it connects to.

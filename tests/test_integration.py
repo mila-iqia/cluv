@@ -7,11 +7,13 @@ efficient, since at some point there might be like 10 different clusters, and 10
 """
 
 import asyncio
+import importlib
 import os
 import re
 import stat
 import subprocess
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import milatools.cli.init_command
 import pytest
@@ -207,6 +209,17 @@ async def test_get_gpu_types(remote: Remote, dont_cache_gpu_types: None):
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)  # Set the home directory to tmp_path
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def no_checks_on_the_clusters_in_cluv_init(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pretends that no cluster is connected in `cluv init`, so that it doesn't run checks on the
+    clusters, which take longer than the timeouts of the tests of `cluv init`.
+
+    `tests/test_init.py` tests these checks.
+    """
+    init_module = importlib.import_module("cluv.cli.init")
+    monkeypatch.setattr(init_module, "control_socket_is_running", AsyncMock(return_value=False))
 
 
 @pytest.fixture(params=[True, False], ids=["with_scratch", "without_scratch"])

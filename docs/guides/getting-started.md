@@ -33,9 +33,10 @@ and your datasets on the clusters. Press Enter to keep the default answer. With 
 `cluv init` asks nothing and uses the default answers.
 
 At the end, `cluv init` checks the clusters of the config, and shows the results in a frame for
-each cluster. **Read the output carefully**: each warning (!) or problem (✘) says how to fix it,
-often with a change of the config (see the next section). Run `cluv init` again at any time to check
-your setup.
+each cluster. It offers to connect to the clusters that aren't connected yet (with a 2FA prompt for
+each cluster), to check your access to GitHub and your Slurm accounts there. **Read the output
+carefully**: each warning (!) or problem (✘) says how to fix it, often with a change of the config
+(see the next section). Run `cluv init` again at any time to check your setup.
 
 ## Adapt the config to your needs
 
@@ -93,6 +94,9 @@ adjust them to the allocations you actually have access to:
 
 - **Add** your PI's accounts (`def-*` or `rrg-*` for DRAC clusters, `aip-*` for PAICE clusters).
 - **Remove** the Mila accounts if you don't have access to them.
+
+To find your accounts, run `cluv init` again: on each connected cluster, it checks the accounts of
+the config, and suggests a `sbatch_args` line with all your accounts on the cluster.
 
 When you have access to multiple accounts on a cluster, you can list them all in the config.
 `cluv submit` will submit one job per allocation and keep the first one that starts.

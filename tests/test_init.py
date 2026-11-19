@@ -22,22 +22,27 @@ from cluv.cli.init import (
     InitAnswers,
     Status,
     ask_questions,
+    check_accounts,
     check_cluster,
     check_clusters,
     check_cluv_config,
     check_git,
+    check_github,
     check_home_dir,
     check_job_script,
     check_job_script_paths,
+    check_on_cluster,
     check_ssh_entry,
     check_symlink_to_scratch,
     cluster_panel,
+    connect_to_clusters,
     default_answers,
     make_cluv_config,
     print_keep_alive_tip,
     print_summary,
 )
 from cluv.config import CluvConfig, load_cluv_config
+from cluv.remote import Remote
 from cluv.utils import console
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -433,13 +438,19 @@ class TestDefaultAnswers:
 
 
 class FakeQuestion:
-    """Stands in for a questionary question: returns a fixed answer."""
+    """Stands in for a questionary question: returns a fixed answer, or raises it when the answer
+    is an exception (Ctrl-C raises KeyboardInterrupt, and Ctrl-D raises EOFError)."""
 
     def __init__(self, answer):
         self.answer = answer
 
     def unsafe_ask(self):
+        if isinstance(self.answer, type) and issubclass(self.answer, BaseException):
+            raise self.answer
         return self.answer
+
+    async def unsafe_ask_async(self):
+        return self.unsafe_ask()
 
 
 def answer_questions(
@@ -963,22 +974,6 @@ class TestCheckCluster:
         assert checks[1].message.endswith(": cluv commands skip rorqual")
         assert checks[1].hints == ("run `cluv enable rorqual` to use it again",)
 
-    def test_check_clusters_shows_a_frame_for_each_cluster(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        fake_ssh_config(monkeypatch, ["mila"], keep_alive=("mila",))
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_disabled_clusters", lambda: {})
-        config = make_cluv_config_with_clusters(mila={}, tamia={})
-
-        with console.capture() as capture:
-            reports = check_clusters(config)
-
-        assert list(reports) == ["mila", "tamia"]
-        output = capture.get()
-        assert "mila  ✔ 1" in output
-        assert "tamia  ✘ 1" in output
-        assert "Clusters: 1 ready · 1 with problems" in output
-
 
 class TestCheckJobScriptPaths:
     def test_job_scripts_of_the_config(self, tmp_path: Path) -> None:
@@ -1104,3 +1099,308 @@ class TestDisplay:
             print_keep_alive_tip(["mila"])
 
         assert capture.get() == ""
+
+
+# The results of the commands on a fake cluster, as (exit code, stdout, stderr).
+CONNECTED = (0, "OK\n", "")
+GITHUB_ACCESS = (
+    1,
+    "",
+    "Hi me! You've successfully authenticated, but GitHub does not provide...\n",
+)
+NO_GITHUB_ACCESS = (255, "", "git@github.com: Permission denied (publickey).\n")
+# The Slurm associations of a user on a DRAC cluster, with an account for the CPU jobs and another
+# one for the GPU jobs.
+DRAC_ACCOUNTS = (0, "def-me_cpu\ndef-me_gpu\nrrg-me-ad_cpu\nrrg-me-ad_gpu\n", "")
+
+
+class FakeRemote:
+    """Stands in for a `Remote`: the result of a command is `results[word]`, for the first `word`
+    that is in the command."""
+
+    def __init__(self, hostname: str, results: dict[str, tuple[int, str, str]]):
+        self.hostname = hostname
+        self.results = results
+
+    async def run(self, command: str, **kwargs) -> subprocess.CompletedProcess[str]:
+        for word, (returncode, stdout, stderr) in self.results.items():
+            if word in command:
+                return subprocess.CompletedProcess(command, returncode, stdout, stderr)
+        raise AssertionError(f"Unexpected command on {self.hostname}: {command}")
+
+
+def fake_clusters(
+    monkeypatch: pytest.MonkeyPatch,
+    results: dict[str, dict[str, tuple[int, str, str]]],
+    connected: list[str],
+) -> None:
+    """Makes the commands on each cluster give the `results` of the cluster, with the clusters of
+    `connected` already connected."""
+
+    async def control_socket_is_running(host: str) -> bool:
+        return host in connected
+
+    monkeypatch.setattr(CLUV_INIT_MODULE, "control_socket_is_running", control_socket_is_running)
+    monkeypatch.setattr(
+        CLUV_INIT_MODULE,
+        "Remote",
+        lambda hostname: FakeRemote(hostname, results.get(hostname, {})),
+    )
+
+
+def answer_connect_question(monkeypatch: pytest.MonkeyPatch, answer) -> list[str]:
+    """Makes questionary give `answer` to the question about connecting to the clusters. Returns
+    the questions that get asked."""
+    asked = []
+
+    def confirm(message: str, **kwargs) -> FakeQuestion:
+        asked.append(message)
+        return FakeQuestion(answer)
+
+    monkeypatch.setattr(questionary, "confirm", confirm)
+    return asked
+
+
+NOT_CONNECTED = Check(
+    Status.SKIP,
+    "not connected: GitHub access and Slurm accounts not checked",
+    ("run `cluv login rorqual`, then `cluv init` again",),
+)
+
+
+class TestConnectToClusters:
+    config = make_cluv_config_with_clusters(
+        mila={}, rorqual={"cluster_link": "https://docs.alliancecan.ca/wiki/Rorqual"}
+    )
+
+    async def test_no_question_without_ask(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Without `ask` (with `--quiet`, or when the input isn't a terminal), only the clusters
+        that are already connected are checked."""
+        fake_clusters(monkeypatch, {}, connected=["mila"])
+        asked = answer_connect_question(monkeypatch, True)
+
+        connections = await connect_to_clusters(self.config, ["mila", "rorqual"], ask=False)
+
+        assert asked == []
+        assert connections == {"mila": Check(Status.OK, "connected"), "rorqual": NOT_CONNECTED}
+
+    async def test_connect_when_the_user_agrees(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_clusters(
+            monkeypatch, {"mila": {"echo OK": CONNECTED}, "rorqual": {"echo OK": CONNECTED}}, []
+        )
+        asked = answer_connect_question(monkeypatch, True)
+
+        connections = await connect_to_clusters(self.config, ["mila", "rorqual"], ask=True)
+
+        assert asked == [
+            "Connect to mila and rorqual now, to check them? There may be a 2FA prompt for each "
+            "cluster."
+        ]
+        assert connections == {
+            "mila": Check(Status.OK, "connected"),
+            "rorqual": Check(Status.OK, "connected"),
+        }
+
+    @pytest.mark.parametrize("answer", [False, KeyboardInterrupt, EOFError])
+    async def test_no_connection_when_the_user_refuses(
+        self, answer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No, Ctrl-C or Ctrl-D: the clusters that aren't connected aren't checked."""
+        fake_clusters(monkeypatch, {}, connected=[])
+        answer_connect_question(monkeypatch, answer)
+
+        connections = await connect_to_clusters(self.config, ["rorqual"], ask=True)
+
+        assert connections == {"rorqual": NOT_CONNECTED}
+
+    async def test_no_question_when_all_the_clusters_are_connected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_clusters(monkeypatch, {}, connected=["mila", "rorqual"])
+        asked = answer_connect_question(monkeypatch, True)
+
+        await connect_to_clusters(self.config, ["mila", "rorqual"], ask=True)
+
+        assert asked == []
+
+    async def test_connection_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The last line of the SSH errors says why the connection failed."""
+        error = (255, "", "Welcome to Rorqual!\nme@rorqual: Permission denied (publickey).\n")
+        fake_clusters(monkeypatch, {"rorqual": {"echo OK": error}}, connected=[])
+        answer_connect_question(monkeypatch, True)
+
+        connections = await connect_to_clusters(self.config, ["rorqual"], ask=True)
+
+        assert connections == {
+            "rorqual": Check(
+                Status.FAIL,
+                "connection failed: me@rorqual: Permission denied (publickey).",
+                (
+                    "run `ssh rorqual` to see the details",
+                    "if you don't have access to rorqual yet, see: "
+                    "https://docs.alliancecan.ca/wiki/Rorqual",
+                ),
+            )
+        }
+
+
+class TestCheckGithub:
+    async def test_github_access(self) -> None:
+        check = await check_github(FakeRemote("rorqual", {"git@github.com": GITHUB_ACCESS}))
+
+        assert check == Check(Status.OK, "SSH access to GitHub")
+
+    async def test_no_github_access(self) -> None:
+        check = await check_github(FakeRemote("rorqual", {"git@github.com": NO_GITHUB_ACCESS}))
+
+        assert check.status is Status.FAIL
+        assert check.hints == (
+            "see how to set it up: https://mila-iqia.github.io/cluv/troubleshooting/"
+            "#setting-up-ssh-access-to-github-from-the-clusters",
+        )
+
+
+class TestCheckAccounts:
+    @staticmethod
+    async def check(cluster: str, sbatch_args, sacctmgr: tuple[int, str, str]) -> Check:
+        config = make_cluv_config_with_clusters(**{cluster: {"sbatch_args": sbatch_args}})
+        remote = FakeRemote(cluster, {"sacctmgr": sacctmgr})
+        return await check_accounts(remote, config.get_cluster_config(cluster))
+
+    async def test_all_the_accounts_of_the_user(self) -> None:
+        sbatch_args = [{"account": "def-me"}, {"account": "rrg-me-ad"}]
+
+        check = await self.check("rorqual", sbatch_args, DRAC_ACCOUNTS)
+
+        assert check == Check(Status.OK, "Slurm accounts: def-me, rrg-me-ad")
+
+    async def test_other_accounts_of_the_user(self) -> None:
+        """The check suggests a `sbatch_args` line with all the accounts of the user, starting
+        with the accounts of the config."""
+        check = await self.check("rorqual", {"account": "rrg-me-ad"}, DRAC_ACCOUNTS)
+
+        assert check == Check(
+            Status.OK,
+            "Slurm account: rrg-me-ad",
+            (
+                "you also have def-me. To use all your accounts, set in pyproject.toml, under "
+                "[tool.cluv.clusters.rorqual]:",
+            ),
+            'sbatch_args = [{ account = "rrg-me-ad" }, { account = "def-me" }]',
+        )
+
+    async def test_account_of_an_association(self) -> None:
+        """An account with the `_gpu` suffix of its association is an account of the user too."""
+        check = await self.check("rorqual", {"account": "def-me_gpu"}, DRAC_ACCOUNTS)
+
+        assert check.status is Status.OK
+        assert check.hints[0].startswith("you also have rrg-me-ad. ")
+
+    async def test_account_that_isnt_the_users(self) -> None:
+        check = await self.check("narval", {"account": "def-bengioy"}, DRAC_ACCOUNTS)
+
+        assert check == Check(
+            Status.FAIL,
+            "not among your Slurm accounts on narval: def-bengioy",
+            (
+                "your accounts: def-me, rrg-me-ad. Set in pyproject.toml, under "
+                "[tool.cluv.clusters.narval]:",
+            ),
+            'sbatch_args = [{ account = "def-me" }, { account = "rrg-me-ad" }]',
+        )
+
+    async def test_no_account_on_the_mila_cluster(self) -> None:
+        check = await self.check("mila", {}, (0, "mila\n", ""))
+
+        assert check == Check(
+            Status.OK, "no Slurm account set (usually not needed on the Mila cluster)"
+        )
+
+    async def test_no_account_with_a_single_account(self) -> None:
+        check = await self.check("narval", {}, (0, "def-me_cpu\ndef-me_gpu\n", ""))
+
+        assert check == Check(
+            Status.OK, "no Slurm account set (Slurm uses your only account, def-me)"
+        )
+
+    async def test_no_account_with_many_accounts(self) -> None:
+        check = await self.check("narval", {}, DRAC_ACCOUNTS)
+
+        assert check == Check(
+            Status.WARN,
+            "no Slurm account set, but you have several on narval: jobs may need one",
+            (
+                "to use all your accounts, set in pyproject.toml, under "
+                "[tool.cluv.clusters.narval]:",
+            ),
+            'sbatch_args = [{ account = "def-me" }, { account = "rrg-me-ad" }]',
+        )
+
+    async def test_lines_that_arent_accounts_are_ignored(self) -> None:
+        """The login shell can print other lines, like a welcome message."""
+        sacctmgr = (0, "Welcome to Narval!\ndef-me_cpu\n", "")
+
+        check = await self.check("narval", {}, sacctmgr)
+
+        assert check.message == "no Slurm account set (Slurm uses your only account, def-me)"
+
+    @pytest.mark.parametrize("sacctmgr", [(1, "", "sacctmgr: command not found\n"), (0, "", "")])
+    async def test_accounts_that_cant_be_listed(self, sacctmgr: tuple[int, str, str]) -> None:
+        check = await self.check("narval", {"account": "def-me"}, sacctmgr)
+
+        assert check == Check(Status.SKIP, "couldn't list your Slurm accounts on narval")
+
+
+async def test_check_clusters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each cluster has a frame with its checks. The clusters that cluv doesn't connect to (without
+    an SSH entry, disabled, or the current cluster) have no checks on the cluster."""
+    fake_ssh_config(monkeypatch, ["mila", "rorqual", "narval"], keep_alive=("mila",))
+    monkeypatch.setattr(CLUV_INIT_MODULE, "current_cluster", lambda: "mila")
+    disabled = {"narval": DisabledCluster(disabled_at=datetime.now(tz=timezone.utc))}
+    monkeypatch.setattr(CLUV_INIT_MODULE, "get_disabled_clusters", lambda: disabled)
+    fake_clusters(
+        monkeypatch,
+        {"rorqual": {"git@github.com": GITHUB_ACCESS, "sacctmgr": DRAC_ACCOUNTS}},
+        connected=["rorqual"],
+    )
+    config = make_cluv_config_with_clusters(
+        mila={},
+        rorqual={"sbatch_args": [{"account": "def-me"}, {"account": "rrg-me-ad"}]},
+        narval={},
+        tamia={},
+    )
+
+    with console.capture() as capture:
+        reports = await check_clusters(config, ask=True)
+
+    assert reports == {
+        "mila": [
+            Check(Status.OK, "current cluster: no SSH connection needed"),
+            Check(Status.SKIP, "GitHub access and Slurm accounts not checked on this cluster"),
+        ],
+        "rorqual": [
+            Check(Status.OK, "SSH entry in ~/.ssh/config"),
+            Check(Status.OK, "connected"),
+            Check(Status.OK, "SSH access to GitHub"),
+            Check(Status.OK, "Slurm accounts: def-me, rrg-me-ad"),
+        ],
+        "narval": [
+            Check(Status.OK, "SSH entry in ~/.ssh/config"),
+            CLUV_INIT_MODULE.check_disabled("narval", disabled["narval"]),
+        ],
+        "tamia": [check_ssh_entry("tamia", None)],
+    }
+    output = capture.get()
+    assert "rorqual  ✔ 4" in output
+    assert "Clusters: 1 ready · 1 with warnings · 1 not checked · 1 with problems" in output
+
+
+@pytest.mark.integration
+async def test_checks_on_a_cluster(remote: Remote) -> None:
+    """The commands of the checks work on the clusters. The result of the GitHub check depends on
+    the SSH keys of the user, but `sacctmgr` lists the Slurm accounts of the user."""
+    config = make_cluv_config_with_clusters(**{remote.hostname: {}})
+
+    _github, accounts = await check_on_cluster(config, remote.hostname)
+
+    assert accounts.status is not Status.SKIP, accounts.message

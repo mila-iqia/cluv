@@ -1,3 +1,4 @@
+import asyncio
 import dataclasses
 import json
 import os
@@ -15,8 +16,14 @@ from rich.text import Text
 
 from cluv.cache import DisabledCluster, get_disabled_clusters
 from cluv.cli.disable import format_remaining
-from cluv.config import CluvConfig, find_pyproject, has_cluv_config, load_cluv_config
-from cluv.remote import get_ssh_options_for_host
+from cluv.config import (
+    ClusterConfig,
+    CluvConfig,
+    find_pyproject,
+    has_cluv_config,
+    load_cluv_config,
+)
+from cluv.remote import Remote, control_socket_is_running, get_ssh_options_for_host
 from cluv.utils import console, current_cluster
 
 __all__ = ["init"]
@@ -32,6 +39,9 @@ PAICE_CLUSTERS = ("tamia", "killarney", "vulcan")
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # Repository root when running cluv from a source checkout.
 REPO_ROOT = Path(__file__).resolve().parents[2]
+TROUBLESHOOTING_URL = "https://mila-iqia.github.io/cluv/troubleshooting/"
+# The checks that run on the clusters, for the messages about the clusters where they don't run.
+REMOTE_CHECKS = "GitHub access and Slurm accounts"
 
 
 def init(path: Path | None = None, quiet: bool = False) -> None:
@@ -46,7 +56,8 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
       is asked and the default answers are used.
     * Adds job script templates in the `scripts/` directory of the project.
     * Checks each cluster of the config, and shows the results in a frame for each cluster, with
-      how to fix each problem.
+      how to fix each problem. Some checks run on the clusters: unless `quiet` is True or stdin
+      isn't a terminal, `cluv init` offers to connect to the clusters that aren't connected yet.
     """
     console.print()
     console.rule("[bold cyan]cluv init[/bold cyan]")
@@ -73,7 +84,8 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
     pyproject_path = find_pyproject()
 
     # If it doesn't exist, add a cluv config section made from the answers to a few questions.
-    check_cluv_config(pyproject_path, ask=not quiet and sys.stdin.isatty())
+    ask = not quiet and sys.stdin.isatty()
+    check_cluv_config(pyproject_path, ask=ask)
     config = load_cluv_config(pyproject_path)
 
     # Check if project structure is correct
@@ -90,7 +102,7 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
     # Check the access to each cluster of the config.
     console.print()
     console.print("Checking the clusters...")
-    reports = check_clusters(config)
+    reports = asyncio.run(check_clusters(config, ask=ask))
 
     # Show what the user can do next after the project setup
     console.print()
@@ -468,15 +480,38 @@ class Check:
     code: str = ""
 
 
-def check_clusters(config: CluvConfig) -> dict[str, list[Check]]:
+async def check_clusters(config: CluvConfig, ask: bool = False) -> dict[str, list[Check]]:
     """Checks the access to each cluster of the config, and shows the results in a frame for each
-    cluster. Returns the checks of each cluster."""
+    cluster. Returns the checks of each cluster.
+
+    Some checks run on the clusters. When `ask` is True, the user is offered to connect to the
+    clusters that aren't connected yet.
+    """
     disabled = get_disabled_clusters()
     reports = {
         cluster: check_cluster(config, cluster, disabled) for cluster in config.clusters_names
     }
     if not reports:
         return reports
+    # The clusters that cluv connects to with SSH.
+    clusters = [
+        cluster
+        for cluster in reports
+        if cluster != current_cluster() and cluster not in disabled and _has_ssh_entry(cluster)
+    ]
+    connections = await connect_to_clusters(config, clusters, ask)
+    connected = [cluster for cluster in clusters if connections[cluster].status is Status.OK]
+    with console.status(f"Checking {REMOTE_CHECKS} on the clusters..."):
+        results = await asyncio.gather(
+            *(check_on_cluster(config, cluster) for cluster in connected)
+        )
+    for cluster, connection in connections.items():
+        reports[cluster].append(connection)
+    for cluster, checks in zip(connected, results):
+        reports[cluster] += checks
+    if (here := current_cluster()) in reports:
+        reports[here].append(Check(Status.SKIP, f"{REMOTE_CHECKS} not checked on this cluster"))
+
     for cluster, checks in reports.items():
         console.print(cluster_panel(cluster, checks))
     print_summary(reports)
@@ -525,6 +560,158 @@ def check_disabled(cluster: str, disabled: DisabledCluster) -> Check:
         f"disabled {period}: cluv commands skip {cluster}",
         (f"run `cluv enable {cluster}` to use it again",),
     )
+
+
+async def connect_to_clusters(
+    config: CluvConfig, clusters: list[str], ask: bool
+) -> dict[str, Check]:
+    """Returns whether each cluster is connected, after connecting to the clusters.
+
+    Each new connection can ask for a 2FA, so the clusters that aren't connected yet are only
+    connected when `ask` is True and the user agrees.
+    """
+    running = await asyncio.gather(*(control_socket_is_running(cluster) for cluster in clusters))
+    connections = {
+        cluster: Check(Status.OK, "connected")
+        for cluster, is_running in zip(clusters, running)
+        if is_running
+    }
+    missing = [cluster for cluster in clusters if cluster not in connections]
+    if missing and ask and await _ask_to_connect(missing):
+        # One cluster at a time, so that the 2FA prompts of the clusters don't mix.
+        for cluster in missing:
+            cluster_link = config.get_cluster_config(cluster).cluster_link
+            connections[cluster] = await _connect(cluster, cluster_link)
+    for cluster in missing:
+        connections.setdefault(
+            cluster,
+            Check(
+                Status.SKIP,
+                f"not connected: {REMOTE_CHECKS} not checked",
+                (f"run `cluv login {cluster}`, then `cluv init` again",),
+            ),
+        )
+    return connections
+
+
+async def check_on_cluster(config: CluvConfig, cluster: str) -> list[Check]:
+    """The checks that run on the cluster, through the SSH connection to the cluster."""
+    remote = Remote(cluster)
+    cluster_config = config.get_cluster_config(cluster)
+    return list(await asyncio.gather(check_github(remote), check_accounts(remote, cluster_config)))
+
+
+async def check_github(remote: Remote) -> Check:
+    """Checks that the cluster connects to GitHub with SSH, with a key of the cluster or a key
+    forwarded from this machine. `cluv sync` clones the project from GitHub on the cluster."""
+    # `ssh -T git@github.com` exits with 1, even when the connection works.
+    result = await remote.run(
+        "ssh -T -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "
+        "git@github.com",
+        warn=True,
+        hide=True,
+        display=False,
+    )
+    if "successfully authenticated" in result.stderr:
+        return Check(Status.OK, "SSH access to GitHub")
+    return Check(
+        Status.FAIL,
+        "no SSH access to GitHub",
+        (
+            f"see how to set it up: {TROUBLESHOOTING_URL}"
+            "#setting-up-ssh-access-to-github-from-the-clusters",
+        ),
+    )
+
+
+async def check_accounts(remote: Remote, cluster_config: ClusterConfig) -> Check:
+    """Checks the Slurm accounts of the cluster in the config (`sbatch_args`) against the accounts
+    of the user on the cluster.
+
+    When the config doesn't have all the accounts of the user, the check suggests a `sbatch_args`
+    line with all of them: with many accounts, `cluv submit` submits a job with each account, and
+    keeps the first job that starts.
+    """
+    cluster = remote.hostname
+    accounts = [str(args["account"]) for args in cluster_config.sbatch_args if "account" in args]
+    result = await remote.run(
+        "bash --login -c 'sacctmgr --noheader --parsable2 show associations user=$USER "
+        "format=account'",
+        warn=True,
+        hide=True,
+        display=False,
+    )
+    associations = {
+        line.strip()
+        for line in result.stdout.splitlines()
+        if re.fullmatch(r"[\w.-]+", line.strip())
+    }
+    if result.returncode != 0 or not associations:
+        return Check(Status.SKIP, f"couldn't list your Slurm accounts on {cluster}")
+
+    def account_name(association: str) -> str:
+        # On the DRAC clusters, an account like `def-pi` has an association for the CPU jobs
+        # (`def-pi_cpu`) and another one for the GPU jobs (`def-pi_gpu`).
+        return re.sub(r"_[cg]pu$", "", association)
+
+    user_accounts = sorted({account_name(association) for association in associations})
+    unknown = [a for a in accounts if a not in associations and a not in user_accounts]
+    others = [a for a in user_accounts if a not in {account_name(b) for b in accounts}]
+    # The accounts of the config that are the user's, then the other accounts of the user.
+    suggestion = _sbatch_args_line([a for a in accounts if a not in unknown] + others)
+    where = f"in pyproject.toml, under [tool.cluv.clusters.{cluster}]"
+    if unknown:
+        return Check(
+            Status.FAIL,
+            f"not among your Slurm accounts on {cluster}: {', '.join(unknown)}",
+            (f"your accounts: {', '.join(user_accounts)}. Set {where}:",),
+            suggestion,
+        )
+    if accounts:
+        message = f"Slurm account{'s' if len(accounts) > 1 else ''}: {', '.join(accounts)}"
+        if others:
+            hint = f"you also have {', '.join(others)}. To use all your accounts, set {where}:"
+            return Check(Status.OK, message, (hint,), suggestion)
+        return Check(Status.OK, message)
+    if cluster == MILA_CLUSTER:
+        return Check(Status.OK, "no Slurm account set (usually not needed on the Mila cluster)")
+    if len(user_accounts) == 1:
+        return Check(
+            Status.OK, f"no Slurm account set (Slurm uses your only account, {user_accounts[0]})"
+        )
+    return Check(
+        Status.WARN,
+        f"no Slurm account set, but you have several on {cluster}: jobs may need one",
+        (f"to use all your accounts, set {where}:",),
+        suggestion,
+    )
+
+
+async def _ask_to_connect(clusters: list[str]) -> bool:
+    """Asks whether to connect to the clusters now. Ctrl-C or Ctrl-D mean no."""
+    try:
+        return await questionary.confirm(
+            f"Connect to {_join(clusters)} now, to check them? There may be a 2FA prompt for each "
+            "cluster.",
+            default=True,
+        ).unsafe_ask_async()
+    except (KeyboardInterrupt, EOFError):
+        return False
+
+
+async def _connect(cluster: str, cluster_link: str | None) -> Check:
+    """Opens an SSH connection to the cluster, which stays open for the next cluv commands."""
+    console.print(f"Connecting to {cluster}...")
+    result = await Remote(cluster).run("echo OK", display=False, warn=True, hide=True)
+    if "OK" in result.stdout:
+        return Check(Status.OK, "connected")
+    # The last line of the SSH errors says why the connection failed.
+    error_lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+    error = error_lines[-1] if error_lines else f"ssh exited with {result.returncode}"
+    hints = [f"run `ssh {cluster}` to see the details"]
+    if cluster_link:
+        hints.append(f"if you don't have access to {cluster} yet, see: {cluster_link}")
+    return Check(Status.FAIL, f"connection failed: {error}", tuple(hints))
 
 
 def cluster_panel(cluster: str, checks: list[Check]) -> Panel:
@@ -806,11 +993,22 @@ def _set_accounts(section: list[str], accounts: list[str]) -> list[str]:
     """
     section = [line for line in section if not line.startswith("sbatch_args = ")]
     if accounts:
-        tables = [f"{{ account = {_toml_string(account)} }}" for account in accounts]
-        value = tables[0] if len(tables) == 1 else f"[{', '.join(tables)}]"
         # Under the header and the `cluster_link` line.
-        section.insert(2, f"sbatch_args = {value}")
+        section.insert(2, _sbatch_args_line(accounts))
     return section
+
+
+def _sbatch_args_line(accounts: list[str]) -> str:
+    """The `sbatch_args` line of a cluster with these Slurm accounts.
+
+    >>> _sbatch_args_line(["def-pi"])
+    'sbatch_args = { account = "def-pi" }'
+    >>> _sbatch_args_line(["def-pi", "rrg-pi-ad"])
+    'sbatch_args = [{ account = "def-pi" }, { account = "rrg-pi-ad" }]'
+    """
+    tables = [f"{{ account = {_toml_string(account)} }}" for account in accounts]
+    value = tables[0] if len(tables) == 1 else f"[{', '.join(tables)}]"
+    return f"sbatch_args = {value}"
 
 
 def _comment_out(section: list[str]) -> list[str]:

@@ -54,6 +54,7 @@ from cluv.utils import console, current_cluster
 # would hit the function, not the module. Go through `importlib` instead, like
 # `tests/test_sync_shared_filesystem.py` does.
 sync_module = importlib.import_module("cluv.cli.sync")
+init_module = importlib.import_module("cluv.cli.init")
 
 
 def build_sbatch_command(
@@ -106,6 +107,10 @@ def project_dir(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture
 def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(project_dir)  # Set current working dir
+    # Pretend that no cluster is connected, so that `cluv init` doesn't run checks on the clusters.
+    monkeypatch.setattr(
+        init_module, "control_socket_is_running", mock.AsyncMock(return_value=False)
+    )
 
     cluv.cli.init()
     return project_dir

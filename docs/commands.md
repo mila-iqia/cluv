@@ -100,6 +100,17 @@ cluster: ✔ for what works, ! for a warning and ✘ for a problem, with how to 
   [`mila init`](troubleshooting.md#setting-up-ssh-access-to-all-clusters) to add it, or see the
   `cluster_link` of the cluster to get access to it.
 - The cluster isn't disabled with [`cluv disable`](#cluv-disable).
+- cluv can connect to the cluster.
+- The cluster has
+  [SSH access to GitHub](troubleshooting.md#setting-up-ssh-access-to-github-from-the-clusters), to
+  clone your project.
+- The Slurm accounts of the config are yours. When you have other accounts on the cluster,
+  `cluv init` suggests a `sbatch_args` line with all your accounts.
+
+The last three checks run on the cluster. If some clusters aren't connected yet, `cluv init` asks
+whether to connect to them now, with a 2FA prompt for each cluster, like
+[`cluv login`](#cluv-login). With `--quiet`, or when the input isn't a terminal, it only checks the
+clusters that are already connected.
 
 It also suggests the SSH options that keep idle connections open (`ServerAliveInterval`). Run
 `cluv init` again at any time to check your setup: it only adds what is missing.

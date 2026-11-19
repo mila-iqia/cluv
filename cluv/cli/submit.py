@@ -1018,19 +1018,25 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
     Check git is clean locally and return the current commit hash.
     """
     git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
-    dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
-    if dirty_lines:
-        if autocommit:
-            if submit_command is None:
-                raise ValueError("submit_command is required when autocommit=True")
-            create_submit_commit(submit_command)
-        elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
-            console.print(
-                "Working directory is dirty. Please commit your changes before submitting, "
-                "or use `--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).",
-                style="red",
-            )
-            sys.exit(1)
+    dirty_lines = git_status.stdout.splitlines()
+    untracked = [line for line in dirty_lines if line.startswith("??")]
+    tracked = [line for line in dirty_lines if not line.startswith("??")]
+    skip_check = os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"
+    if not skip_check and (untracked or (tracked and not autocommit)):
+        print(
+            "Error: local tree is dirty — cluv submits a commit, not your working tree.",
+            *(f"  {line}" for line in dirty_lines),
+            "Fix: commit or stash these files (use `git stash -u` for untracked files).",
+            "For tracked changes, use --autocommit (hydra.launcher.autocommit=True with Hydra).",
+            "Add untracked files with `git add` before committing; --autocommit does not add them.",
+            sep="\n",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if tracked and autocommit:
+        if submit_command is None:
+            raise ValueError("submit_command is required when autocommit=True")
+        create_submit_commit(submit_command)
 
     # In GitHub Actions PR jobs we can be on a detached merge commit that doesn't exist on
     # the synced remote checkout. Prefer the branch tip commit in that case.

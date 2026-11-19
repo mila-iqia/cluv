@@ -1102,38 +1102,82 @@ class TestBuildSubmitCommand:
 
 
 class TestEnsureCleanGitState:
-    def test_ensure_clean_git_state_exits_when_repo_dirty_without_autocommit(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ("status", "autocommit"),
+        [
+            (" M cluv/cli/submit.py\n", False),
+            ("?? notes.txt\n", False),
+            (" M cluv/cli/submit.py\n?? notes.txt\n", False),
+            ("?? notes.txt\n", True),
+            (" M cluv/cli/submit.py\n?? notes.txt\n", True),
+        ],
+    )
+    def test_ensure_clean_git_state_refuses_dirty_files(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+        status: str,
+        autocommit: bool,
     ) -> None:
-        messages: list[tuple[str, dict]] = []
         monkeypatch.setenv("SKIP_CLEAN_GIT_CHECK", "0")  # in case it is set in the dev test env.
 
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
             assert kwargs.get("text") is True
             if command == ["git", "status", "--porcelain"]:
-                return subprocess.CompletedProcess(
-                    command, 0, stdout=" M cluv/cli/submit.py\n", stderr=""
-                )
+                return subprocess.CompletedProcess(command, 0, stdout=status, stderr="")
             raise AssertionError(f"Unexpected subprocess.run call: {command}")
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        with pytest.raises(SystemExit) as exc:
+            ensure_clean_git_state(autocommit=autocommit, submit_command="cluv submit mila")
+
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "cluv submits a commit, not your working tree" in captured.err
+        for line in status.splitlines():
+            assert line in captured.err
+        assert "--autocommit" in captured.err
+        assert "git add" in captured.err
+        assert "git stash -u" in captured.err
+
+    async def test_dirty_tree_is_reported_in_parsable_mode(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setenv("SKIP_CLEAN_GIT_CHECK", "0")
         monkeypatch.setattr(
-            cluv.cli.submit.console,
-            "print",
-            lambda message, **kwargs: messages.append((message, kwargs)),
+            subprocess,
+            "run",
+            lambda command, **kwargs: subprocess.CompletedProcess(
+                command, 0, stdout="?? config.yaml\n", stderr=""
+            ),
         )
+        monkeypatch.setattr(console, "quiet", False)
 
-        with pytest.raises(SystemExit):
-            ensure_clean_git_state()
+        with pytest.raises(SystemExit) as exc:
+            await submit("mila", Path("job.sh"), [], [], parsable=True)
 
-        assert messages == [
-            (
-                "Working directory is dirty. Please commit your changes before submitting, or use "
-                "`--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).",
-                {"style": "red"},
-            )
-        ]
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "?? config.yaml" in captured.err
+
+    def test_skip_clean_git_check_allows_untracked_files(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SKIP_CLEAN_GIT_CHECK", "1")
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda command, **kwargs: subprocess.CompletedProcess(
+                command, 0, stdout="?? notes.txt\n", stderr=""
+            ),
+        )
+        monkeypatch.setattr(subprocess, "check_output", lambda *args, **kwargs: "main\n")
+
+        assert ensure_clean_git_state() == "main"
 
     def test_ensure_clean_git_state_creates_commit_when_autocommit_enabled(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1146,7 +1190,7 @@ class TestEnsureCleanGitState:
             command_calls.append((command, kwargs))
             if command == ["git", "status", "--porcelain"]:
                 return subprocess.CompletedProcess(
-                    command, 0, stdout=" M cluv/cli/submit.py\n?? notes.txt\n", stderr=""
+                    command, 0, stdout=" M cluv/cli/submit.py\n", stderr=""
                 )
             if command == ["git", "add", "-u"]:
                 assert kwargs.get("check") is True

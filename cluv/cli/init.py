@@ -229,12 +229,15 @@ def ask_questions(template: str, defaults: InitAnswers, home_project_dir: str) -
         validate=lambda selected: bool(selected) or "Select at least one cluster.",
     ).unsafe_ask()
     default_accounts = _default_accounts(template, answers.clusters, answers.mila_access)
-    # The last answer for each kind of cluster (Mila, PAICE or DRAC). When the template has no
+    # The last answer for each kind of cluster (PAICE or DRAC). When the template has no
     # account for a cluster, that answer pre-fills the question about the cluster, since clusters
     # of the same kind often share accounts.
     last_answers: dict[str, str] = {}
     answers.accounts = {}
     for cluster in answers.clusters:
+        if cluster == MILA_CLUSTER:
+            # Jobs on the Mila cluster usually don't need an account, so no question asks for one.
+            continue
         kind = _cluster_kind(cluster)
         accounts = ask_text(
             f"Which Slurm accounts do you use on {cluster}?",
@@ -530,21 +533,16 @@ def _default_accounts(
 
 
 def _cluster_kind(cluster: str) -> str:
-    """The kind of the cluster: "mila", "paice" or "drac"."""
-    if cluster == MILA_CLUSTER:
-        return "mila"
+    """The kind of a cluster other than Mila: "paice" or "drac"."""
     return "paice" if cluster in PAICE_CLUSTERS else "drac"
 
 
 def _accounts_instruction(cluster: str) -> str:
     """The instruction of the question about the Slurm accounts on the cluster.
 
-    The instruction gives an example of account name. On the Mila cluster, where jobs usually don't
-    need an account, the instruction says so instead.
+    The instruction gives an example of account name.
     """
     instruction = "separate accounts with commas; leave empty for none"
-    if cluster == MILA_CLUSTER:
-        return f"(usually not needed on the Mila cluster; {instruction})"
     return f"(e.g. {_example_account(cluster)}; {instruction})"
 
 

@@ -468,6 +468,22 @@ class TestAskQuestions:
         expected_selection = ["mila", "rorqual"] if mila_access else ["rorqual"]
         assert asked["Which clusters do you want to use?"] == expected_selection
 
+    def test_no_account_question_for_the_mila_cluster(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Jobs on the Mila cluster usually don't need an account, so no question asks for one, and
+        the config has no account on the Mila cluster."""
+        asked = answer_questions(
+            monkeypatch, mila_access=True, clusters=["mila", "rorqual"], texts={}
+        )
+
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+
+        account_questions = [message for message in asked if message.startswith("Which Slurm")]
+        assert account_questions == ["Which Slurm accounts do you use on rorqual?"]
+        config = parse_config(make_cluv_config(TEMPLATE, answers, SCRATCH_PROJECT_DIR))
+        assert config.clusters["mila"].sbatch_args == {}
+
     def test_accounts_are_prefilled_with_those_of_mila_members(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -480,15 +496,14 @@ class TestAskQuestions:
         prefilled = {
             cluster: asked[f"Which Slurm accounts do you use on {cluster}?"]
             for cluster in clusters
+            if cluster != "mila"
         }
         assert prefilled == {
-            "mila": "",
             "rorqual": "rrg-bengioy-ad",
             "narval": "def-bengioy",
             "tamia": "",
         }
         assert answers.accounts == {
-            "mila": [],
             "rorqual": ["rrg-bengioy-ad", "def-yourpi"],
             "narval": ["def-bengioy"],
             "tamia": [],
@@ -632,19 +647,13 @@ class TestAskQuestions:
         ("narval", "def-yourpi"),
         ("tamia", "aip-yourpi"),
         ("killarney", "aip-yourpi"),
-        ("mila", None),
     ],
 )
-def test_accounts_instruction_gives_an_example(cluster: str, example: str | None) -> None:
-    """The question about the accounts shows a DRAC or PAICE account name. For the Mila cluster,
-    the question says instead that an account is usually not needed."""
+def test_accounts_instruction_gives_an_example(cluster: str, example: str) -> None:
+    """The question about the accounts shows a DRAC or PAICE account name."""
     instruction = CLUV_INIT_MODULE._accounts_instruction(cluster)
 
-    if example:
-        assert f"(e.g. {example}; " in instruction
-    else:
-        assert "e.g." not in instruction
-        assert "(usually not needed on the Mila cluster; " in instruction
+    assert f"(e.g. {example}; " in instruction
 
 
 @pytest.mark.parametrize("quiet", [True, False])

@@ -3,6 +3,7 @@ import dataclasses
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from enum import Enum
@@ -41,7 +42,23 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TROUBLESHOOTING_URL = "https://mila-iqia.github.io/cluv/troubleshooting/"
 # The checks that run on the clusters, for the messages about the clusters where they don't run.
-REMOTE_CHECKS = "GitHub access and Slurm accounts"
+REMOTE_CHECKS = "GitHub access, Slurm accounts and folders"
+# Checks a folder on a cluster, after replacing the variables of its path, like $SCRATCH. The
+# output is the state of the folder, its path, and the closest folder above it that exists. The
+# lines are joined with `; `, since the login shell of the user (which runs bash) might not accept
+# a command with many lines. The script doesn't run `exit`, which would make bash run the
+# ~/.bash_logout of the user, and maybe print something after the output.
+FOLDER_SCRIPT = r"""
+set -u
+path="{path}"
+parent=$(dirname "$path")
+while [ ! -e "$parent" ]; do parent=$(dirname "$parent"); done
+if [ -d "$path" ]; then state=folder
+elif [ -e "$path" ]; then state=file
+elif [ -d "$parent" ] && [ -w "$parent" ]; then state=creatable
+else state=blocked; fi
+printf '%s\t%s\t%s\n' "$state" "$path" "$parent"
+"""
 
 
 def init(path: Path | None = None, quiet: bool = False) -> None:
@@ -102,7 +119,7 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
     # Check the access to each cluster of the config.
     console.print()
     console.print("Checking the clusters...")
-    reports = asyncio.run(check_clusters(config, ask=ask))
+    reports = asyncio.run(check_clusters(config, pyproject_path.parent, ask=ask))
 
     # Show what the user can do next after the project setup
     console.print()
@@ -480,7 +497,9 @@ class Check:
     code: str = ""
 
 
-async def check_clusters(config: CluvConfig, ask: bool = False) -> dict[str, list[Check]]:
+async def check_clusters(
+    config: CluvConfig, project_root: Path, ask: bool = False
+) -> dict[str, list[Check]]:
     """Checks the access to each cluster of the config, and shows the results in a frame for each
     cluster. Returns the checks of each cluster.
 
@@ -503,7 +522,7 @@ async def check_clusters(config: CluvConfig, ask: bool = False) -> dict[str, lis
     connected = [cluster for cluster in clusters if connections[cluster].status is Status.OK]
     with console.status(f"Checking {REMOTE_CHECKS} on the clusters..."):
         results = await asyncio.gather(
-            *(check_on_cluster(config, cluster) for cluster in connected)
+            *(check_on_cluster(config, cluster, project_root) for cluster in connected)
         )
     for cluster, connection in connections.items():
         reports[cluster].append(connection)
@@ -594,11 +613,30 @@ async def connect_to_clusters(
     return connections
 
 
-async def check_on_cluster(config: CluvConfig, cluster: str) -> list[Check]:
-    """The checks that run on the cluster, through the SSH connection to the cluster."""
+async def check_on_cluster(config: CluvConfig, cluster: str, project_root: Path) -> list[Check]:
+    """The checks that run on the cluster, through the SSH connection to the cluster.
+
+    Without a `project_dir`, the project goes in the same folder as on this machine, from $HOME.
+    """
     remote = Remote(cluster)
     cluster_config = config.get_cluster_config(cluster)
-    return list(await asyncio.gather(check_github(remote), check_accounts(remote, cluster_config)))
+    project_dir = cluster_config.project_dir or PurePosixPath(_home_project_dir(project_root))
+    checks = [
+        check_github(remote),
+        check_accounts(remote, cluster_config),
+        check_folder(remote, "project folder", "project_dir", project_dir),
+        check_folder(remote, "results folder", "results_path", cluster_config.results_path),
+    ]
+    if cluster == config.data_source_cluster and config.data_source_path:
+        # `cluv sync` copies the datasets from that folder to the other clusters.
+        datasets = PurePosixPath(config.data_source_path)
+        checks.append(
+            check_folder(remote, "datasets to copy", "data_source", datasets, must_exist=True)
+        )
+    elif config.data_source and cluster_config.datasets_path:
+        datasets_path = cluster_config.datasets_path
+        checks.append(check_folder(remote, "datasets folder", "datasets_path", datasets_path))
+    return list(await asyncio.gather(*checks))
 
 
 async def check_github(remote: Remote) -> Check:
@@ -685,6 +723,44 @@ async def check_accounts(remote: Remote, cluster_config: ClusterConfig) -> Check
         (f"to use all your accounts, set {where}:",),
         suggestion,
     )
+
+
+async def check_folder(
+    remote: Remote, name: str, key: str, path: PurePosixPath, must_exist: bool = False
+) -> Check:
+    """Checks that the folder exists on the cluster, or that `cluv sync` can create it.
+
+    `key` is the setting of the config with the path of the folder. When `must_exist` is True,
+    the folder (or file) has to exist.
+    """
+    cluster = remote.hostname
+    if key == "data_source":
+        hints = ("fix `data_source` in pyproject.toml",)
+    else:
+        hints = (
+            f"set `{key}` for {cluster} in pyproject.toml, under [tool.cluv.clusters.{cluster}]",
+        )
+    script = "; ".join(FOLDER_SCRIPT.format(path=path).strip().splitlines())
+    result = await remote.run(
+        f"bash --login -c {shlex.quote(script)}", warn=True, hide=True, display=False
+    )
+    lines = result.stdout.splitlines()
+    fields = lines[-1].split("\t") if result.returncode == 0 and lines else []
+    if len(fields) != 3:
+        # With `set -u`, bash stops with an error when a variable of the path isn't defined.
+        error_lines = [line.strip() for line in result.stderr.splitlines() if line.strip()]
+        error = error_lines[-1] if error_lines else f"exit code {result.returncode}"
+        return Check(Status.FAIL, f"{name}: can't check {path}: {error}", hints)
+    state, folder, parent = fields
+    if state == "folder" or (must_exist and state == "file"):
+        return Check(Status.OK, f"{name}: {folder}")
+    if must_exist:
+        return Check(Status.FAIL, f"{name}: {folder} doesn't exist on {cluster}", hints)
+    if state == "file":
+        return Check(Status.FAIL, f"{name}: {folder} is a file, not a folder", hints)
+    if state == "creatable":
+        return Check(Status.OK, f"{name}: {folder} (cluv sync will create it)")
+    return Check(Status.FAIL, f"{name}: can't create {folder}, no write access to {parent}", hints)
 
 
 async def _ask_to_connect(clusters: list[str]) -> bool:

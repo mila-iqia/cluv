@@ -34,9 +34,9 @@ and your datasets on the clusters. Press Enter to keep the default answer. With 
 
 At the end, `cluv init` checks the clusters of the config, and shows the results in a frame for
 each cluster. It offers to connect to the clusters that aren't connected yet (with a 2FA prompt for
-each cluster), to check your access to GitHub and your Slurm accounts there. **Read the output
-carefully**: each warning (!) or problem (✘) says how to fix it, often with a change of the config
-(see the next section). Run `cluv init` again at any time to check your setup.
+each cluster), to check your access to GitHub, your Slurm accounts and your folders there.
+**Read the output carefully**: each warning (!) or problem (✘) says how to fix it, often with a
+change of the config (see the next section). Run `cluv init` again at any time to check your setup.
 
 ## Adapt the config to your needs
 
@@ -179,7 +179,8 @@ usually don't need to change them:
 project_dir = "$SCRATCH/repos/my-project"
 ```
 
-All of these can be set globally or per cluster.
+All of these can be set globally or per cluster. On each connected cluster, `cluv init` shows where
+the project and the results go, and checks that `cluv sync` can create these folders.
 
 !!! note
     `cluv sync` only copies back what's under `results_path`. By default, a job only writes its

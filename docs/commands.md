@@ -106,8 +106,12 @@ cluster: ✔ for what works, ! for a warning and ✘ for a problem, with how to 
   clone your project.
 - The Slurm accounts of the config are yours. When you have other accounts on the cluster,
   `cluv init` suggests a `sbatch_args` line with all your accounts.
+- The folders of the project, of the results and of the datasets (`project_dir`, `results_path`
+  and `datasets_path`) exist on the cluster, or `cluv sync` can create them. The paths can't use
+  variables that the cluster doesn't define. On the cluster of the `data_source`, the datasets to
+  copy have to exist.
 
-The last three checks run on the cluster. If some clusters aren't connected yet, `cluv init` asks
+The last four checks run on the cluster. If some clusters aren't connected yet, `cluv init` asks
 whether to connect to them now, with a 2FA prompt for each cluster, like
 [`cluv login`](#cluv-login). With `--quiet`, or when the input isn't a terminal, it only checks the
 clusters that are already connected.

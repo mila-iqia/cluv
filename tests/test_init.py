@@ -7,7 +7,7 @@ import subprocess
 import textwrap
 import tomllib
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 import questionary
@@ -26,6 +26,7 @@ from cluv.cli.init import (
     check_cluster,
     check_clusters,
     check_cluv_config,
+    check_folder,
     check_git,
     check_github,
     check_home_dir,
@@ -1163,7 +1164,7 @@ def answer_connect_question(monkeypatch: pytest.MonkeyPatch, answer) -> list[str
 
 NOT_CONNECTED = Check(
     Status.SKIP,
-    "not connected: GitHub access and Slurm accounts not checked",
+    "not connected: GitHub access, Slurm accounts and folders not checked",
     ("run `cluv login rorqual`, then `cluv init` again",),
 )
 
@@ -1351,18 +1352,167 @@ class TestCheckAccounts:
         assert check == Check(Status.SKIP, "couldn't list your Slurm accounts on narval")
 
 
-async def test_check_clusters(monkeypatch: pytest.MonkeyPatch) -> None:
+class LocalRemote:
+    """Stands in for a `Remote`: runs the commands on this machine."""
+
+    hostname = "local"
+
+    async def run(self, command: str, **kwargs) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(command, shell=True, capture_output=True, text=True)
+
+
+class TestCheckFolder:
+    """The checks of the folders, with the script of the checks run by bash on this machine."""
+
+    @pytest.fixture(autouse=True)
+    def home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        return tmp_path
+
+    @staticmethod
+    async def check(path: str, must_exist: bool = False) -> Check:
+        key = "data_source" if must_exist else "results_path"
+        return await check_folder(
+            LocalRemote(), "my folder", key, PurePosixPath(path), must_exist=must_exist
+        )
+
+    async def test_existing_folder(self, home: Path) -> None:
+        """The variables of the path, like $HOME, are replaced."""
+        (home / "logs").mkdir()
+
+        assert await self.check("$HOME/logs") == Check(Status.OK, f"my folder: {home}/logs")
+
+    async def test_folder_that_cluv_sync_creates(self, home: Path) -> None:
+        check = await self.check("$HOME/logs/my_project")
+
+        assert check == Check(
+            Status.OK, f"my folder: {home}/logs/my_project (cluv sync will create it)"
+        )
+
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root can write in any folder")
+    async def test_folder_that_cant_be_created(self, home: Path) -> None:
+        read_only = home / "read_only"
+        read_only.mkdir(mode=0o555)
+
+        check = await self.check("$HOME/read_only/logs/my_project")
+
+        assert check == Check(
+            Status.FAIL,
+            f"my folder: can't create {read_only}/logs/my_project, no write access to {read_only}",
+            ("set `results_path` for local in pyproject.toml, under [tool.cluv.clusters.local]",),
+        )
+
+    async def test_file(self, home: Path) -> None:
+        (home / "logs").touch()
+
+        check = await self.check("$HOME/logs")
+
+        assert check.status is Status.FAIL
+        assert check.message == f"my folder: {home}/logs is a file, not a folder"
+
+    async def test_undefined_variable(self) -> None:
+        """A path with a variable that isn't defined on the cluster can't be used."""
+        check = await self.check("$CLUV_UNDEFINED_VARIABLE/logs")
+
+        assert check.status is Status.FAIL
+        assert check.message.startswith("my folder: can't check $CLUV_UNDEFINED_VARIABLE/logs: ")
+        assert "CLUV_UNDEFINED_VARIABLE" in check.message.split(": ", 2)[2]
+
+    async def test_datasets_to_copy_must_exist(self, home: Path) -> None:
+        check = await self.check("$HOME/datasets", must_exist=True)
+
+        assert check == Check(
+            Status.FAIL,
+            f"my folder: {home}/datasets doesn't exist on local",
+            ("fix `data_source` in pyproject.toml",),
+        )
+        (home / "datasets").touch()
+        assert await self.check("$HOME/datasets", must_exist=True) == Check(
+            Status.OK, f"my folder: {home}/datasets"
+        )
+
+
+@pytest.mark.parametrize(
+    ("data_source", "expected_datasets_checks"),
+    [
+        (None, {}),
+        (
+            "mila:/network/datasets/x",
+            {
+                "mila": ("datasets to copy", "/network/datasets/x", True),
+                "killarney": ("datasets folder", "$SCRATCH/data", False),
+            },
+        ),
+        (
+            "/data/x",
+            {
+                "mila": ("datasets folder", "$SCRATCH/data", False),
+                "killarney": ("datasets folder", "$SCRATCH/data", False),
+            },
+        ),
+    ],
+)
+async def test_folders_of_each_cluster(
+    data_source: str | None,
+    expected_datasets_checks: dict[str, tuple[str, str, bool]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without `project_dir`, the project goes in the same folder as on this machine, from $HOME.
+    The datasets are only checked with a `data_source`: on the cluster of the `data_source`, the
+    datasets to copy have to exist."""
+    checked = []
+
+    async def check_folder(remote, name: str, key: str, path, must_exist: bool = False) -> Check:
+        checked.append((remote.hostname, name, str(path), must_exist))
+        return Check(Status.OK, name)
+
+    async def other_check(*args) -> Check:
+        return Check(Status.OK, "other check")
+
+    monkeypatch.setattr(CLUV_INIT_MODULE, "check_folder", check_folder)
+    monkeypatch.setattr(CLUV_INIT_MODULE, "check_github", other_check)
+    monkeypatch.setattr(CLUV_INIT_MODULE, "check_accounts", other_check)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    config = CluvConfig.model_validate(
+        {
+            "results_path": "$SCRATCH/logs/my_project",
+            "data_source": data_source,
+            "datasets_path": "$SCRATCH/data",
+            "clusters": {"mila": {}, "killarney": {"project_dir": "$SCRATCH/repos/my_project"}},
+        }
+    )
+
+    for cluster in ["mila", "killarney"]:
+        await check_on_cluster(config, cluster, tmp_path / "code" / "my_project")
+
+    expected = [
+        ("mila", "project folder", "$HOME/code/my_project", False),
+        ("mila", "results folder", "$SCRATCH/logs/my_project", False),
+        ("killarney", "project folder", "$SCRATCH/repos/my_project", False),
+        ("killarney", "results folder", "$SCRATCH/logs/my_project", False),
+    ]
+    for cluster, datasets_check in expected_datasets_checks.items():
+        index = max(i for i, check in enumerate(expected) if check[0] == cluster) + 1
+        expected.insert(index, (cluster, *datasets_check))
+    assert checked == expected
+
+
+async def test_check_clusters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Each cluster has a frame with its checks. The clusters that cluv doesn't connect to (without
     an SSH entry, disabled, or the current cluster) have no checks on the cluster."""
     fake_ssh_config(monkeypatch, ["mila", "rorqual", "narval"], keep_alive=("mila",))
     monkeypatch.setattr(CLUV_INIT_MODULE, "current_cluster", lambda: "mila")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
     disabled = {"narval": DisabledCluster(disabled_at=datetime.now(tz=timezone.utc))}
     monkeypatch.setattr(CLUV_INIT_MODULE, "get_disabled_clusters", lambda: disabled)
-    fake_clusters(
-        monkeypatch,
-        {"rorqual": {"git@github.com": GITHUB_ACCESS, "sacctmgr": DRAC_ACCOUNTS}},
-        connected=["rorqual"],
-    )
+    rorqual_results = {
+        "git@github.com": GITHUB_ACCESS,
+        "sacctmgr": DRAC_ACCOUNTS,
+        'path="$HOME/my_project"': (0, "creatable\t/home/me/my_project\t/home/me\n", ""),
+        'path="$SCRATCH/logs"': (0, "folder\t/scratch/me/logs\t/scratch/me\n", ""),
+    }
+    fake_clusters(monkeypatch, {"rorqual": rorqual_results}, connected=["rorqual"])
     config = make_cluv_config_with_clusters(
         mila={},
         rorqual={"sbatch_args": [{"account": "def-me"}, {"account": "rrg-me-ad"}]},
@@ -1371,18 +1521,23 @@ async def test_check_clusters(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     with console.capture() as capture:
-        reports = await check_clusters(config, ask=True)
+        reports = await check_clusters(config, tmp_path / "my_project", ask=True)
 
     assert reports == {
         "mila": [
             Check(Status.OK, "current cluster: no SSH connection needed"),
-            Check(Status.SKIP, "GitHub access and Slurm accounts not checked on this cluster"),
+            Check(
+                Status.SKIP,
+                "GitHub access, Slurm accounts and folders not checked on this cluster",
+            ),
         ],
         "rorqual": [
             Check(Status.OK, "SSH entry in ~/.ssh/config"),
             Check(Status.OK, "connected"),
             Check(Status.OK, "SSH access to GitHub"),
             Check(Status.OK, "Slurm accounts: def-me, rrg-me-ad"),
+            Check(Status.OK, "project folder: /home/me/my_project (cluv sync will create it)"),
+            Check(Status.OK, "results folder: /scratch/me/logs"),
         ],
         "narval": [
             Check(Status.OK, "SSH entry in ~/.ssh/config"),
@@ -1391,16 +1546,21 @@ async def test_check_clusters(monkeypatch: pytest.MonkeyPatch) -> None:
         "tamia": [check_ssh_entry("tamia", None)],
     }
     output = capture.get()
-    assert "rorqual  ✔ 4" in output
+    assert "rorqual  ✔ 6" in output
     assert "Clusters: 1 ready · 1 with warnings · 1 not checked · 1 with problems" in output
 
 
 @pytest.mark.integration
 async def test_checks_on_a_cluster(remote: Remote) -> None:
     """The commands of the checks work on the clusters. The result of the GitHub check depends on
-    the SSH keys of the user, but `sacctmgr` lists the Slurm accounts of the user."""
+    the SSH keys of the user, but `sacctmgr` lists the Slurm accounts of the user, and the results
+    go in $SCRATCH, which is defined on all the clusters."""
     config = make_cluv_config_with_clusters(**{remote.hostname: {}})
 
-    _github, accounts = await check_on_cluster(config, remote.hostname)
+    _github, accounts, project, results = await check_on_cluster(
+        config, remote.hostname, REPO_ROOT
+    )
 
     assert accounts.status is not Status.SKIP, accounts.message
+    assert project.status is Status.OK, project.message
+    assert results.status is Status.OK, results.message

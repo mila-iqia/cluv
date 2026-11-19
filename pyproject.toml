@@ -146,39 +146,39 @@ requeue = true
 # sbatch_args = [{ account = "rrg-yourpi-ad" }, { account = "def-yourpi" }]
 
 [tool.cluv.clusters.mila]
-# https://docs.mila.quebec/technical_reference/clusters/mila/
+cluster_link = "https://docs.mila.quebec/technical_reference/clusters/mila/"
 # Overrides specific to the Mila cluster.
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 
 [tool.cluv.clusters.tamia]
-# https://docs.alliancecan.ca/wiki/TamIA
+cluster_link = "https://docs.alliancecan.ca/wiki/TamIA"
 
 [tool.cluv.clusters.killarney]
-# https://docs.alliancecan.ca/wiki/Killarney
+cluster_link = "https://docs.alliancecan.ca/wiki/Killarney"
 # Killarney refuses to run jobs whose submission directory is under /home
 # ("Submitting jobs from directories residing in /home is not permitted"), so the project lives on
 # $SCRATCH there instead of the default $HOME location.
 project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.vulcan]
-# https://docs.alliancecan.ca/wiki/Vulcan
+cluster_link = "https://docs.alliancecan.ca/wiki/Vulcan"
 
 [tool.cluv.clusters.rorqual]
-# https://docs.alliancecan.ca/wiki/Rorqual
+cluster_link = "https://docs.alliancecan.ca/wiki/Rorqual"
 sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.fir]
-# https://docs.alliancecan.ca/wiki/Fir
+cluster_link = "https://docs.alliancecan.ca/wiki/Fir"
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.nibi]
-# https://docs.alliancecan.ca/wiki/Nibi
+cluster_link = "https://docs.alliancecan.ca/wiki/Nibi"
 env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 sbatch_args = { account = "rrg-bengioy-ad" }
 
 [tool.cluv.clusters.trillium]
-# https://docs.alliancecan.ca/wiki/Trillium
+cluster_link = "https://docs.alliancecan.ca/wiki/Trillium"
 sbatch_args = { account = "rrg-bengioy-ad" }
 # $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
 # location is rejected ("Job output requested to be written to a filesystem not available on
@@ -186,10 +186,10 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.trillium-gpu]
-# https://docs.alliancecan.ca/wiki/Trillium
+cluster_link = "https://docs.alliancecan.ca/wiki/Trillium"
 sbatch_args = { account = "rrg-bengioy-ad" }
 project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.narval]
-# https://docs.alliancecan.ca/wiki/Narval
+cluster_link = "https://docs.alliancecan.ca/wiki/Narval"
 sbatch_args = { account = "def-bengioy" }  # Mila doesn't have an allocation on Narval anymore.

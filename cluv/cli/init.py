@@ -595,12 +595,12 @@ def _remove_project_dir(section: list[str]) -> list[str]:
     """Removes the `project_dir` line from the section of a cluster.
 
     The comment lines right above the `project_dir` line explain that line, so these comment lines
-    are removed too, except the link to the documentation of the cluster under the header.
+    are removed too.
     """
     lines: list[str] = []
     for line in section:
         if line.startswith("project_dir = "):
-            while lines and lines[-1].startswith("#") and not lines[-1].startswith("# https://"):
+            while lines and lines[-1].startswith("#"):
                 lines.pop()
         else:
             lines.append(line)
@@ -616,7 +616,7 @@ def _set_accounts(section: list[str], accounts: list[str]) -> list[str]:
     if accounts:
         tables = [f"{{ account = {_toml_string(account)} }}" for account in accounts]
         value = tables[0] if len(tables) == 1 else f"[{', '.join(tables)}]"
-        # Under the header and the link to the documentation of the cluster.
+        # Under the header and the `cluster_link` line.
         section.insert(2, f"sbatch_args = {value}")
     return section
 

@@ -48,8 +48,8 @@ The config has two levels: settings in `[tool.cluv]` apply to every cluster, and
 
 Each `[tool.cluv.clusters.<name>]` table declares a cluster that cluv can log into, sync to and
 submit to. The `<name>` must match a `Host` in your `~/.ssh/config`. `cluv init` adds the clusters
-you selected, among Mila and the DRAC and PAICE clusters, each with a link to its documentation. An
-empty table is enough to enable a cluster with the global defaults:
+you selected, among Mila and the DRAC and PAICE clusters, each with a link to its documentation
+(`cluster_link`). An empty table is enough to enable a cluster with the global defaults:
 
 ```toml title="pyproject.toml"
 [tool.cluv.clusters.mila]
@@ -63,7 +63,7 @@ example account (`def-yourpi` or `aip-yourpi`), if there is one, with your own a
 
 ```toml title="pyproject.toml"
 # [tool.cluv.clusters.narval]
-## https://docs.alliancecan.ca/wiki/Narval
+# cluster_link = "https://docs.alliancecan.ca/wiki/Narval"
 # sbatch_args = { account = "def-yourpi" }
 ```
 

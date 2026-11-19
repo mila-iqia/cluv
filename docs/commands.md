@@ -73,7 +73,7 @@ To write the `[tool.cluv]` section, `cluv init` asks a few questions:
 - **Whether you have access to the Mila cluster.** If so, the Mila cluster is selected by default.
 - **The clusters to use.** The other clusters that have a `Host` entry in your `~/.ssh/config` are
   selected by default. The clusters you don't select are also added to the config, commented out.
-  Each cluster in the config has a link to its documentation.
+  Each cluster in the config has a link to its documentation (`cluster_link`).
 - **Your Slurm accounts on the selected clusters**, except the Mila cluster, where jobs usually
   don't need an account. One question covers the clusters of the same kind (DRAC or PAICE) with
   the same pre-filled accounts. If you have access to the Mila cluster, the answers are pre-filled

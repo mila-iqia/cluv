@@ -365,6 +365,25 @@ project_dir = "$SCRATCH/cluv"
         cfg = load_cluv_config(p)
         assert cfg.get_cluster_config("killarney").project_dir == Path("$SCRATCH/cluv")
 
+    def test_cluster_link(self, tmp_path: Path) -> None:
+        p = write_pyproject(
+            tmp_path,
+            """
+[tool.cluv]
+results_path = "logs"
+
+[tool.cluv.clusters.narval]
+cluster_link = "https://docs.alliancecan.ca/wiki/Narval"
+
+[tool.cluv.clusters.mila]
+""",
+        )
+        cfg = load_cluv_config(p)
+        assert cfg.get_cluster_config("narval").cluster_link == (
+            "https://docs.alliancecan.ca/wiki/Narval"
+        )
+        assert cfg.get_cluster_config("mila").cluster_link is None
+
 
 # ---------------------------------------------------------------------------
 # Real project config

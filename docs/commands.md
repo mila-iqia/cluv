@@ -90,7 +90,19 @@ With `--quiet`, or when the input isn't a terminal, `cluv init` asks no question
 default answers.
 
 Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to the
-`results_path` (`$SCRATCH/logs/<project_name>` by default).
+`results_path` (`$SCRATCH/logs/<project_name>` by default), and checks that the job scripts of the
+config (`job_script_path`) exist.
+
+Finally, `cluv init` checks each cluster of the config, and shows the results in a frame for each
+cluster: ✔ for what works, ! for a warning and ✘ for a problem, with how to fix it. It checks that:
+
+- The cluster has an entry in your `~/.ssh/config`. If not, run
+  [`mila init`](troubleshooting.md#setting-up-ssh-access-to-all-clusters) to add it, or see the
+  `cluster_link` of the cluster to get access to it.
+- The cluster isn't disabled with [`cluv disable`](#cluv-disable).
+
+It also suggests the SSH options that keep idle connections open (`ServerAliveInterval`). Run
+`cluv init` again at any time to check your setup: it only adds what is missing.
 
 Default project structure after [`cluv init`](#cluv-init) (if the project didn't already exist):
 ```

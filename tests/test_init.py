@@ -6,25 +6,36 @@ import os
 import subprocess
 import textwrap
 import tomllib
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 import questionary
 
 import cluv.__main__ as cluv_main
+from cluv.cache import DisabledCluster
 from cluv.cli.init import (
     DEFAULT_RESULTS_LINKNAME,
     DEFAULT_RESULTS_PATH,
     SCRIPTS_DIR_PATH,
+    Check,
     InitAnswers,
+    Status,
     ask_questions,
+    check_cluster,
+    check_clusters,
     check_cluv_config,
     check_git,
     check_home_dir,
     check_job_script,
+    check_job_script_paths,
+    check_ssh_entry,
     check_symlink_to_scratch,
+    cluster_panel,
     default_answers,
     make_cluv_config,
+    print_keep_alive_tip,
+    print_summary,
 )
 from cluv.config import CluvConfig, load_cluv_config
 from cluv.utils import console
@@ -48,6 +59,24 @@ def parse_config(text: str) -> CluvConfig:
 
 
 TEMPLATE_CONFIG = parse_config(TEMPLATE)
+
+
+def fake_ssh_config(
+    monkeypatch: pytest.MonkeyPatch, entries: list[str], keep_alive: tuple[str, ...] = ()
+) -> None:
+    """Makes `ssh -G <host>` give the options of an SSH config with an entry for each host of
+    `entries`, and `ServerAliveInterval` for the hosts of `keep_alive`.
+
+    Without an entry for a host, the host name that `ssh -G` gives is the name of the host.
+    """
+
+    def get_ssh_options_for_host(host: str) -> dict[str, str]:
+        return {
+            "hostname": f"{host}.example.com" if host in entries else host,
+            "serveraliveinterval": "120" if host in keep_alive else "0",
+        }
+
+    monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_options_for_host", get_ssh_options_for_host)
 
 
 class TestCheckHomeDir:
@@ -81,7 +110,7 @@ class TestCheckCluvConfig:
     ) -> None:
         """check_cluv_config() should add a cluv config section if the toml doesn't have it"""
         # With no cluster in ~/.ssh/config, all the clusters of the template are kept.
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+        fake_ssh_config(monkeypatch, [])
         p = tmp_path / "pyproject.toml"
         p.touch()
 
@@ -105,7 +134,7 @@ class TestCheckCluvConfig:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """check_cluv_config(ask=True) writes the config from the answers to the questions."""
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+        fake_ssh_config(monkeypatch, [])
         answer_questions(
             monkeypatch,
             mila_access=False,
@@ -127,7 +156,7 @@ class TestCheckCluvConfig:
     ) -> None:
         """Ctrl-C (KeyboardInterrupt) or Ctrl-D (EOFError) during the questions stops `cluv init`
         without writing a cluv config."""
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+        fake_ssh_config(monkeypatch, [])
 
         def cancel(*args, **kwargs):
             raise error
@@ -371,8 +400,7 @@ class TestScratchProjectDir:
 
 class TestDefaultAnswers:
     def test_clusters_from_the_ssh_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        ssh_hostnames = {"rorqual", "mila", "github.com"}
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: ssh_hostnames)
+        fake_ssh_config(monkeypatch, ["rorqual", "mila", "github.com"])
 
         answers = default_answers(TEMPLATE, "my_project")
 
@@ -385,7 +413,7 @@ class TestDefaultAnswers:
     def test_no_default_accounts_without_the_mila_cluster(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: {"rorqual", "narval"})
+        fake_ssh_config(monkeypatch, ["rorqual", "narval"])
 
         answers = default_answers(TEMPLATE, "my_project")
 
@@ -395,7 +423,7 @@ class TestDefaultAnswers:
     def test_all_clusters_without_any_in_the_ssh_config(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+        fake_ssh_config(monkeypatch, [])
 
         answers = default_answers(TEMPLATE, "my_project")
 
@@ -850,3 +878,229 @@ class TestJobScriptCheck:
         assert 'results_path="outputs"' in generated_legacy_script_content
         assert "Using $results_path" in generated_legacy_script_content
         assert "results_dir" not in generated_legacy_script_content
+
+
+def make_cluv_config_with_clusters(**clusters: dict[str, str]) -> CluvConfig:
+    """A cluv config with these clusters, with `scripts/job.sh` as default job script."""
+    return CluvConfig.model_validate(
+        {"results_path": "$SCRATCH/logs", "job_script_path": JOB_SCRIPT_PATH, "clusters": clusters}
+    )
+
+
+def render(renderable) -> str:
+    """The text that the console prints for the renderable, without colors."""
+    with console.capture() as capture:
+        console.print(renderable)
+    return capture.get()
+
+
+class TestCheckCluster:
+    """The checks of a cluster that don't need a connection to the cluster."""
+
+    @pytest.fixture(autouse=True)
+    def not_on_a_cluster(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(CLUV_INIT_MODULE, "current_cluster", lambda: None)
+
+    def test_ssh_entry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_ssh_config(monkeypatch, ["rorqual"])
+
+        assert check_ssh_entry("rorqual", None) == Check(Status.OK, "SSH entry in ~/.ssh/config")
+
+    def test_no_ssh_entry_for_a_cluster_of_mila_init(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`mila init` adds the entries of the clusters of the template. When the user doesn't have
+        access to the cluster, its `cluster_link` says how to get access."""
+        fake_ssh_config(monkeypatch, [])
+
+        check = check_ssh_entry("tamia", "https://docs.alliancecan.ca/wiki/TamIA")
+
+        assert check.status is Status.FAIL
+        assert check.hints == (
+            "if you have access to tamia, run `mila init` to add it",
+            "otherwise, see how to get access: https://docs.alliancecan.ca/wiki/TamIA",
+        )
+
+    def test_no_ssh_entry_for_another_cluster(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_ssh_config(monkeypatch, [])
+
+        check = check_ssh_entry("my_cluster", None)
+
+        assert check.status is Status.FAIL
+        assert check.hints == (
+            "if you have access to my_cluster, add a `Host my_cluster` entry for it",
+        )
+
+    def test_current_cluster_needs_no_ssh_entry(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """cluv runs the commands of the current cluster without SSH."""
+        fake_ssh_config(monkeypatch, [])
+        monkeypatch.setattr(CLUV_INIT_MODULE, "current_cluster", lambda: "rorqual")
+        config = make_cluv_config_with_clusters(rorqual={})
+
+        checks = check_cluster(config, "rorqual", disabled={})
+
+        assert checks == [Check(Status.OK, "current cluster: no SSH connection needed")]
+
+    @pytest.mark.parametrize(
+        ("disabled_until", "period"),
+        [(None, "indefinitely"), (timedelta(days=2, hours=1), "for 2d, ")],
+    )
+    def test_disabled_cluster(
+        self, disabled_until: timedelta | None, period: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_ssh_config(monkeypatch, ["rorqual"])
+        config = make_cluv_config_with_clusters(rorqual={})
+        now = datetime.now(tz=timezone.utc)
+        disabled = DisabledCluster(
+            disabled_at=now, disabled_until=disabled_until and now + disabled_until
+        )
+
+        checks = check_cluster(config, "rorqual", disabled={"rorqual": disabled})
+
+        assert checks[0] == Check(Status.OK, "SSH entry in ~/.ssh/config")
+        assert checks[1].status is Status.WARN
+        assert checks[1].message.startswith(f"disabled {period}")
+        assert checks[1].message.endswith(": cluv commands skip rorqual")
+        assert checks[1].hints == ("run `cluv enable rorqual` to use it again",)
+
+    def test_check_clusters_shows_a_frame_for_each_cluster(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_ssh_config(monkeypatch, ["mila"], keep_alive=("mila",))
+        monkeypatch.setattr(CLUV_INIT_MODULE, "get_disabled_clusters", lambda: {})
+        config = make_cluv_config_with_clusters(mila={}, tamia={})
+
+        with console.capture() as capture:
+            reports = check_clusters(config)
+
+        assert list(reports) == ["mila", "tamia"]
+        output = capture.get()
+        assert "mila  ✔ 1" in output
+        assert "tamia  ✘ 1" in output
+        assert "Clusters: 1 ready · 1 with problems" in output
+
+
+class TestCheckJobScriptPaths:
+    def test_job_scripts_of_the_config(self, tmp_path: Path) -> None:
+        """The default job script of each cluster has to be in the project. Each job script is
+        checked once."""
+        (tmp_path / JOB_SCRIPT_PATH).parent.mkdir()
+        (tmp_path / JOB_SCRIPT_PATH).touch()
+        config = make_cluv_config_with_clusters(
+            mila={}, narval={}, rorqual={"job_script_path": "scripts/rorqual_job.sh"}
+        )
+
+        with console.capture() as capture:
+            check_job_script_paths(tmp_path, config)
+
+        assert " ".join(capture.get().split()) == (
+            "✅ Job script of the config found: scripts/job.sh "
+            "❌ Job script of the config not found: scripts/rorqual_job.sh. "
+            "Fix `job_script_path` in pyproject.toml."
+        )
+
+    def test_no_job_script_path(self, tmp_path: Path) -> None:
+        config = CluvConfig.model_validate({"results_path": "logs", "clusters": {"mila": {}}})
+
+        with console.capture() as capture:
+            check_job_script_paths(tmp_path, config)
+
+        assert capture.get() == ""
+
+
+class TestDisplay:
+    def test_frame_shows_every_check(self) -> None:
+        """Each check has a line with its icon, followed by its hints and by its line to copy."""
+        checks = [
+            Check(Status.OK, "SSH entry in ~/.ssh/config"),
+            Check(Status.WARN, "disabled indefinitely", ("run `cluv enable rorqual`",)),
+            Check(
+                Status.FAIL,
+                "Slurm account def-x isn't one of yours",
+                ("your accounts on rorqual: def-y",),
+                'sbatch_args = { account = "def-y" }',
+            ),
+            Check(Status.SKIP, "not connected"),
+        ]
+
+        output = render(cluster_panel("rorqual", checks))
+
+        assert "rorqual  ✔ 1  ! 1  ✘ 1  - 1" in output
+        for line in [
+            "│ ✔ SSH entry in ~/.ssh/config",
+            "│ ! disabled indefinitely",
+            "│   → run `cluv enable rorqual`",
+            "│ ✘ Slurm account def-x isn't one of yours",
+            "│   → your accounts on rorqual: def-y",
+            '│     sbatch_args = { account = "def-y" }',
+            "│ - not connected",
+        ]:
+            assert line in output
+
+    @pytest.mark.parametrize(
+        ("statuses", "color"),
+        [
+            ([Status.OK, Status.OK], "green"),
+            ([Status.OK, Status.SKIP], "dim"),
+            ([Status.SKIP, Status.WARN, Status.OK], "yellow"),
+            ([Status.WARN, Status.FAIL, Status.SKIP], "red"),
+        ],
+    )
+    def test_frame_has_the_color_of_the_worst_result(
+        self, statuses: list[Status], color: str
+    ) -> None:
+        checks = [Check(status, "message") for status in statuses]
+
+        assert cluster_panel("rorqual", checks).border_style == color
+
+    def test_long_links_are_not_cut(self) -> None:
+        """A link longer than the frame continues on the next line, instead of being cut."""
+        url = "https://docs.alliancecan.ca/wiki/" + "x" * 100
+
+        output = render(cluster_panel("rorqual", [Check(Status.FAIL, "message", (f"see {url}",))]))
+
+        assert "…" not in output
+        assert url in "".join(line.strip("│ ") for line in output.splitlines())
+
+    def test_urls_are_links(self) -> None:
+        url = "https://docs.alliancecan.ca/wiki/Narval"
+
+        text = CLUV_INIT_MODULE._text(f"see {url} for more")
+
+        assert [(text.plain[span.start : span.end], str(span.style)) for span in text.spans] == [
+            (url, f"link {url}")
+        ]
+
+    def test_summary(self) -> None:
+        reports = {
+            "mila": [Check(Status.OK, "a")],
+            "rorqual": [Check(Status.OK, "a"), Check(Status.FAIL, "b")],
+            "narval": [Check(Status.OK, "a"), Check(Status.SKIP, "b")],
+            "fir": [Check(Status.OK, "a")],
+        }
+
+        with console.capture() as capture:
+            print_summary(reports)
+
+        assert "Clusters: 2 ready · 1 not checked · 1 with problems" in capture.get()
+
+    def test_keep_alive_tip(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The tip lists the clusters whose SSH entry doesn't keep the connection open."""
+        monkeypatch.setattr(CLUV_INIT_MODULE, "current_cluster", lambda: None)
+        fake_ssh_config(monkeypatch, ["mila", "rorqual", "narval"], keep_alive=("mila",))
+
+        with console.capture() as capture:
+            print_keep_alive_tip(["mila", "rorqual", "narval", "tamia"])
+
+        output = " ".join(capture.get().split())
+        assert "`Host` entries of rorqual and narval in ~/.ssh/config:" in output
+        assert "ServerAliveInterval 120 ServerAliveCountMax 5" in output
+
+    def test_no_keep_alive_tip(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(CLUV_INIT_MODULE, "current_cluster", lambda: None)
+        fake_ssh_config(monkeypatch, ["mila"], keep_alive=("mila",))
+
+        with console.capture() as capture:
+            print_keep_alive_tip(["mila"])
+
+        assert capture.get() == ""

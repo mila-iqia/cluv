@@ -2,6 +2,10 @@
 
 This page covers common setup issues.
 
+To check your setup, run [`cluv init`](commands.md#cluv-init) again in your project: it checks each
+cluster of the config, and says how to fix each problem. It only adds what is missing, so it's safe
+to re-run.
+
 ## Setting up SSH access to all clusters
 
 `cluv` connects to each cluster using the hostnames configured in your `~/.ssh/config`. We

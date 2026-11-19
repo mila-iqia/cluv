@@ -32,7 +32,10 @@ clusters you use, your Slurm accounts on each of them, and where to put your res
 and your datasets on the clusters. Press Enter to keep the default answer. With `--quiet`,
 `cluv init` asks nothing and uses the default answers.
 
-**Read the output carefully**: every warning points to something you'll probably want to fix in the next section.
+At the end, `cluv init` checks the clusters of the config, and shows the results in a frame for
+each cluster. **Read the output carefully**: each warning (!) or problem (✘) says how to fix it,
+often with a change of the config (see the next section). Run `cluv init` again at any time to check
+your setup.
 
 ## Adapt the config to your needs
 

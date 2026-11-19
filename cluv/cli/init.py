@@ -4,13 +4,20 @@ import os
 import re
 import subprocess
 import sys
+from enum import Enum
 from pathlib import Path, PurePosixPath
 
 import questionary
+from rich.console import Group
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
-from cluv.config import find_pyproject, has_cluv_config, load_cluv_config
-from cluv.ssh import get_ssh_hostnames
-from cluv.utils import console
+from cluv.cache import DisabledCluster, get_disabled_clusters
+from cluv.cli.disable import format_remaining
+from cluv.config import CluvConfig, find_pyproject, has_cluv_config, load_cluv_config
+from cluv.remote import get_ssh_options_for_host
+from cluv.utils import console, current_cluster
 
 __all__ = ["init"]
 
@@ -38,6 +45,8 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
       answers to a few questions. When `quiet` is True, or when stdin isn't a terminal, no question
       is asked and the default answers are used.
     * Adds job script templates in the `scripts/` directory of the project.
+    * Checks each cluster of the config, and shows the results in a frame for each cluster, with
+      how to fix each problem.
     """
     console.print()
     console.rule("[bold cyan]cluv init[/bold cyan]")
@@ -67,22 +76,31 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
     check_cluv_config(pyproject_path, ask=not quiet and sys.stdin.isatty())
     config = load_cluv_config(pyproject_path)
 
-    # Compare the cluster names in the config to the SSH hostnames.
-    check_ssh_hostnames(config.clusters_names)
-
     # Check if project structure is correct
     console.print()
     console.print("Validating project structure...")
 
     # Check if the job script exists
     check_job_script(pyproject_path.parent, config.results_path)
+    check_job_script_paths(pyproject_path.parent, config)
 
     # Check if the results path is correctly symlinked to scratch
     check_symlink_to_scratch(pyproject_path.parent, config.results_path, config.results_symlink)
 
+    # Check the access to each cluster of the config.
+    console.print()
+    console.print("Checking the clusters...")
+    reports = check_clusters(config)
+
     # Show what the user can do next after the project setup
     console.print()
-    console.print(":tada: Your cluv config is ready to go !")
+    if any(check.status is Status.FAIL for checks in reports.values() for check in checks):
+        console.print(
+            "Some clusters have problems: fix them (see above), then run [bold]cluv init[/bold] "
+            "again to check them."
+        )
+    else:
+        console.print(":tada: Your cluv config is ready to go !")
     console.print()
     console.print("Next steps :")
     console.print(
@@ -183,9 +201,8 @@ def default_answers(template: str, project_name: str) -> InitAnswers:
     with `ssh <cluster>`. When none of the clusters has an entry, all the clusters are kept. The
     user is assumed to have access to the Mila cluster when it is one of these clusters.
     """
-    ssh_hostnames = get_ssh_hostnames()
     all_clusters = _cluster_names(template)
-    clusters = [cluster for cluster in all_clusters if cluster in ssh_hostnames] or all_clusters
+    clusters = [cluster for cluster in all_clusters if _has_ssh_entry(cluster)] or all_clusters
     mila_access = MILA_CLUSTER in clusters
     return InitAnswers(
         clusters=clusters,
@@ -411,26 +428,185 @@ def check_symlink_to_scratch(project_path: Path, results_path: str, results_syml
         symlink_path.symlink_to(scratch_path, target_is_directory=True)
 
 
-def check_ssh_hostnames(clusters: list[str]) -> None:
-    """
-    Check if the names of the clusters in the cluv config are present in the SSH config file.
-    If not, print a warning.
-    """
-    ssh_hostnames = get_ssh_hostnames()
-    missing_clusters = set(clusters).difference(ssh_hostnames)
+class Status(Enum):
+    """The result of a check, with its icon and its color."""
 
-    if len(missing_clusters) > 0:
-        console.print(
-            f"⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. "
-            "Try to run [bold]mila init[/bold] to add all available clusters.",
-            style="yellow",
-        )
-        for cluster in missing_clusters:
-            console.print(f"    - {cluster}", style="yellow")
+    OK = ("✔", "green")
+    WARN = ("!", "yellow")
+    FAIL = ("✘", "red")
+    # The check wasn't done.
+    SKIP = ("-", "dim")
+
+    @property
+    def icon(self) -> Text:
+        return Text(self.value[0], style=f"bold {self.color}")
+
+    @property
+    def color(self) -> str:
+        return self.value[1]
+
+
+# How the summary of the checks names the clusters, from the worst result of their checks.
+SUMMARY_LABELS = {
+    Status.OK: "ready",
+    Status.WARN: "with warnings",
+    Status.SKIP: "not checked",
+    Status.FAIL: "with problems",
+}
+
+
+@dataclasses.dataclass(frozen=True)
+class Check:
+    """The result of a check on a cluster.
+
+    The hints say how to fix a problem, and `code` is a line to copy into a config file.
+    """
+
+    status: Status
+    message: str
+    hints: tuple[str, ...] = ()
+    code: str = ""
+
+
+def check_clusters(config: CluvConfig) -> dict[str, list[Check]]:
+    """Checks the access to each cluster of the config, and shows the results in a frame for each
+    cluster. Returns the checks of each cluster."""
+    disabled = get_disabled_clusters()
+    reports = {
+        cluster: check_cluster(config, cluster, disabled) for cluster in config.clusters_names
+    }
+    if not reports:
+        return reports
+    for cluster, checks in reports.items():
+        console.print(cluster_panel(cluster, checks))
+    print_summary(reports)
+    print_keep_alive_tip(config.clusters_names)
+    return reports
+
+
+def check_cluster(
+    config: CluvConfig, cluster: str, disabled: dict[str, DisabledCluster]
+) -> list[Check]:
+    """Checks the SSH entry of the cluster, and whether the cluster is disabled."""
+    if cluster == current_cluster():
+        # cluv runs the commands of the current cluster without SSH.
+        checks = [Check(Status.OK, "current cluster: no SSH connection needed")]
     else:
+        checks = [check_ssh_entry(cluster, config.get_cluster_config(cluster).cluster_link)]
+    if (disabled_cluster := disabled.get(cluster)) is not None:
+        checks.append(check_disabled(cluster, disabled_cluster))
+    return checks
+
+
+def check_ssh_entry(cluster: str, cluster_link: str | None) -> Check:
+    """Checks that ~/.ssh/config has an entry for the cluster, since cluv runs `ssh <cluster>`."""
+    if _has_ssh_entry(cluster):
+        return Check(Status.OK, "SSH entry in ~/.ssh/config")
+    # `mila init` adds the entries of the Mila cluster and of the DRAC and PAICE clusters, which
+    # are the clusters of the template.
+    if cluster in _cluster_names(_load_cluv_config_template()):
+        hints = [f"if you have access to {cluster}, run `mila init` to add it"]
+    else:
+        hints = [f"if you have access to {cluster}, add a `Host {cluster}` entry for it"]
+    if cluster_link:
+        hints.append(f"otherwise, see how to get access: {cluster_link}")
+    return Check(Status.FAIL, "no entry in ~/.ssh/config", tuple(hints))
+
+
+def check_disabled(cluster: str, disabled: DisabledCluster) -> Check:
+    """Warns that the cluster is disabled with `cluv disable`, so cluv commands skip it."""
+    period = (
+        "indefinitely"
+        if disabled.disabled_until is None
+        else f"for {format_remaining(disabled.disabled_until)}"
+    )
+    return Check(
+        Status.WARN,
+        f"disabled {period}: cluv commands skip {cluster}",
+        (f"run `cluv enable {cluster}` to use it again",),
+    )
+
+
+def cluster_panel(cluster: str, checks: list[Check]) -> Panel:
+    """A frame with the result of each check of the cluster, in the color of the worst result.
+
+    The title of the frame has the name of the cluster and the number of checks of each result.
+    """
+    counts = Text("  ").join(
+        Text.assemble(status.icon, f" {count}")
+        for status in Status
+        if (count := sum(check.status is status for check in checks))
+    )
+    rows = Table.grid(padding=(0, 1))
+    rows.add_column(width=1)
+    rows.add_column()
+    for check in checks:
+        lines = [_text(check.message)]
+        lines += [_text(f"→ {hint}", style="dim italic") for hint in check.hints]
+        lines += [_text(f"  {line}", style="cyan") for line in check.code.splitlines()]
+        rows.add_row(check.status.icon, Group(*lines))
+    title = Text.assemble((cluster, "bold"), "  ", counts)
+    return Panel(rows, title=title, title_align="left", border_style=_worst_status(checks).color)
+
+
+def print_summary(reports: dict[str, list[Check]]) -> None:
+    """Prints how many clusters are ready, and how many have warnings or problems."""
+    statuses = [_worst_status(checks) for checks in reports.values()]
+    counts = Text(" · ").join(
+        Text(f"{statuses.count(status)} {label}", style=status.color)
+        for status, label in SUMMARY_LABELS.items()
+        if status in statuses
+    )
+    console.rule(Text.assemble("Clusters: ", counts))
+
+
+def print_keep_alive_tip(clusters: list[str]) -> None:
+    """Suggests the SSH options that keep the connections to the clusters open.
+
+    A network or a cluster can close an SSH connection that stays idle for too long. With
+    `ServerAliveInterval`, SSH sends a message to the cluster regularly, so the connection is never
+    idle. `mila init` only sets that option for the Mila cluster.
+    """
+    clusters = [
+        cluster
+        for cluster in clusters
+        if cluster != current_cluster()
+        and _has_ssh_entry(cluster)
+        and get_ssh_options_for_host(cluster).get("serveraliveinterval", "0") == "0"
+    ]
+    if clusters:
         console.print(
-            "✅ All clusters in the cluv config are present in your SSH config.", style="green"
+            "💡 To keep the SSH connections open when they are idle, add these lines to the "
+            f"`Host` entries of {_join(clusters)} in ~/.ssh/config:"
         )
+        console.print("    ServerAliveInterval 120\n    ServerAliveCountMax 5", style="cyan")
+
+
+def _has_ssh_entry(cluster: str) -> bool:
+    """Whether the SSH config has an entry for the cluster.
+
+    `ssh -G` reads the whole SSH config, with the files that it includes. Without an entry for the
+    cluster, the host name that `ssh -G` gives is the name of the cluster.
+    """
+    return get_ssh_options_for_host(cluster).get("hostname", cluster).lower() != cluster.lower()
+
+
+def _worst_status(checks: list[Check]) -> Status:
+    """The worst result of the checks. A check that wasn't done is only worse than a success."""
+    statuses = {check.status for check in checks}
+    return next((s for s in (Status.FAIL, Status.WARN, Status.SKIP) if s in statuses), Status.OK)
+
+
+def _text(text: str, style: str = "") -> Text:
+    """The text of a line in a frame.
+
+    A URL or a path that is too long for the frame continues on the next line instead of being
+    cut. The URLs are links, which still work when they continue on the next line.
+    """
+    rich_text = Text(text, style=style, overflow="fold")
+    for url in re.finditer(r"https?://\S+", text):
+        rich_text.stylize(f"link {url.group()}", url.start(), url.end())
+    return rich_text
 
 
 def check_job_script(project_root: Path, results_path: str) -> None:
@@ -485,6 +661,22 @@ def check_job_script(project_root: Path, results_path: str) -> None:
         )
         script_path.write_text(script_content)
         console.print(f"Adding job template script at '{script_path}'.")
+
+
+def check_job_script_paths(project_root: Path, config: CluvConfig) -> None:
+    """Checks that the default job scripts of the clusters (`job_script_path`) are in the project."""
+    job_script_paths = {
+        config.get_cluster_config(cluster).job_script_path for cluster in config.clusters_names
+    }
+    for job_script_path in sorted(path for path in job_script_paths if path is not None):
+        if (project_root / os.path.expandvars(job_script_path)).is_file():
+            console.print(f"✅ Job script of the config found: {job_script_path}", style="green")
+        else:
+            console.print(
+                f"❌ Job script of the config not found: {job_script_path}. Fix "
+                "`job_script_path` in pyproject.toml.",
+                style="red",
+            )
 
 
 def _load_cluv_config_template() -> str:

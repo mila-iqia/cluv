@@ -109,7 +109,7 @@ class TestCheckCluvConfig:
             monkeypatch,
             mila_access=False,
             clusters=["rorqual"],
-            texts={"on rorqual?": "def-yourpi"},
+            texts={"DRAC cluster rorqual?": "def-yourpi"},
         )
         p = tmp_path / "pyproject.toml"
         p.touch()
@@ -441,6 +441,17 @@ def answer_questions(
     return asked
 
 
+def account_questions(asked: dict[str, object]) -> dict[str, object]:
+    """The questions about the Slurm accounts among the `asked` questions, with their default
+    answers. Each question is shortened to its end, such as "DRAC cluster narval?"."""
+    start = "Which Slurm accounts do you use on the "
+    return {
+        message.removeprefix(start): default
+        for message, default in asked.items()
+        if message.startswith(start)
+    }
+
+
 class TestAskQuestions:
     defaults = InitAnswers(
         clusters=TEMPLATE_CLUSTERS,
@@ -479,34 +490,33 @@ class TestAskQuestions:
 
         answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
-        account_questions = [message for message in asked if message.startswith("Which Slurm")]
-        assert account_questions == ["Which Slurm accounts do you use on rorqual?"]
+        assert list(account_questions(asked)) == ["DRAC cluster rorqual?"]
         config = parse_config(make_cluv_config(TEMPLATE, answers, SCRATCH_PROJECT_DIR))
         assert config.clusters["mila"].sbatch_args == {}
 
     def test_accounts_are_prefilled_with_those_of_mila_members(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        clusters = ["mila", "rorqual", "narval", "tamia"]
-        texts = {"on rorqual?": "rrg-bengioy-ad, def-yourpi"}
+        """With access to the Mila cluster, one question covers the clusters of the same kind that
+        have the same accounts of Mila members. Narval, where these accounts differ, gets its own
+        question."""
+        clusters = ["mila", "tamia", "killarney", "rorqual", "fir", "narval"]
+        texts = {"DRAC clusters (rorqual, fir)?": "rrg-bengioy-ad, def-yourpi"}
         asked = answer_questions(monkeypatch, mila_access=True, clusters=clusters, texts=texts)
 
         answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
-        prefilled = {
-            cluster: asked[f"Which Slurm accounts do you use on {cluster}?"]
-            for cluster in clusters
-            if cluster != "mila"
-        }
-        assert prefilled == {
-            "rorqual": "rrg-bengioy-ad",
-            "narval": "def-bengioy",
-            "tamia": "",
+        assert account_questions(asked) == {
+            "PAICE clusters (tamia, killarney)?": "",
+            "DRAC clusters (rorqual, fir)?": "rrg-bengioy-ad",
+            "DRAC cluster narval?": "def-bengioy",
         }
         assert answers.accounts == {
-            "rorqual": ["rrg-bengioy-ad", "def-yourpi"],
-            "narval": ["def-bengioy"],
             "tamia": [],
+            "killarney": [],
+            "rorqual": ["rrg-bengioy-ad", "def-yourpi"],
+            "fir": ["rrg-bengioy-ad", "def-yourpi"],
+            "narval": ["def-bengioy"],
         }
 
     def test_mila_accounts_are_prefilled_without_the_mila_cluster(
@@ -520,58 +530,57 @@ class TestAskQuestions:
 
         answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
-        assert asked["Which Slurm accounts do you use on rorqual?"] == "rrg-bengioy-ad"
-        assert asked["Which Slurm accounts do you use on narval?"] == "def-bengioy"
+        assert account_questions(asked) == {
+            "DRAC cluster rorqual?": "rrg-bengioy-ad",
+            "DRAC cluster narval?": "def-bengioy",
+        }
         assert answers.accounts == {"rorqual": ["rrg-bengioy-ad"], "narval": ["def-bengioy"]}
 
     def test_accounts_are_not_prefilled_without_access_to_mila(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        texts = {"on rorqual?": "def-yourpi, rrg-yourpi-ad", "on tamia?": "aip-yourpi"}
+        texts = {
+            "DRAC cluster rorqual?": "def-yourpi, rrg-yourpi-ad",
+            "PAICE cluster tamia?": "aip-yourpi",
+        }
         asked = answer_questions(
             monkeypatch, mila_access=False, clusters=["rorqual", "tamia"], texts=texts
         )
 
         answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
-        assert asked["Which Slurm accounts do you use on rorqual?"] == ""
-        assert asked["Which Slurm accounts do you use on tamia?"] == ""
+        assert account_questions(asked) == {
+            "DRAC cluster rorqual?": "",
+            "PAICE cluster tamia?": "",
+        }
         assert answers.accounts == {
             "rorqual": ["def-yourpi", "rrg-yourpi-ad"],
             "tamia": ["aip-yourpi"],
         }
 
-    def test_accounts_are_prefilled_with_the_answer_for_the_previous_cluster_of_the_same_kind(
+    def test_one_account_question_for_the_clusters_of_the_same_kind(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """When the template has no account for a cluster, the answer for the previous cluster of
-        the same kind (PAICE or DRAC) pre-fills the question."""
+        """Without access to the Mila cluster, one question covers the PAICE clusters, and another
+        question covers the DRAC clusters. The answer to a question goes to all the clusters that
+        the question covers."""
         clusters = ["tamia", "killarney", "rorqual", "fir", "narval"]
         texts = {
-            "on tamia?": "aip-yourpi",
-            "on rorqual?": "def-yourpi, rrg-yourpi-ad",
-            "on fir?": "def-yourpi",
+            "PAICE clusters (tamia, killarney)?": "aip-yourpi",
+            "DRAC clusters (rorqual, fir, narval)?": "def-yourpi",
         }
         asked = answer_questions(monkeypatch, mila_access=False, clusters=clusters, texts=texts)
 
         answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
 
-        prefilled = {
-            cluster: asked[f"Which Slurm accounts do you use on {cluster}?"]
-            for cluster in clusters
-        }
-        assert prefilled == {
-            "tamia": "",
-            "killarney": "aip-yourpi",
-            # The answer for a PAICE cluster doesn't pre-fill the question for a DRAC cluster.
-            "rorqual": "",
-            "fir": "def-yourpi, rrg-yourpi-ad",
-            "narval": "def-yourpi",
-        }
+        assert list(account_questions(asked)) == [
+            "PAICE clusters (tamia, killarney)?",
+            "DRAC clusters (rorqual, fir, narval)?",
+        ]
         assert answers.accounts == {
             "tamia": ["aip-yourpi"],
             "killarney": ["aip-yourpi"],
-            "rorqual": ["def-yourpi", "rrg-yourpi-ad"],
+            "rorqual": ["def-yourpi"],
             "fir": ["def-yourpi"],
             "narval": ["def-yourpi"],
         }

@@ -229,23 +229,27 @@ def ask_questions(template: str, defaults: InitAnswers, home_project_dir: str) -
         validate=lambda selected: bool(selected) or "Select at least one cluster.",
     ).unsafe_ask()
     default_accounts = _default_accounts(template, answers.clusters, answers.mila_access)
-    # The last answer for each kind of cluster (PAICE or DRAC). When the template has no
-    # account for a cluster, that answer pre-fills the question about the cluster, since clusters
-    # of the same kind often share accounts.
-    last_answers: dict[str, str] = {}
-    answers.accounts = {}
+    # One question asks for the accounts on all the clusters of the same kind (PAICE or DRAC) with
+    # the same default accounts, since these clusters often share accounts. For the users who
+    # have access to the Mila cluster, Narval gets its own question: the accounts of Mila members
+    # on Narval differ from those on the other DRAC clusters.
+    groups: dict[tuple[str, str], list[str]] = {}
     for cluster in answers.clusters:
-        if cluster == MILA_CLUSTER:
-            # Jobs on the Mila cluster usually don't need an account, so no question asks for one.
-            continue
-        kind = _cluster_kind(cluster)
+        # Jobs on the Mila cluster usually don't need an account, so no question asks for one.
+        if cluster != MILA_CLUSTER:
+            default = ", ".join(default_accounts[cluster])
+            groups.setdefault((_cluster_kind(cluster), default), []).append(cluster)
+    answers.accounts = {}
+    for (kind, default), clusters in groups.items():
+        names = ", ".join(clusters)
+        where = f"{kind} clusters ({names})" if len(clusters) > 1 else f"{kind} cluster {names}"
         accounts = ask_text(
-            f"Which Slurm accounts do you use on {cluster}?",
-            default=", ".join(default_accounts[cluster]) or last_answers.get(kind, ""),
-            instruction=_accounts_instruction(cluster),
+            f"Which Slurm accounts do you use on the {where}?",
+            default=default,
+            instruction=_accounts_instruction(clusters[0]),
         )
-        last_answers[kind] = accounts
-        answers.accounts[cluster] = accounts.replace(",", " ").split()
+        for cluster in clusters:
+            answers.accounts[cluster] = accounts.replace(",", " ").split()
     answers.results_path = ask_text(
         "Where should the job results go on the clusters?",
         default=defaults.results_path,
@@ -533,8 +537,8 @@ def _default_accounts(
 
 
 def _cluster_kind(cluster: str) -> str:
-    """The kind of a cluster other than Mila: "paice" or "drac"."""
-    return "paice" if cluster in PAICE_CLUSTERS else "drac"
+    """The kind of a cluster other than Mila: "PAICE" or "DRAC"."""
+    return "PAICE" if cluster in PAICE_CLUSTERS else "DRAC"
 
 
 def _accounts_instruction(cluster: str) -> str:

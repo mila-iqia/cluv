@@ -82,10 +82,11 @@ For the clusters you don't want to use (no access, missing SSH entry, ...), you 
 ### Set your allocation accounts
 
 Some clusters require an `--account` for every job. `cluv init` asks for your accounts on each
-cluster, except the Mila cluster, where jobs usually don't need one. If you have access to the
-Mila cluster, it suggests Mila's allocations (`rrg-bengioy-ad`, `def-bengioy`), which are
-available to core Mila students. To change the accounts later, adjust them to the allocations you
-actually have access to:
+cluster, except the Mila cluster, where jobs usually don't need one. One question covers the
+clusters of the same kind (DRAC or PAICE) with the same suggested accounts. If you have access to
+the Mila cluster, it suggests Mila's allocations (`rrg-bengioy-ad`, `def-bengioy`), which are
+available to core Mila students. To change the accounts later, for example on a single cluster,
+adjust them to the allocations you actually have access to:
 
 - **Add** your PI's accounts (`def-*` or `rrg-*` for DRAC clusters, `aip-*` for PAICE clusters).
 - **Remove** the Mila accounts if you don't have access to them.

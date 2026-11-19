@@ -74,11 +74,11 @@ To write the `[tool.cluv]` section, `cluv init` asks a few questions:
 - **The clusters to use.** The other clusters that have a `Host` entry in your `~/.ssh/config` are
   selected by default. The clusters you don't select are also added to the config, commented out.
   Each cluster in the config has a link to its documentation.
-- **Your Slurm accounts on each selected cluster**, except the Mila cluster, where jobs usually
-  don't need an account. If you have access to the Mila cluster, the answers are pre-filled with
-  the accounts of Mila members, which you can change or complete.
-  On a cluster without such accounts, the answer is pre-filled with your answer for the previous
-  cluster of the same kind (DRAC or PAICE).
+- **Your Slurm accounts on the selected clusters**, except the Mila cluster, where jobs usually
+  don't need an account. One question covers the clusters of the same kind (DRAC or PAICE) with
+  the same pre-filled accounts. If you have access to the Mila cluster, the answers are pre-filled
+  with the accounts of Mila members, which you can change or complete. Narval then gets its own
+  question, since the accounts of Mila members are different on Narval.
 - **Where to put the job results and the project** on the clusters (`results_path` and
   `project_dir`). The question about the project shows its default path: the same as on your
   machine, relative to `$HOME`.

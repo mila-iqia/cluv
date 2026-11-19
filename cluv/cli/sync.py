@@ -452,13 +452,8 @@ def _is_github_pr_ref(github_ref: str) -> bool:
 
 async def clone_project(
     remote: Remote, project_path: PurePosixPath, project_state: ProjectStateOnCluster
-):
-    """Setup the project repo on all the remote clusters.
-
-    New idea:
-    - Assume GitHub. Push to GitHub if needed. Clone from github on the remotes.
-    - Worry about authentication later, just raise an error if need be for now.
-    """
+) -> None:
+    """Setup the project repo on all the remote clusters."""
     current_git_commit = subprocess.getoutput("git rev-parse HEAD").strip()
 
     # In the case of a subproject (like the examples in the cluv repo), these are different!

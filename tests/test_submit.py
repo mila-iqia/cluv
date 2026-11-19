@@ -1798,3 +1798,17 @@ async def test_submit_first_considers_current_cluster(
         assert returned_job.job_id == this_cluster_jobid
     else:
         assert returned_job.job_id == other_cluster_jobid
+
+
+def test_submit_exits_nonzero_when_every_submission_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`cluv submit first` exits 1, not 0, when every racing job failed (#257)."""
+    monkeypatch.setattr(
+        cluv_main, "submit", mock.AsyncMock(spec=cluv_main.submit, return_value=None)
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cluv_main.main(["submit", "first", "--", "python", "main.py"])
+
+    assert exc_info.value.code == 1

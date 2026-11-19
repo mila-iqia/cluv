@@ -1,5 +1,8 @@
+import asyncio
+import importlib
 import re
 from typing import Literal
+from unittest import mock
 
 import pytest
 
@@ -8,6 +11,10 @@ from cluv.cli.sync import get_active_remotes
 from cluv.utils import console
 
 from .test_integration import REQUIRED_CLUSTERS
+
+# `cluv.cli` re-exports the `status` function, so `cluv.cli.status` as an attribute
+# would hit the function, not the module. Go through `importlib` instead.
+status_module = importlib.import_module("cluv.cli.status")
 
 
 @pytest.mark.slow
@@ -57,3 +64,50 @@ async def test_cluv_status(table: Literal["clusters", "jobs", "all"], all_jobs: 
         # There should be "Cluster", some whitespace, and then "Job ID" in one of the lines.
         # This is somewhat reliable, those columns don't seem to wrap around.
         assert re.search(r"Cluster\s+Job ID", output)
+
+
+async def _never_returns(*args, **kwargs):
+    """Stand-in for a command on a cluster that is in maintenance: it never answers."""
+    await asyncio.Event().wait()
+
+
+@pytest.mark.timeout(30)
+async def test_get_cluster_status_times_out_on_unresponsive_cluster(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A cluster that never answers is reported offline with a warning, not awaited forever (#297)."""
+    remote = mock.Mock()
+    remote.get_output = _never_returns
+    monkeypatch.setattr(
+        status_module, "get_remote_without_2fa_prompt", mock.AsyncMock(return_value=remote)
+    )
+    monkeypatch.setattr(status_module, "CLUSTER_TIMEOUT_SECONDS", 0.1, raising=False)
+
+    with caplog.at_level("WARNING"):
+        # The outer `wait_for` only keeps this test from hanging when the timeout is missing.
+        result = await asyncio.wait_for(
+            status_module.get_cluster_status("rorqual", disabled_clusters={}), timeout=5
+        )
+
+    assert result == status_module.get_default_cluster_status("rorqual")
+    assert any("Connection to rorqual timeout" in message for message in caplog.messages)
+
+
+@pytest.mark.timeout(30)
+async def test_fetch_live_job_info_times_out_on_unresponsive_cluster(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Jobs on a cluster that never answers are skipped with a warning (#297)."""
+    monkeypatch.setattr(
+        status_module, "get_remote_without_2fa_prompt", mock.AsyncMock(return_value=mock.Mock())
+    )
+    monkeypatch.setattr(status_module, "run_sacct", _never_returns)
+    monkeypatch.setattr(status_module, "CLUSTER_TIMEOUT_SECONDS", 0.1, raising=False)
+
+    with caplog.at_level("WARNING"):
+        result = await asyncio.wait_for(
+            status_module.fetch_live_job_info("rorqual", [123], disabled_clusters={}), timeout=5
+        )
+
+    assert result == {}
+    assert any("Connection to rorqual timeout" in message for message in caplog.messages)

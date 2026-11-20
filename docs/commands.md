@@ -54,7 +54,8 @@ Available for all commands.
     shows debug-level logs. Defaults to warning-level logs only.
 
 `-q`, `--quiet`
-:   Disable command output. Has no effect on `cluv status`.
+:   Disable command output. Has no effect on `cluv status`. With `cluv init`, also skips the
+    questions and uses the default answers.
 
 
 ---
@@ -67,8 +68,29 @@ If the project already have a `pyproject.toml` file, it will add a `[tool.cluv]`
 If not, it will create one with [`uv init`](https://docs.astral.sh/uv/reference/cli/#uv-init) and
 add a `[tool.cluv]` section.
 
-Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to
-`$SCRATCH/logs/<project_name>`.
+To write the `[tool.cluv]` section, `cluv init` asks a few questions:
+
+- **Whether you have access to the Mila cluster.** If so, the Mila cluster is selected by default.
+- **The clusters to use.** The other clusters that have a `Host` entry in your `~/.ssh/config` are
+  selected by default. The clusters you don't select are also added to the config, commented out.
+  Each cluster in the config has a link to its documentation.
+- **Your Slurm accounts on the selected clusters**, except the Mila cluster, where jobs usually
+  don't need an account. One question covers the clusters of the same kind (DRAC or PAICE) with
+  the same pre-filled accounts. If you have access to the Mila cluster, the answers are pre-filled
+  with the accounts of Mila members, which you can change or complete. Narval then gets its own
+  question, since the accounts of Mila members are different on Narval.
+- **Where to put the job results and the project** on the clusters (`results_path` and
+  `project_dir`). The question about the project shows its default path: the same as on your
+  machine, relative to `$HOME`. Some clusters can't run jobs from `$HOME` (Killarney, Trillium):
+  there, the project goes in `$SCRATCH/repos/<repo-name>`, unless your answer is a path in
+  `$SCRATCH`. When you select these clusters, a note before the question says so.
+- **The datasets to copy to all the clusters**, if any (`data_source` and `datasets_path`).
+
+With `--quiet`, or when the input isn't a terminal, `cluv init` asks no question and uses the
+default answers.
+
+Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to the
+`results_path` (`$SCRATCH/logs/<project_name>` by default).
 
 Default project structure after [`cluv init`](#cluv-init) (if the project didn't already exist):
 ```

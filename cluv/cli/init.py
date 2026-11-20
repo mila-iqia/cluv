@@ -839,8 +839,9 @@ def print_keep_alive_tip(clusters: list[str]) -> None:
     ]
     if clusters:
         console.print(
-            "💡 To keep the SSH connections open when they are idle, add these lines to the "
-            f"`Host` entries of {_join(clusters)} in ~/.ssh/config:"
+            "💡 Optional: a network can close an SSH connection that stays idle for a long time, "
+            "and you would then need `cluv login` (and a 2FA) again. To keep the connections "
+            f"open, add these lines to the `Host` entries of {_join(clusters)} in ~/.ssh/config:"
         )
         console.print("    ServerAliveInterval 120\n    ServerAliveCountMax 5", style="cyan")
 

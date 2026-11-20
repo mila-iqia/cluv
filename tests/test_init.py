@@ -1081,7 +1081,8 @@ class TestDisplay:
         assert "Clusters: 2 ready · 1 not checked · 1 with problems" in capture.get()
 
     def test_keep_alive_tip(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """The tip lists the clusters whose SSH entry doesn't keep the connection open."""
+        """The tip says why it's useful, and lists the clusters whose SSH entry doesn't keep the
+        connection open."""
         monkeypatch.setattr(CLUV_INIT_MODULE, "current_cluster", lambda: None)
         fake_ssh_config(monkeypatch, ["mila", "rorqual", "narval"], keep_alive=("mila",))
 
@@ -1089,6 +1090,10 @@ class TestDisplay:
             print_keep_alive_tip(["mila", "rorqual", "narval", "tamia"])
 
         output = " ".join(capture.get().split())
+        assert output.startswith(
+            "💡 Optional: a network can close an SSH connection that stays idle for a long time, "
+            "and you would then need `cluv login` (and a 2FA) again."
+        )
         assert "`Host` entries of rorqual and narval in ~/.ssh/config:" in output
         assert "ServerAliveInterval 120 ServerAliveCountMax 5" in output
 

@@ -143,15 +143,18 @@ def check_cluv_config(pyproject_path: Path, ask: bool = False) -> None:
     )
     template = _load_cluv_config_template()
     project_root = pyproject_path.parent
+    scratch_project_dir = _scratch_project_dir(project_root)
     answers = default_answers(template, project_root.name)
     if ask:
         try:
-            answers = ask_questions(template, answers, _home_project_dir(project_root))
+            answers = ask_questions(
+                template, answers, _home_project_dir(project_root), scratch_project_dir
+            )
         except (KeyboardInterrupt, EOFError):
             # Ctrl-C raises KeyboardInterrupt, and Ctrl-D raises EOFError.
             console.print("Cancelled: no cluv config was written.", style="yellow")
             sys.exit(1)
-    cluv_config = make_cluv_config(template, answers, _scratch_project_dir(project_root))
+    cluv_config = make_cluv_config(template, answers, scratch_project_dir)
 
     console.print("Adding config for cluv tool :")
     add_cluv_config_section(pyproject_path, cluv_config)
@@ -192,12 +195,16 @@ def default_answers(template: str, project_name: str) -> InitAnswers:
     )
 
 
-def ask_questions(template: str, defaults: InitAnswers, home_project_dir: str) -> InitAnswers:
+def ask_questions(
+    template: str, defaults: InitAnswers, home_project_dir: str, scratch_project_dir: str
+) -> InitAnswers:
     """Asks the questions of `cluv init` in the terminal, with `defaults` as default answers.
 
     `home_project_dir` is the path of the project on this machine, starting with `$HOME`. Without
     `project_dir`, the project goes in that path on the clusters, so the question about
-    `project_dir` shows that path while the answer is empty.
+    `project_dir` shows that path while the answer is empty. On the clusters that can't run jobs
+    from $HOME, the project goes in `scratch_project_dir` instead, unless `project_dir` is in
+    $SCRATCH: a note before the question says so.
     """
 
     def ask_text(message: str, **kwargs) -> str:
@@ -255,6 +262,15 @@ def ask_questions(template: str, defaults: InitAnswers, home_project_dir: str) -
         default=defaults.results_path,
         validate=required_path,
     )
+    scratch_clusters = [
+        cluster for cluster in _clusters_that_refuse_home(template) if cluster in answers.clusters
+    ]
+    if scratch_clusters:
+        console.print(
+            f"Since {_join(scratch_clusters)} can't run jobs from $HOME, the project goes in "
+            f"{scratch_project_dir} there, unless your answer is a path in $SCRATCH.",
+            style="yellow",
+        )
     answers.project_dir = ask_text(
         "Where should the project go on the clusters?",
         instruction="(leave empty for the same path as on this machine)",
@@ -517,6 +533,16 @@ def _cluster_names(config: str) -> list[str]:
     return [cluster for section in _split_sections(config) if (cluster := _cluster_name(section))]
 
 
+def _clusters_that_refuse_home(template: str) -> list[str]:
+    """The clusters that can't run jobs from $HOME: the template sets their `project_dir`."""
+    return [
+        cluster
+        for section in _split_sections(template)
+        if (cluster := _cluster_name(section))
+        and any(line.startswith("project_dir = ") for line in section)
+    ]
+
+
 def _default_accounts(
     template: str, clusters: list[str], mila_access: bool
 ) -> dict[str, list[str]]:
@@ -642,6 +668,11 @@ def _scratch_project_dir(project_root: Path) -> str:
 def _toml_string(value: str) -> str:
     """Quotes the value as a TOML string. (A JSON string is also a valid TOML string.)"""
     return json.dumps(value, ensure_ascii=False)
+
+
+def _join(names: list[str]) -> str:
+    """Joins names for a sentence: "a", "a and b", "a, b and c"."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def _get_script_templates_path() -> Path:

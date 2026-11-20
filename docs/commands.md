@@ -81,7 +81,9 @@ To write the `[tool.cluv]` section, `cluv init` asks a few questions:
   question, since the accounts of Mila members are different on Narval.
 - **Where to put the job results and the project** on the clusters (`results_path` and
   `project_dir`). The question about the project shows its default path: the same as on your
-  machine, relative to `$HOME`.
+  machine, relative to `$HOME`. Some clusters can't run jobs from `$HOME` (Killarney, Trillium):
+  there, the project goes in `$SCRATCH/repos/<repo-name>`, unless your answer is a path in
+  `$SCRATCH`. When you select these clusters, a note before the question says so.
 - **The datasets to copy to all the clusters**, if any (`data_source` and `datasets_path`).
 
 With `--quiet`, or when the input isn't a terminal, `cluv init` asks no question and uses the

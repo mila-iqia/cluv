@@ -27,6 +27,7 @@ from cluv.cli.init import (
     make_cluv_config,
 )
 from cluv.config import CluvConfig, load_cluv_config
+from cluv.utils import console
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLUV_INIT_MODULE = importlib.import_module("cluv.cli.init")
@@ -473,7 +474,7 @@ class TestAskQuestions:
             monkeypatch, mila_access=mila_access, clusters=["rorqual"], texts={}
         )
 
-        ask_questions(TEMPLATE, defaults, HOME_PROJECT_DIR)
+        ask_questions(TEMPLATE, defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
 
         assert asked["Do you have access to the Mila cluster?"] == (not mila_access)
         expected_selection = ["mila", "rorqual"] if mila_access else ["rorqual"]
@@ -488,7 +489,7 @@ class TestAskQuestions:
             monkeypatch, mila_access=True, clusters=["mila", "rorqual"], texts={}
         )
 
-        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
 
         assert list(account_questions(asked)) == ["DRAC cluster rorqual?"]
         config = parse_config(make_cluv_config(TEMPLATE, answers, SCRATCH_PROJECT_DIR))
@@ -504,7 +505,7 @@ class TestAskQuestions:
         texts = {"DRAC clusters (rorqual, fir)?": "rrg-bengioy-ad, def-yourpi"}
         asked = answer_questions(monkeypatch, mila_access=True, clusters=clusters, texts=texts)
 
-        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
 
         assert account_questions(asked) == {
             "PAICE clusters (tamia, killarney)?": "",
@@ -528,7 +529,7 @@ class TestAskQuestions:
             monkeypatch, mila_access=True, clusters=["rorqual", "narval"], texts={}
         )
 
-        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
 
         assert account_questions(asked) == {
             "DRAC cluster rorqual?": "rrg-bengioy-ad",
@@ -547,7 +548,7 @@ class TestAskQuestions:
             monkeypatch, mila_access=False, clusters=["rorqual", "tamia"], texts=texts
         )
 
-        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
 
         assert account_questions(asked) == {
             "DRAC cluster rorqual?": "",
@@ -571,7 +572,7 @@ class TestAskQuestions:
         }
         asked = answer_questions(monkeypatch, mila_access=False, clusters=clusters, texts=texts)
 
-        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
 
         assert list(account_questions(asked)) == [
             "PAICE clusters (tamia, killarney)?",
@@ -589,12 +590,13 @@ class TestAskQuestions:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         asked = answer_questions(monkeypatch, mila_access=True, clusters=["mila"], texts={})
-        assert ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR).datasets_path == ""
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
+        assert answers.datasets_path == ""
         assert not any("datasets go" in message for message in asked)
 
         texts = {"copy": "mila:/network/datasets/x", "datasets go": "$SCRATCH/data"}
         answer_questions(monkeypatch, mila_access=True, clusters=["mila"], texts=texts)
-        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+        answers = ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
         assert answers.data_source == "mila:/network/datasets/x"
         assert answers.datasets_path == "$SCRATCH/data"
 
@@ -611,7 +613,7 @@ class TestAskQuestions:
 
         monkeypatch.setattr(questionary, "text", text)
 
-        ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+        ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
 
         path_questions = [message for message in validators if message.startswith("Where")]
         assert len(path_questions) == 4
@@ -643,10 +645,34 @@ class TestAskQuestions:
 
         monkeypatch.setattr(questionary, "text", text)
 
-        ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR)
+        ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
 
         placeholder = placeholders["Where should the project go on the clusters?"]
         assert [part for _style, part in placeholder] == [HOME_PROJECT_DIR]
+
+    @pytest.mark.parametrize(
+        ("clusters", "expected_note"),
+        [
+            (
+                ["mila", "killarney", "rorqual", "trillium"],
+                "Since killarney and trillium can't run jobs from $HOME, the project goes in "
+                f"{SCRATCH_PROJECT_DIR} there, unless your answer is a path in $SCRATCH.",
+            ),
+            (["mila", "rorqual"], ""),
+        ],
+    )
+    def test_note_on_the_clusters_that_refuse_home(
+        self, clusters: list[str], expected_note: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Before the question about `project_dir`, a note says where the project goes on the
+        selected clusters that can't run jobs from $HOME. Without these clusters, there's no note."""
+        answer_questions(monkeypatch, mila_access=True, clusters=clusters, texts={})
+
+        with console.capture() as capture:
+            ask_questions(TEMPLATE, self.defaults, HOME_PROJECT_DIR, SCRATCH_PROJECT_DIR)
+
+        # Rich wraps the long lines, so the spaces are normalized.
+        assert " ".join(capture.get().split()) == expected_note
 
 
 @pytest.mark.parametrize(

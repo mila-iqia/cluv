@@ -140,6 +140,10 @@ env = { SCRATCH = "$HOME/scratch" }
 requeue = true
 
 ###  --------------   Clusters Config   --------------  ###
+# With more than one allocation on a cluster, list one account per allocation in the
+# `sbatch_args` of that cluster: `cluv submit <cluster>` then submits one job per allocation and
+# keeps the first one that starts, cancelling the others. For example:
+# sbatch_args = [{ account = "rrg-yourpi-ad" }, { account = "def-yourpi" }]
 
 [tool.cluv.clusters.mila]
 # https://docs.mila.quebec/technical_reference/clusters/mila/
@@ -162,9 +166,6 @@ project_dir = "$SCRATCH/repos/cluv"
 [tool.cluv.clusters.rorqual]
 # https://docs.alliancecan.ca/wiki/Rorqual
 sbatch_args = { account = "rrg-bengioy-ad" }
-# With more than one allocation on a cluster, `cluv submit rorqual` submits one job per allocation
-# and keeps the first one that starts, cancelling the others:
-# sbatch_args = [{ account = "rrg-yourpi-ad" }, { account = "def-yourpi" }]
 
 [tool.cluv.clusters.fir]
 # https://docs.alliancecan.ca/wiki/Fir

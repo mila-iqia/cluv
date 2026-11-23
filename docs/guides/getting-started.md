@@ -96,7 +96,8 @@ adjust them to the allocations you actually have access to:
 - **Remove** the Mila accounts if you don't have access to them.
 
 To find your accounts, run `cluv init` again: on each connected cluster, it checks the accounts of
-the config, and suggests a `sbatch_args` line with all your accounts on the cluster.
+the config, and suggests a `sbatch_args` line with all your accounts on the cluster. It also shows
+the clusters where you have no account, since Slurm refuses your jobs there.
 
 When you have access to multiple accounts on a cluster, you can list them all in the config.
 `cluv submit` will submit one job per allocation and keep the first one that starts.

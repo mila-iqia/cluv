@@ -1356,11 +1356,42 @@ class TestCheckAccounts:
 
         assert check.message == "no Slurm account set (Slurm uses your only account, def-me)"
 
-    @pytest.mark.parametrize("sacctmgr", [(1, "", "sacctmgr: command not found\n"), (0, "", "")])
-    async def test_accounts_that_cant_be_listed(self, sacctmgr: tuple[int, str, str]) -> None:
+    async def test_accounts_that_cant_be_listed(self) -> None:
+        sacctmgr = (1, "", "sacctmgr: command not found\n")
+
         check = await self.check("narval", {"account": "def-me"}, sacctmgr)
 
         assert check == Check(Status.SKIP, "couldn't list your Slurm accounts on narval")
+
+    @pytest.mark.parametrize(
+        ("cluster_link", "access_hints"),
+        [
+            (
+                "https://docs.alliancecan.ca/wiki/TamIA",
+                ("to get access, see https://docs.alliancecan.ca/wiki/TamIA",),
+            ),
+            (None, ()),
+        ],
+    )
+    async def test_no_account_on_the_cluster(
+        self, cluster_link: str | None, access_hints: tuple[str, ...]
+    ) -> None:
+        """When `sacctmgr` lists no account, the user has no account on the cluster, like on a
+        PAICE cluster without access to the allocation of a PI. Slurm refuses the jobs then."""
+        config = make_cluv_config_with_clusters(tamia={"cluster_link": cluster_link})
+        remote = FakeRemote("tamia", {"sacctmgr": (0, "", "")})
+
+        check = await check_accounts(remote, config.get_cluster_config("tamia"))
+
+        assert check == Check(
+            Status.FAIL,
+            "you have no Slurm account on tamia: jobs can't run there",
+            (
+                *access_hints,
+                "to stop using tamia, remove [tool.cluv.clusters.tamia] from pyproject.toml, or "
+                "run `cluv disable tamia`",
+            ),
+        )
 
 
 class LocalRemote:
@@ -1626,5 +1657,8 @@ async def test_checks_on_a_cluster(remote: Remote) -> None:
     assert len(checks) == 4, checks[0].message
     _github, accounts, project, results = checks
     assert accounts.status is not Status.SKIP, accounts.message
+    if accounts.message.startswith("you have no Slurm account"):
+        # Without access to the cluster, the folder of the user in $SCRATCH may not exist.
+        pytest.skip(accounts.message)
     assert project.status is Status.OK, project.message
     assert results.status is Status.OK, results.message

@@ -688,7 +688,8 @@ async def check_github(remote: Remote) -> Check:
 
 async def check_accounts(remote: Remote, cluster_config: ClusterConfig) -> Check:
     """Checks the Slurm accounts of the cluster in the config (`sbatch_args`) against the accounts
-    of the user on the cluster.
+    of the user on the cluster. Without any account on the cluster, Slurm refuses the jobs of the
+    user.
 
     When the config doesn't have all the accounts of the user, the check suggests a `sbatch_args`
     line with all of them: with many accounts, `cluv submit` submits a job with each account, and
@@ -708,8 +709,21 @@ async def check_accounts(remote: Remote, cluster_config: ClusterConfig) -> Check
         for line in result.stdout.splitlines()
         if re.fullmatch(r"[\w.-]+", line.strip())
     }
-    if result.returncode != 0 or not associations:
+    if result.returncode != 0:
         return Check(Status.SKIP, f"couldn't list your Slurm accounts on {cluster}")
+    if not associations:
+        hints: list[str] = []
+        if cluster_config.cluster_link:
+            hints.append(f"to get access, see {cluster_config.cluster_link}")
+        hints.append(
+            f"to stop using {cluster}, remove [tool.cluv.clusters.{cluster}] from pyproject.toml, "
+            f"or run `cluv disable {cluster}`"
+        )
+        return Check(
+            Status.FAIL,
+            f"you have no Slurm account on {cluster}: jobs can't run there",
+            tuple(hints),
+        )
 
     def account_name(association: str) -> str:
         # On the DRAC clusters, an account like `def-pi` has an association for the CPU jobs

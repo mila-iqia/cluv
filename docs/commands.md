@@ -104,8 +104,9 @@ cluster: ✔ for what works, ! for a warning and ✘ for a problem, with how to 
 - The cluster has
   [SSH access to GitHub](troubleshooting.md#setting-up-ssh-access-to-github-from-the-clusters), to
   clone your project.
-- The Slurm accounts of the config are yours. When you have other accounts on the cluster,
-  `cluv init` suggests a `sbatch_args` line with all your accounts.
+- You have a Slurm account on the cluster (without one, Slurm refuses your jobs), and the accounts
+  of the config are yours. When you have other accounts on the cluster, `cluv init` suggests a
+  `sbatch_args` line with all your accounts.
 - The folders of the project, of the results and of the datasets (`project_dir`, `results_path`
   and `datasets_path`) exist on the cluster, or `cluv sync` can create them. The paths can't use
   variables that the cluster doesn't define. On the cluster of the `data_source`, the datasets to

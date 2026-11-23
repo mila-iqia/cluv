@@ -1,5 +1,6 @@
 """Unit tests for cluv/cli/init.py check functions."""
 
+import asyncio
 import dataclasses
 import importlib
 import os
@@ -1118,26 +1119,31 @@ NO_GITHUB_ACCESS = (255, "", "git@github.com: Permission denied (publickey).\n")
 # The Slurm associations of a user on a DRAC cluster, with an account for the CPU jobs and another
 # one for the GPU jobs.
 DRAC_ACCOUNTS = (0, "def-me_cpu\ndef-me_gpu\nrrg-me-ad_cpu\nrrg-me-ad_gpu\n", "")
+# A command that never ends, like a command that reads a file system that doesn't answer.
+NO_ANSWER = None
 
 
 class FakeRemote:
     """Stands in for a `Remote`: the result of a command is `results[word]`, for the first `word`
     that is in the command."""
 
-    def __init__(self, hostname: str, results: dict[str, tuple[int, str, str]]):
+    def __init__(self, hostname: str, results: dict[str, tuple[int, str, str] | None]):
         self.hostname = hostname
         self.results = results
 
     async def run(self, command: str, **kwargs) -> subprocess.CompletedProcess[str]:
-        for word, (returncode, stdout, stderr) in self.results.items():
+        for word, result in self.results.items():
             if word in command:
+                while result is None:  # NO_ANSWER: the command never ends.
+                    await asyncio.sleep(3600)
+                returncode, stdout, stderr = result
                 return subprocess.CompletedProcess(command, returncode, stdout, stderr)
         raise AssertionError(f"Unexpected command on {self.hostname}: {command}")
 
 
 def fake_clusters(
     monkeypatch: pytest.MonkeyPatch,
-    results: dict[str, dict[str, tuple[int, str, str]]],
+    results: dict[str, dict[str, tuple[int, str, str] | None]],
     connected: list[str],
 ) -> None:
     """Makes the commands on each cluster give the `results` of the cluster, with the clusters of
@@ -1503,6 +1509,58 @@ async def test_folders_of_each_cluster(
     assert checked == expected
 
 
+@pytest.mark.parametrize(
+    ("cluster", "expected_hints"),
+    [
+        (
+            "rorqual",
+            (
+                "rorqual may have a problem, such as a file system that doesn't answer: run "
+                "`cluv init` again later",
+                "see the status of the Alliance clusters: https://status.alliancecan.ca/",
+            ),
+        ),
+        (
+            "mila",
+            (
+                "mila may have a problem, such as a file system that doesn't answer: run "
+                "`cluv init` again later",
+            ),
+        ),
+    ],
+)
+async def test_no_answer_from_a_cluster(
+    cluster: str,
+    expected_hints: tuple[str, ...],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When a check doesn't end in time, like a check of a folder in $SCRATCH while $SCRATCH
+    doesn't answer, the checks on the cluster stop, and the cluster gets a warning. The Alliance
+    clusters have a status page."""
+    monkeypatch.setattr(CLUV_INIT_MODULE, "REMOTE_CHECKS_TIMEOUT", 0.1)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    results = {
+        "git@github.com": GITHUB_ACCESS,
+        "sacctmgr": DRAC_ACCOUNTS,
+        'path="$HOME': (0, "folder\t/home/me/my_project\t/home/me\n", ""),
+        'path="$SCRATCH': NO_ANSWER,
+    }
+    fake_clusters(monkeypatch, {cluster: results}, connected=[cluster])
+    config = make_cluv_config_with_clusters(**{cluster: {}})
+
+    checks = await check_on_cluster(config, cluster, tmp_path / "my_project")
+
+    assert checks == [
+        Check(
+            Status.WARN,
+            f"no answer from {cluster} after 0.1 s: GitHub access, Slurm accounts and folders not "
+            "checked",
+            expected_hints,
+        )
+    ]
+
+
 async def test_check_clusters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Each cluster has a frame with its checks. The clusters that cluv doesn't connect to (without
     an SSH entry, disabled, or the current cluster) have no checks on the cluster."""
@@ -1562,10 +1620,11 @@ async def test_checks_on_a_cluster(remote: Remote) -> None:
     go in $SCRATCH, which is defined on all the clusters."""
     config = make_cluv_config_with_clusters(**{remote.hostname: {}})
 
-    _github, accounts, project, results = await check_on_cluster(
-        config, remote.hostname, REPO_ROOT
-    )
+    checks = await check_on_cluster(config, remote.hostname, REPO_ROOT)
 
+    # A single check is the warning about a cluster that doesn't answer in time.
+    assert len(checks) == 4, checks[0].message
+    _github, accounts, project, results = checks
     assert accounts.status is not Status.SKIP, accounts.message
     assert project.status is Status.OK, project.message
     assert results.status is Status.OK, results.message

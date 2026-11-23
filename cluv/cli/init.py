@@ -43,6 +43,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 TROUBLESHOOTING_URL = "https://mila-iqia.github.io/cluv/troubleshooting/"
 # The checks that run on the clusters, for the messages about the clusters where they don't run.
 REMOTE_CHECKS = "GitHub access, Slurm accounts and folders"
+# How long the checks on a cluster can take, in seconds. A command that reads a file system of a
+# cluster can stay blocked for hours when that file system doesn't answer.
+REMOTE_CHECKS_TIMEOUT = 60
+# The status of the clusters of the Alliance, which are the clusters of the template except Mila.
+ALLIANCE_STATUS_URL = "https://status.alliancecan.ca/"
 # Checks a folder on a cluster, after replacing the variables of its path, like $SCRATCH. The
 # output is the state of the folder, its path, and the closest folder above it that exists. The
 # lines are joined with `; `, since the login shell of the user (which runs bash) might not accept
@@ -617,6 +622,8 @@ async def check_on_cluster(config: CluvConfig, cluster: str, project_root: Path)
     """The checks that run on the cluster, through the SSH connection to the cluster.
 
     Without a `project_dir`, the project goes in the same folder as on this machine, from $HOME.
+    When the checks don't end within `REMOTE_CHECKS_TIMEOUT` seconds, they stop, and the cluster
+    gets a warning instead.
     """
     remote = Remote(cluster)
     cluster_config = config.get_cluster_config(cluster)
@@ -636,7 +643,24 @@ async def check_on_cluster(config: CluvConfig, cluster: str, project_root: Path)
     elif config.data_source and cluster_config.datasets_path:
         datasets_path = cluster_config.datasets_path
         checks.append(check_folder(remote, "datasets folder", "datasets_path", datasets_path))
-    return list(await asyncio.gather(*checks))
+    try:
+        return list(await asyncio.wait_for(asyncio.gather(*checks), REMOTE_CHECKS_TIMEOUT))
+    except TimeoutError:
+        # The checks are cancelled, which stops their `ssh` commands.
+        hints = [
+            f"{cluster} may have a problem, such as a file system that doesn't answer: run "
+            "`cluv init` again later"
+        ]
+        if cluster != MILA_CLUSTER and cluster in _cluster_names(_load_cluv_config_template()):
+            hints.append(f"see the status of the Alliance clusters: {ALLIANCE_STATUS_URL}")
+        return [
+            Check(
+                Status.WARN,
+                f"no answer from {cluster} after {REMOTE_CHECKS_TIMEOUT} s: {REMOTE_CHECKS} not "
+                "checked",
+                tuple(hints),
+            )
+        ]
 
 
 async def check_github(remote: Remote) -> Check:

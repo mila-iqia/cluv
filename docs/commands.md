@@ -114,7 +114,9 @@ cluster: ✔ for what works, ! for a warning and ✘ for a problem, with how to 
 The last four checks run on the cluster. If some clusters aren't connected yet, `cluv init` asks
 whether to connect to them now, with a 2FA prompt for each cluster, like
 [`cluv login`](#cluv-login). With `--quiet`, or when the input isn't a terminal, it only checks the
-clusters that are already connected.
+clusters that are already connected. A cluster has 60 seconds to answer these checks. When a
+cluster doesn't answer in time, for example because one of its file systems is down, `cluv init`
+stops its checks and shows a warning.
 
 It also suggests the SSH options that keep idle connections open (`ServerAliveInterval`). Run
 `cluv init` again at any time to check your setup: it only adds what is missing.

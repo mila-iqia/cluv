@@ -58,6 +58,7 @@ uv add git+https://github.com/mila-iqia/cluv
 ## Configuration
 
 Add a `[tool.cluv]` section to the `pyproject.toml` of your project to manage the behavior of the tool.
-The command `cluv init` will add a default config if it doesn't already exists in the `.toml`.
+The command `cluv init` asks a few questions and writes this section from the answers, unless the
+`.toml` already has a `[tool.cluv]` section.
 
 See the config at the project root for an example, or refer to the [docs](https://mila-iqia.github.io/cluv/).

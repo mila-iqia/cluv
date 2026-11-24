@@ -7,6 +7,8 @@ cluster must not copy the data to this machine and back.
 from __future__ import annotations
 
 import importlib
+import os
+import time
 from pathlib import Path
 from unittest import mock
 
@@ -85,3 +87,62 @@ async def test_push_datasets_to_a_cluster_without_datasets_path(
         await sync_module._push_datasets_to_remote(
             tmp_path, Remote(hostname="narval"), config, ProjectStateOnCluster()
         )
+
+
+@pytest.fixture
+def pushed_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A local `data_source` with one subdirectory, already pushed once to narval.
+
+    Returns the source path, the cached project state and the rsync mock. `mkdir` and `rsync`
+    are mocked, so nothing reaches narval.
+    """
+    source = tmp_path / "data"
+    (source / "train").mkdir(parents=True)
+    (source / "train" / "a.txt").write_text("a")
+    # Everything in the source was last edited a minute before the first push.
+    before_push = time.time() - 60
+    for path in (source / "train" / "a.txt", source / "train", source):
+        os.utime(path, (before_push, before_push))
+
+    monkeypatch.setattr(Remote, "run", mock.AsyncMock())
+    monkeypatch.setattr(sync_module, "run", mock_rsync := mock.AsyncMock())
+    config = CluvConfig(
+        results_path="/results",
+        datasets_path="/scratch/datasets/data",
+        clusters={"narval": PartialClusterConfig()},
+    )
+    state = ProjectStateOnCluster()
+
+    async def push() -> None:
+        await sync_module._push_datasets_to_remote(
+            source, Remote(hostname="narval"), config, state
+        )
+
+    return source, push, mock_rsync
+
+
+async def test_push_datasets_is_skipped_when_nothing_changed(pushed_source):
+    source, push, mock_rsync = pushed_source
+    await push()
+    await push()
+    assert mock_rsync.await_count == 1
+
+
+async def test_push_datasets_again_after_a_file_is_added_in_a_subdirectory(pushed_source):
+    """A file added inside an existing subdirectory is pushed, not skipped (#260).
+
+    Adding it changes the mtime of the subdirectory, not of the top directory of the source.
+    """
+    source, push, mock_rsync = pushed_source
+    await push()
+
+    after_push = time.time() + 60
+    new_file = source / "train" / "b.txt"
+    new_file.write_text("b")
+    os.utime(new_file, (after_push, after_push))
+    os.utime(source / "train", (after_push, after_push))
+    # The top directory is untouched, exactly as on a real filesystem.
+    assert source.stat().st_mtime < time.time()
+
+    await push()
+    assert mock_rsync.await_count == 2

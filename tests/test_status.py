@@ -81,7 +81,7 @@ async def test_get_cluster_status_times_out_on_unresponsive_cluster(
     monkeypatch.setattr(
         status_module, "get_remote_without_2fa_prompt", mock.AsyncMock(return_value=remote)
     )
-    monkeypatch.setattr(status_module, "CLUSTER_TIMEOUT_SECONDS", 0.1, raising=False)
+    monkeypatch.setattr(status_module, "CLUSTER_TIMEOUT_SECONDS", 0.1)
 
     with caplog.at_level("WARNING"):
         # The outer `wait_for` only keeps this test from hanging when the timeout is missing.
@@ -102,7 +102,7 @@ async def test_fetch_live_job_info_times_out_on_unresponsive_cluster(
         status_module, "get_remote_without_2fa_prompt", mock.AsyncMock(return_value=mock.Mock())
     )
     monkeypatch.setattr(status_module, "run_sacct", _never_returns)
-    monkeypatch.setattr(status_module, "CLUSTER_TIMEOUT_SECONDS", 0.1, raising=False)
+    monkeypatch.setattr(status_module, "CLUSTER_TIMEOUT_SECONDS", 0.1)
 
     with caplog.at_level("WARNING"):
         result = await asyncio.wait_for(
@@ -111,3 +111,32 @@ async def test_fetch_live_job_info_times_out_on_unresponsive_cluster(
 
     assert result == {}
     assert any("Connection to rorqual timeout" in message for message in caplog.messages)
+
+
+@pytest.mark.timeout(30)
+async def test_one_unresponsive_cluster_does_not_hold_back_the_others(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The clusters that do answer are still reported when another one hangs (#297)."""
+    hanging = mock.Mock()
+    hanging.get_output = _never_returns
+    answering = mock.Mock()
+    answering.get_output = mock.AsyncMock(return_value=status_module._SEP.join([""] * 5))
+    remotes = {"rorqual": hanging, "narval": answering}
+
+    async def fake_get_remote(cluster: str):
+        return remotes[cluster]
+
+    monkeypatch.setattr(status_module, "get_remote_without_2fa_prompt", fake_get_remote)
+    monkeypatch.setattr(status_module, "CLUSTER_TIMEOUT_SECONDS", 0.1)
+
+    rorqual, narval = await asyncio.wait_for(
+        asyncio.gather(
+            status_module.get_cluster_status("rorqual", disabled_clusters={}),
+            status_module.get_cluster_status("narval", disabled_clusters={}),
+        ),
+        timeout=5,
+    )
+
+    assert not rorqual.online
+    assert narval.online

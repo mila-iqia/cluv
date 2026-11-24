@@ -116,13 +116,43 @@ disk-quota 2>/dev/null; echo {_SEP}
 
 _MILA_CLUSTERS = {"mila"}
 
+# How long `cluv status` waits for one cluster before giving up on it. A cluster in
+# maintenance can accept the SSH connection and then never answer, and without a limit
+# that one cluster holds back the tables for all the others (#297).
+CLUSTER_TIMEOUT_SECONDS = 30.0
+
 
 async def fetch_live_job_info(
     cluster: str,
     job_ids: list[int],
     disabled_clusters: dict[str, DisabledCluster],
 ) -> dict[int, LiveJobInfo]:
-    """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
+    """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs.
+
+    Gives up after `CLUSTER_TIMEOUT_SECONDS` and returns no jobs for that cluster, so one
+    cluster that never answers does not hold back the jobs of the others.
+    """
+    try:
+        return await asyncio.wait_for(
+            _fetch_live_job_info(cluster, job_ids, disabled_clusters),
+            timeout=CLUSTER_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        _warn_timeout(cluster)
+        return {}
+
+
+def _warn_timeout(cluster: str) -> None:
+    logger.warning(
+        f"[red]Connection to {cluster} timeout after {CLUSTER_TIMEOUT_SECONDS:g} seconds[/red]"
+    )
+
+
+async def _fetch_live_job_info(
+    cluster: str,
+    job_ids: list[int],
+    disabled_clusters: dict[str, DisabledCluster],
+) -> dict[int, LiveJobInfo]:
     start_time = datetime.now()
 
     if cluster in disabled_clusters:
@@ -208,7 +238,25 @@ async def get_cluster_status(
 
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
+
+    Gives up after `CLUSTER_TIMEOUT_SECONDS` and returns the same empty status as a
+    cluster that could not be reached. The limit covers the connection check too, not
+    only the remote command, because either can hang.
     """
+    try:
+        return await asyncio.wait_for(
+            _get_cluster_status(cluster, disabled_clusters),
+            timeout=CLUSTER_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        _warn_timeout(cluster)
+        return get_default_cluster_status(cluster)
+
+
+async def _get_cluster_status(
+    cluster: str,
+    disabled_clusters: dict[str, DisabledCluster],
+) -> ClusterStatus:
     start_time = datetime.now()
 
     if cluster in disabled_clusters:

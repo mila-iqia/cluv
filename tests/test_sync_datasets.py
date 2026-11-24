@@ -146,3 +146,74 @@ async def test_push_datasets_again_after_a_file_is_added_in_a_subdirectory(pushe
 
     await push()
     assert mock_rsync.await_count == 2
+
+
+async def test_push_datasets_again_after_a_symlink_to_an_old_file_is_added(
+    pushed_source, tmp_path: Path
+):
+    """A new symlink is a change even when the file it points to is old (#260)."""
+    source, push, mock_rsync = pushed_source
+    old_file = tmp_path / "elsewhere.txt"
+    old_file.write_text("old")
+    long_ago = time.time() - 3600
+    os.utime(old_file, (long_ago, long_ago))
+    await push()
+
+    after_push = time.time() + 60
+    link = source / "train" / "link.txt"
+    link.symlink_to(old_file)
+    os.utime(link, (after_push, after_push), follow_symlinks=False)
+
+    await push()
+    assert mock_rsync.await_count == 2
+
+
+async def test_push_datasets_ignores_changes_in_folders_that_rsync_excludes(pushed_source):
+    """A change inside `.git` is not pushed by rsync, so it must not trigger a push."""
+    source, push, mock_rsync = pushed_source
+    before_push = time.time() - 60
+    (source / ".git").mkdir()
+    os.utime(source / ".git", (before_push, before_push))
+    os.utime(source, (before_push, before_push))
+    await push()
+
+    after_push = time.time() + 60
+    git_file = source / ".git" / "index"
+    git_file.write_text("x")
+    os.utime(git_file, (after_push, after_push))
+    os.utime(source / ".git", (after_push, after_push))
+    os.utime(source, (before_push, before_push))
+
+    await push()
+    assert mock_rsync.await_count == 1
+
+
+async def test_push_datasets_again_after_a_change_inside_a_linked_directory(
+    pushed_source, tmp_path: Path
+):
+    """rsync copies the contents of a linked directory, so a change there is a change (#260).
+
+    The link also points back at its own parent, to check that the walk does not loop.
+    """
+    source, push, mock_rsync = pushed_source
+    before_push = time.time() - 60
+    linked = tmp_path / "elsewhere"
+    (linked / "deep").mkdir(parents=True)
+    (source / "linked").symlink_to(linked, target_is_directory=True)
+    (linked / "back").symlink_to(source, target_is_directory=True)
+    for path in (linked / "deep", linked, source):
+        os.utime(path, (before_push, before_push))
+    for link in (source / "linked", linked / "back"):
+        os.utime(link, (before_push, before_push), follow_symlinks=False)
+    await push()
+    await push()
+    assert mock_rsync.await_count == 1
+
+    after_push = time.time() + 60
+    new_file = linked / "deep" / "c.txt"
+    new_file.write_text("c")
+    os.utime(new_file, (after_push, after_push))
+    os.utime(linked / "deep", (after_push, after_push))
+
+    await push()
+    assert mock_rsync.await_count == 2

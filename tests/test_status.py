@@ -83,7 +83,9 @@ async def test_get_cluster_status_times_out_on_unresponsive_cluster(
     )
     monkeypatch.setattr(status_module, "CLUSTER_TIMEOUT_SECONDS", 0.1)
 
-    with caplog.at_level("WARNING"):
+    # Set the level on the `cluv` logger itself: a test that ran `main()` with `--quiet` in
+    # the same worker leaves it at CRITICAL, which would drop the warning before caplog sees it.
+    with caplog.at_level("WARNING", logger="cluv"):
         # The outer `wait_for` only keeps this test from hanging when the timeout is missing.
         result = await asyncio.wait_for(
             status_module.get_cluster_status("rorqual", disabled_clusters={}), timeout=5
@@ -104,7 +106,9 @@ async def test_fetch_live_job_info_times_out_on_unresponsive_cluster(
     monkeypatch.setattr(status_module, "run_sacct", _never_returns)
     monkeypatch.setattr(status_module, "CLUSTER_TIMEOUT_SECONDS", 0.1)
 
-    with caplog.at_level("WARNING"):
+    # Set the level on the `cluv` logger itself: a test that ran `main()` with `--quiet` in
+    # the same worker leaves it at CRITICAL, which would drop the warning before caplog sees it.
+    with caplog.at_level("WARNING", logger="cluv"):
         result = await asyncio.wait_for(
             status_module.fetch_live_job_info("rorqual", [123], disabled_clusters={}), timeout=5
         )

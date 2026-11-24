@@ -776,72 +776,33 @@ class TestJobScriptCheck:
         job_script_path.parent.mkdir(exist_ok=True)
         job_script_path.write_text("#!/bin/bash\necho 'Hello world!'")
 
-        check_job_script(tmp_path, DEFAULT_RESULTS_PATH)
+        check_job_script(tmp_path)
 
         assert job_script_path.exists()
         assert job_script_path.read_text() == "#!/bin/bash\necho 'Hello world!'"
 
-    def test_create_missing_job_scripts_from_templates(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        fake_home = tmp_path / "home"
-        project_root = fake_home / "my_project"
-        project_root.mkdir(parents=True)
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
+    def test_create_missing_job_scripts_from_templates(self, tmp_path: Path) -> None:
+        check_job_script(tmp_path)
 
-        check_job_script(project_root, "outputs")
+        templates = sorted((REPO_ROOT / "scripts").glob("*.sh"))
+        assert [path.name for path in templates] == [
+            path.name for path in sorted((tmp_path / "scripts").glob("*.sh"))
+        ]
+        for template in templates:
+            assert (tmp_path / "scripts" / template.name).read_text() == template.read_text()
 
-        job_script = project_root / "scripts" / "job.sh"
-        safe_job_script = project_root / "scripts" / "safe_job.sh"
+    def test_template_job_scripts_exist(self) -> None:
+        """Every `job_script_path` of the template config points to a script that cluv init adds."""
+        config = TEMPLATE_CONFIG
+        job_script_paths = {config.job_script_path} | {
+            cluster.job_script_path
+            for cluster in config.clusters.values()
+            if cluster.job_script_path
+        }
+        for job_script_path in job_script_paths:
+            assert (REPO_ROOT / job_script_path).is_file(), job_script_path
 
-        assert job_script.exists()
-        assert safe_job_script.exists()
-        # assert "#SBATCH --output=outputs/%j/slurm-%j.out" in job_script.read_text()
-
-        safe_job_script_content = safe_job_script.read_text()
-        assert 'project_name="my_project"' in safe_job_script_content
-        assert 'project_root="$HOME/my_project"' in safe_job_script_content
-        assert 'results_path="outputs"' in safe_job_script_content
-        assert "results_dir" not in safe_job_script_content
-        assert "mkdir -p $project_root_in_tmpdir/$results_path" in safe_job_script_content
-        assert (
-            "rsync --update --recursive $project_root/$results_path/$SLURM_JOB_ID "
-            "$project_root_in_tmpdir/$results_path/"
-        ) in safe_job_script_content
-        assert (
-            "rsync --update --recursive $project_root_in_tmpdir/$results_path/$SLURM_JOB_ID "
-            "$project_root/$results_path/"
-        ) in safe_job_script_content
-
-    def test_replace_results_dir_from_legacy_template(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        fake_home = tmp_path / "home"
-        project_root = fake_home / "my_project"
-        project_root.mkdir(parents=True)
-        monkeypatch.setattr(Path, "home", lambda: fake_home)
-
-        templates_dir = tmp_path / "templates"
-        templates_dir.mkdir()
-        legacy_script = templates_dir / "legacy_job.sh"
-        legacy_script.write_text(
-            textwrap.dedent(
-                """\
-                #!/bin/bash
-                #SBATCH --output=logs/%j/slurm-%j.out
-                results_dir="logs"
-                echo "Using $results_dir"
-                """
-            )
-        )
-        monkeypatch.setattr(CLUV_INIT_MODULE, "_get_script_templates_path", lambda: templates_dir)
-
-        check_job_script(project_root, "outputs")
-
-        generated_legacy_script = project_root / "scripts" / "legacy_job.sh"
-        assert generated_legacy_script.exists()
-        generated_legacy_script_content = generated_legacy_script.read_text()
-        assert "#SBATCH --output=outputs/%j/slurm-%j.out" in generated_legacy_script_content
-        assert 'results_path="outputs"' in generated_legacy_script_content
-        assert "Using $results_path" in generated_legacy_script_content
-        assert "results_dir" not in generated_legacy_script_content
+    def test_job_scripts_run_the_shared_body(self) -> None:
+        """The `job*.sh` scripts only hold the resources of their clusters, then run `run.sh`."""
+        for job_script in (REPO_ROOT / "scripts").glob("job*.sh"):
+            assert 'exec bash scripts/run.sh "$@"' in job_script.read_text(), job_script.name

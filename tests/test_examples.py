@@ -1,7 +1,7 @@
 """Simplified 'integration' tests for the examples.
 
 For each example, runs `sbatch --test-only` against all of its supposedly supported clusters,
-with each of the supported job scripts (job.sh / safe_job.sh for example).
+with each of the supported job scripts (or the one the config sets for each cluster).
 
 This is somewhat quick to run, compared to actually running the jobs.
 """
@@ -70,7 +70,7 @@ async def skip_unless_connected(cluster: str) -> None:
             pytest.param(
                 REPO_ROOT,
                 cluster,
-                job_script,
+                None,  # The job script that `job_script_path` sets for that cluster.
                 None,
                 marks=[
                     pytest.mark.xdist_group(cluster),
@@ -81,8 +81,9 @@ async def skip_unless_connected(cluster: str) -> None:
                     ),
                     pytest.mark.xfail(
                         cluster in ("trillium", "trillium-gpu"),
-                        reason="TODO: job output can't be in $HOME, and --mem is not allowed.",
-                        strict=True,
+                        # TODO: make it strict (or remove it) once checked on these clusters.
+                        reason="Job output can't be in $HOME. They now have their own job script without --mem.",
+                        strict=False,
                     ),
                     pytest.mark.xfail(
                         cluster in ("killarney",),
@@ -92,7 +93,6 @@ async def skip_unless_connected(cluster: str) -> None:
                 ],
             )
             for cluster in repo_root_clusters
-            for job_script in (REPO_ROOT / "scripts").iterdir()
         ],
         *[
             pytest.param(

@@ -110,7 +110,8 @@ async def test_submit(remote: Remote):
     job = await submit(
         cluster=remote.hostname,
         job_script=Path("scripts/job.sh"),
-        sbatch_args=["--time=00:00:30"],
+        # Enough time to clone the project and run `uv sync` (see scripts/run.sh).
+        sbatch_args=["--time=00:05:00"],
         program_args=["python", "--version"],
     )
     cluster = remote.hostname

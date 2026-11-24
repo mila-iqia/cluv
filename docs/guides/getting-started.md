@@ -187,16 +187,20 @@ one cluster to all the others. See [Syncing datasets](syncing-datasets.md).
 
 ## Adapt the job scripts
 
-`cluv init` creates two job scripts in `scripts/`. Both are plain `sbatch` scripts that run the
+`cluv init` creates job scripts in `scripts/`. They are plain `sbatch` scripts that run the
 command you pass after `--` with `uv run`:
 
 - **`job.sh`**: the default job script (set by `job_script_path`), used when you don't pass one to
-  `cluv submit`. Runs directly from the synced project folder. Good for short and simple jobs that
-  start quickly.
-- **`safe_job.sh`**: clones the exact commit you submitted into `$SLURM_TMPDIR` before running, so
-  a later `cluv sync` can't change the code under a job that is still queued.
+  `cluv submit`. Its resources work on the clusters that allocate cores and memory (Mila and most
+  DRAC/PAICE clusters).
+- **`job_<cluster>.sh`**: the job scripts of the clusters that allocate whole nodes or reject
+  `--mem` (TamIA, Trillium, Trillium GPU). The generated config sets them as `job_script_path` of
+  these clusters.
+- **`run.sh`**: the body shared by the job scripts. It clones the exact commit you submitted into
+  `$SLURM_TMPDIR` before running, so a later `cluv sync` can't change the code under a job that is
+  still queued.
 
-Keep these two as simple references. When your jobs need something more specific (more resources,
+Keep these as simple references. When your jobs need something more specific (more resources,
 modules, setup steps, ...), add a new job script rather than editing them. Make sure it forwards its
 arguments to your program with `"$@"`, then pass it to `cluv submit` or make it the default:
 

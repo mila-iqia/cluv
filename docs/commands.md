@@ -151,7 +151,7 @@ Optionally also pushes/pulls datasets, see the ["Syncing datasets across cluster
 
 **Usage**
 ```console
-cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
+cluv sync [clusters] [--sync-datasets | --no-sync-datasets] [--results-rsync-filter FILE]
 ```
 
 **Arguments**
@@ -165,6 +165,12 @@ cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
 `--sync-datasets`, `--no-sync-datasets`
 :   Push/pull datasets from `data_source` to each cluster as part of the sync.
     Requires `data_source` to be set in the config. Enabled by default.
+
+`--results-rsync-filter FILE`
+:   Read rsync include and exclude rules from a file on the machine running cluv.
+    The rules select files under each cluster's `results_path`. Empty directories
+    are skipped. A filtered fetch does not advance the watermark used by
+    [`cluv clean`](#cluv-clean). By default, cluv fetches all results.
 
 ---
 

@@ -180,6 +180,20 @@ All of these can be set globally or per cluster.
     logs, ...), make your program write them under `results_path` too, ideally in the same per-job
     folder.
 
+To fetch Slurm output without checkpoints or other run artifacts, save these rsync rules in
+`logs-only.rules`.
+
+```text
++ */
++ slurm-*.out
++ slurm-*.err
+- *
+```
+
+```console
+cluv sync mila --no-sync-datasets --results-rsync-filter logs-only.rules
+```
+
 ### Configure dataset syncing (optional)
 
 If your jobs need a dataset, `data_source` and `datasets_path` let `cluv sync` replicate it from

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import threading
 import time
 from pathlib import Path
 from unittest import mock
@@ -126,6 +127,53 @@ async def test_push_datasets_is_skipped_when_nothing_changed(pushed_source):
     await push()
     await push()
     assert mock_rsync.await_count == 1
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="needs a directory that the current user cannot read",
+)
+async def test_push_datasets_is_not_skipped_when_a_subdirectory_cannot_be_read(
+    pushed_source, caplog: pytest.LogCaptureFixture
+):
+    """An unreadable subdirectory could hide a change, so the push is not skipped."""
+    source, push, mock_rsync = pushed_source
+    await push()
+
+    locked = source / "locked"
+    locked.mkdir()
+    before_push = time.time() - 60
+    # Old mtimes everywhere: only the failed scan can explain a second push.
+    for path in (locked, source):
+        os.utime(path, (before_push, before_push))
+    locked.chmod(0o000)
+    try:
+        with caplog.at_level("WARNING", logger=sync_module.logger.name):
+            await push()
+    finally:
+        locked.chmod(0o700)
+
+    assert mock_rsync.await_count == 2
+    assert "Could not read all of" in caplog.text
+
+
+async def test_push_datasets_scans_the_source_outside_the_event_loop_thread(
+    pushed_source, monkeypatch: pytest.MonkeyPatch
+):
+    """The scan of a large source must not block the pushes to the other clusters."""
+    source, push, _ = pushed_source
+    scan_threads: list[threading.Thread] = []
+    real_scan = sync_module._latest_edit_time
+
+    def recording_scan(path: Path):
+        scan_threads.append(threading.current_thread())
+        return real_scan(path)
+
+    monkeypatch.setattr(sync_module, "_latest_edit_time", recording_scan)
+    await push()
+
+    assert len(scan_threads) == 1
+    assert scan_threads[0] is not threading.current_thread()
 
 
 async def test_push_datasets_again_after_a_file_is_added_in_a_subdirectory(pushed_source):

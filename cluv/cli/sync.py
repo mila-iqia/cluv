@@ -695,10 +695,17 @@ def _latest_edit_time(source: Path) -> datetime.datetime:
     what a link points to, including the contents of a linked directory. Each real directory
     is visited once, so a link that points back up the tree cannot loop. Folders that the
     dataset rsync excludes are not visited.
+
+    Raises `OSError` when part of the tree cannot be read. `os.walk` skips such a directory
+    silently by default, which would hide any change inside it.
     """
+
+    def _raise(error: OSError) -> None:
+        raise error
+
     latest = source.stat().st_mtime
     visited: set[str] = set()
-    for root, dirnames, filenames in os.walk(source, followlinks=True):
+    for root, dirnames, filenames in os.walk(source, followlinks=True, onerror=_raise):
         real_root = os.path.realpath(root)
         if real_root in visited:
             dirnames[:] = []
@@ -727,12 +734,25 @@ async def _push_datasets_to_remote(
             f"`cluv.datasets_path` must be set in the Cluv config section of pyproject.toml to "
             f"push datasets to {remote.hostname}."
         )
-    last_datasets_dir_edit_time = _latest_edit_time(local_source)
+    # The scan reads the whole tree, so it runs in a thread: the pushes to the other clusters
+    # share this event loop.
+    last_datasets_dir_edit_time: datetime.datetime | None
+    try:
+        last_datasets_dir_edit_time = await asyncio.to_thread(_latest_edit_time, local_source)
+    except OSError as error:
+        # An incomplete scan is no proof that nothing changed, so push instead of skipping.
+        logger.warning(
+            f"Could not read all of {local_source} to check for changes ({error}). "
+            f"Pushing datasets to {remote.hostname} without that check."
+        )
+        last_datasets_dir_edit_time = None
 
     # Skip if we pushed after the last edit to the local source path.
     if (
-        last_push_datasets_time := project_state.last_pushed_datasets
-    ) and last_push_datasets_time > last_datasets_dir_edit_time:
+        last_datasets_dir_edit_time is not None
+        and (last_push_datasets_time := project_state.last_pushed_datasets)
+        and last_push_datasets_time > last_datasets_dir_edit_time
+    ):
         logger.info(
             f"Datasets at {local_source} were already pushed to {remote.hostname} and have not "
             f"changed since. Skipping."

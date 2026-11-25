@@ -127,6 +127,9 @@ class CluvConfig(BaseModel):
     results_path: str
     """Default path to the results directory for all clusters (may contain env vars like $SCRATCH)."""
 
+    results_rsync_filter: str | None = None
+    """Local rsync rules file for fetching results. Relative paths start at the project root."""
+
     results_symlink: str = "logs"
     """Name of the symlink created in the project directory pointing to `results_path`."""
 

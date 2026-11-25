@@ -65,8 +65,9 @@ async def test_fetch_results_updates_watermark(tmp_path: Path, monkeypatch: pyte
 
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync is required")
+@pytest.mark.parametrize("use_override", [False, True])
 async def test_filtered_fetch_copies_logs_without_advancing_watermark(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, use_override: bool
 ):
     source = tmp_path / "remote"
     (source / "mixed" / "wandb").mkdir(parents=True)
@@ -75,7 +76,11 @@ async def test_filtered_fetch_copies_logs_without_advancing_watermark(
     (source / "mixed" / "checkpoint.pt").touch()
     (source / "checkpoint-only").mkdir()
     (source / "checkpoint-only" / "checkpoint.pt").touch()
-    rules = tmp_path / "logs only.rules"
+    (tmp_path / "pyproject.toml").touch()
+    subdirectory = tmp_path / "subdirectory"
+    subdirectory.mkdir()
+    monkeypatch.chdir(subdirectory)
+    rules = (subdirectory if use_override else tmp_path) / "logs only.rules"
     rules.write_text("+ */\n+ slurm-*.out\n+ *.wandb\n- *\n")
 
     async def run_with_local_source(args: tuple[str, ...], **kwargs):
@@ -94,10 +99,13 @@ async def test_filtered_fetch_copies_logs_without_advancing_watermark(
 
     new_runs = await fetch_results(
         Remote(hostname="foo"),
-        CluvConfig(results_path=str(results)),
+        CluvConfig(
+            results_path=str(results),
+            results_rsync_filter="missing.rules" if use_override else rules.name,
+        ),
         project_state,
         PurePosixPath("/remote"),
-        results_rsync_filter=rules,
+        results_rsync_filter=Path(rules.name) if use_override else None,
     )
 
     assert new_runs == [results / "mixed"]

@@ -194,6 +194,10 @@ To fetch Slurm output without checkpoints or other run artifacts, save these rsy
 cluv sync mila --no-sync-datasets --results-rsync-filter logs-only.rules
 ```
 
+To make this the default, add `results_rsync_filter = "logs-only.rules"` under
+`[tool.cluv]` in `pyproject.toml`. Pass `--results-rsync-filter FILE` to use a
+different rules file for a single sync.
+
 ### Configure dataset syncing (optional)
 
 If your jobs need a dataset, `data_source` and `datasets_path` let `cluv sync` replicate it from

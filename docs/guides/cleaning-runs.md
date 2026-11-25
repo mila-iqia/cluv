@@ -27,8 +27,8 @@ To tell those two cases apart, `cluv clean` only considers a remote folder
 deletable if **both** are true:
 
 1. There's no folder with that name in your local results folder.
-2. It's older than the last time `cluv sync` successfully pulled results from
-   that cluster.
+2. It's older than the last time Cluv successfully pulled the full results tree
+   from that cluster. A pull with a results filter leaves this cutoff unchanged.
 
 In practice: if you've synced recently, anything that showed up on the cluster
 *after* that sync is left alone (it hasn't been fetched yet — `clean` never

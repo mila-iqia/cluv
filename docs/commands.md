@@ -167,10 +167,15 @@ cluv sync [clusters] [--sync-datasets | --no-sync-datasets] [--results-rsync-fil
     Requires `data_source` to be set in the config. Enabled by default.
 
 `--results-rsync-filter FILE`
-:   Read rsync include and exclude rules from a file on the machine running cluv.
-    The rules select files under each cluster's `results_path`. Empty directories
-    are skipped. A filtered fetch does not advance the watermark used by
-    [`cluv clean`](#cluv-clean). By default, cluv fetches all results.
+:   Override `[tool.cluv].results_rsync_filter` for this invocation. Cluv uses the
+    local rsync rules file to fetch selected files under each cluster's
+    `results_path`. A filtered fetch skips empty directories and leaves the
+    [`cluv clean`](#cluv-clean) watermark at the last full fetch.
+
+In `pyproject.toml`, `results_rsync_filter` supports local environment variables
+and `~`. Relative paths start at the directory containing `pyproject.toml`.
+Relative paths passed with the flag start at the current directory. Cluv fetches
+all results by default.
 
 ---
 

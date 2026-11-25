@@ -60,15 +60,14 @@ async def sync(
         clusters: List of SSH hostnames of the target clusters. If empty, will attempt to sync
             with all clusters in the config that we have an active SSH connection to.
         sync_datasets: Whether to pull/push datasets from/to `data_source` as part of the sync.
-        results_rsync_filter: Local rsync rules file for the results transfer.
+        results_rsync_filter: Override the local rsync rules file for results transfers.
 
     Returns:
         A list of Remote objects corresponding to the clusters that were synced with.
     """
-    if results_rsync_filter is not None:
-        results_rsync_filter = results_rsync_filter.expanduser().resolve()
-        if not results_rsync_filter.is_file():
-            raise FileNotFoundError(f"Results rsync filter file not found: {results_rsync_filter}")
+    results_rsync_filter = _resolve_results_rsync_filter(
+        results_rsync_filter, get_cluv_config().results_rsync_filter
+    )
 
     disabled = get_disabled_clusters()
     print_disabled_clusters(disabled)
@@ -753,6 +752,22 @@ async def _push_datasets_to_remote(
     project_state.last_pushed_datasets = last_push_datetime
 
 
+def _resolve_results_rsync_filter(override: Path | None, configured: str | None) -> Path | None:
+    if override is not None:
+        path = override.expanduser()
+    elif configured is not None:
+        path = Path(os.path.expandvars(configured)).expanduser()
+        if not path.is_absolute():
+            path = find_pyproject().parent / path
+    else:
+        return None
+
+    path = path.resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"Results rsync filter file not found: {path}")
+    return path
+
+
 async def fetch_results(
     remote: Remote,
     config: CluvConfig,
@@ -770,6 +785,7 @@ async def fetch_results(
     the rsync ran). Unfiltered transfers also update `project_state.last_fetch_watermark`
     (see `cluv clean`).
     """
+    filter_path = _resolve_results_rsync_filter(results_rsync_filter, config.results_rsync_filter)
     results_path_here = Path(os.path.expandvars(config.results_path))
     results_path_here.mkdir(parents=True, exist_ok=True)
 
@@ -780,11 +796,7 @@ async def fetch_results(
         else set()
     )
 
-    filter_args = (
-        ("--prune-empty-dirs", "--filter", f"merge {results_rsync_filter}")
-        if results_rsync_filter is not None
-        else ()
-    )
+    filter_args = ("--prune-empty-dirs", "--filter", f"merge {filter_path}") if filter_path else ()
     await run(
         (
             "rsync",
@@ -797,12 +809,12 @@ async def fetch_results(
             f"{remote.hostname}:{results_path_on_cluster}/",
             f"{results_path_here}/",
         ),
-        warn=results_rsync_filter is None,
+        warn=filter_path is None,
         hide=False,
     )
 
     # A filtered fetch can omit entire runs or files within a run.
-    if results_rsync_filter is None:
+    if filter_path is None:
         remote_runs = await list_remote_run_dirs(remote, results_path_on_cluster)
         if remote_runs:
             project_state.last_fetch_watermark = max(mtime for _, mtime in remote_runs)

@@ -51,7 +51,9 @@ async def test_save_does_not_clobber_a_concurrently_written_cluster(
 
     bar_watermark = datetime(2026, 6, 1, tzinfo=timezone.utc)
 
-    async def fake_fetch_results(remote, config, project_state, results_path_on_cluster):
+    async def fake_fetch_results(
+        remote, config, project_state, results_path_on_cluster, *, results_rsync_filter=None
+    ):
         # Simulate a sibling cluster's sync_per_cluster_part completing and writing its own
         # state to disk while our own task is still in progress.
         cache = read_cache()

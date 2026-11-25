@@ -321,6 +321,12 @@ def add_sync_args(subparsers: Subparsers):
         default=True,
         help="Push datasets from data_source to each cluster. Requires data_source in config.",
     )
+    sync_parser.add_argument(
+        "--results-rsync-filter",
+        type=Path,
+        metavar="FILE",
+        help="Override the local rsync rules file for fetching results.",
+    )
     # TODO: Try to add a 'remainder' arg to pass extra args to `uv sync` on the remote cluster, but it seems to be a bit tricky.
     # sync_parser.add_argument(
     #     "--",

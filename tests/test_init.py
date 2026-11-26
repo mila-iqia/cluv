@@ -919,8 +919,8 @@ class TestCheckJobScriptPaths:
             check_job_script_paths(tmp_path, config)
 
         assert " ".join(capture.get().split()) == (
-            "✅ Job script of the config found: scripts/job.sh "
-            "❌ Job script of the config not found: scripts/rorqual_job.sh. "
+            "✔ Job script of the config found: scripts/job.sh "
+            "✘ Job script of the config not found: scripts/rorqual_job.sh. "
             "Fix `job_script_path` in pyproject.toml."
         )
 

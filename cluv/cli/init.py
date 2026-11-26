@@ -123,15 +123,20 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
     console.print()
 
 
+def print_check(status: Status, message: str) -> None:
+    """Prints the result of a check, in the color of its status, after its icon."""
+    console.print(f"{status.icon.plain} {message}", style=status.color)
+
+
 def check_home_dir() -> None:
     """
     Check if the current directory is under the home directory. If not, raise an error.
     """
     if Path.cwd().is_relative_to(Path.home()):
-        console.print("✅ Current directory is under home directory.", style="green")
+        print_check(Status.OK, "Current directory is under home directory.")
     else:
-        console.print(
-            "❌ cluv init should be run in a directory under your home directory.", style="red"
+        print_check(
+            Status.FAIL, "cluv init should be run in a directory under your home directory."
         )
         raise RuntimeError("cluv init should be run in a directory under your home directory.")
 
@@ -139,9 +144,9 @@ def check_home_dir() -> None:
 def run_uv_init() -> None:
     """Run `uv init`, unless a pyproject.toml file already exists in the current directory."""
     if (Path.cwd() / "pyproject.toml").exists():
-        console.print(
-            "✅ uv: a project already exists (see pyproject.toml file). Skipping initialization.",
-            style="green",
+        print_check(
+            Status.OK,
+            "uv: a project already exists (see pyproject.toml file). Skipping initialization.",
         )
         return
 
@@ -151,7 +156,7 @@ def run_uv_init() -> None:
     uv_init = subprocess.run(command, capture_output=True, text=True)
     if uv_init.returncode != 0:
         raise RuntimeError("Error occurred while initializing uv project: ", uv_init.stderr)
-    console.print("✅ uv: project initialized.", style="green")
+    print_check(Status.OK, "uv: project initialized.")
 
 
 def check_cluv_config(pyproject_path: Path, ask: bool = False) -> None:
@@ -161,7 +166,7 @@ def check_cluv_config(pyproject_path: Path, ask: bool = False) -> None:
     When `ask` is False, the default answers are used.
     """
     if has_cluv_config(pyproject_path):
-        console.print("✅ Project already have a cluv config in pyproject.toml.", style="green")
+        print_check(Status.OK, "Project already have a cluv config in pyproject.toml.")
         return
 
     console.print(
@@ -385,17 +390,15 @@ def check_git() -> None:
     git_remote = subprocess.run(["git", "remote"], capture_output=True, text=True)
     if git_remote.returncode == 0:
         if git_remote.stdout.strip() == "":
-            console.print(
-                "⚠️  Warning: No git remote found. You won't be able to use some features "
+            print_check(
+                Status.WARN,
+                "Warning: No git remote found. You won't be able to use some features "
                 "(like syncing or submitting jobs). Consider adding a remote repository to your git config.",
-                style="yellow",
             )
         else:
-            console.print(
-                f"✅ Git remote repository found: {git_remote.stdout.strip()}", style="green"
-            )
+            print_check(Status.OK, f"Git remote repository found: {git_remote.stdout.strip()}")
     else:
-        console.print("❌ Invalid git repository found.", style="red")
+        print_check(Status.FAIL, "Invalid git repository found.")
         raise RuntimeError("Error when checking git remote: ", git_remote.stderr)
 
 
@@ -407,9 +410,7 @@ def check_symlink_to_scratch(project_path: Path, results_path: str, results_syml
     The symlink should be : <project_path>/<results_symlink> -> <results_path>
     """
     if "SCRATCH" not in os.environ:
-        console.print(
-            "⚠️  Warning: $SCRATCH variable not set. Skipping symlink creation.", style="yellow"
-        )
+        print_check(Status.WARN, "Warning: $SCRATCH variable not set. Skipping symlink creation.")
         return
 
     # Generate the expected scratch and symlink path
@@ -418,21 +419,17 @@ def check_symlink_to_scratch(project_path: Path, results_path: str, results_syml
 
     if symlink_path.is_symlink():
         if symlink_path.resolve() == scratch_path.resolve():
-            console.print(
-                "✅ Symlink from $HOME results_path to $SCRATCH already exists.", style="green"
-            )
+            print_check(Status.OK, "Symlink from $HOME results_path to $SCRATCH already exists.")
             return
         else:
-            console.print(
-                f"⚠️  Warning: Symlink from {symlink_path} points to an other path "
+            print_check(
+                Status.WARN,
+                f"Warning: Symlink from {symlink_path} points to an other path "
                 f"({symlink_path.resolve()}) than the expected scratch path.",
-                style="yellow",
             )
             return
     elif symlink_path.exists():
-        console.print(
-            f"⚠️  Warning: {symlink_path} already exists and is not a symlink.", style="yellow"
-        )
+        print_check(Status.WARN, f"Warning: {symlink_path} already exists and is not a symlink.")
         return
     else:
         console.print(f"Creating symlink from {symlink_path} to {scratch_path}")
@@ -451,16 +448,14 @@ def check_job_script(project_root: Path, results_path: str) -> None:
     script_templates = sorted(script_templates_path.glob("*.sh"))
 
     if not script_templates:
-        console.print("⚠️  Warning: No script templates found.", style="yellow")
+        print_check(Status.WARN, "Warning: No script templates found.")
         return
 
     scripts_dir.mkdir(parents=True, exist_ok=True)
     for script_template in script_templates:
         script_path = scripts_dir / script_template.name
         if script_path.exists():
-            console.print(
-                f"✅ Job template script already exists at '{script_path}'.", style="green"
-            )
+            print_check(Status.OK, f"Job template script already exists at '{script_path}'.")
             continue
         script_content = script_template.read_text()
         script_content = re.sub(
@@ -501,12 +496,12 @@ def check_job_script_paths(project_root: Path, config: CluvConfig) -> None:
     }
     for job_script_path in sorted(path for path in job_script_paths if path is not None):
         if (project_root / os.path.expandvars(job_script_path)).is_file():
-            console.print(f"✅ Job script of the config found: {job_script_path}", style="green")
+            print_check(Status.OK, f"Job script of the config found: {job_script_path}")
         else:
-            console.print(
-                f"❌ Job script of the config not found: {job_script_path}. Fix "
+            print_check(
+                Status.FAIL,
+                f"Job script of the config not found: {job_script_path}. Fix "
                 "`job_script_path` in pyproject.toml.",
-                style="red",
             )
 
 

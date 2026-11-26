@@ -19,6 +19,7 @@ from cluv.cli.init_utils.cluster_checks import (
     check_clusters,
     check_folder,
     check_github,
+    check_multiplexing,
     check_on_cluster,
     check_ssh_entry,
     cluster_panel,
@@ -74,6 +75,52 @@ class TestCheckCluster:
         assert check.hints == (
             "if you have access to my_cluster, add a `Host my_cluster` entry for it",
         )
+
+    @pytest.mark.parametrize(
+        ("cluster", "hint"),
+        [
+            (
+                "tamia",
+                "run `mila init`, or add these lines to the `Host` entry of tamia in "
+                "~/.ssh/config:",
+            ),
+            ("my_cluster", "add these lines to the `Host` entry of my_cluster in ~/.ssh/config:"),
+        ],
+    )
+    def test_ssh_entry_without_multiplexing(
+        self, cluster: str, hint: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without `ControlMaster`, `ControlPath` and `ControlPersist`, cluv commands can open new
+        SSH connections, which can ask for a 2FA. `mila init` adds these options to the entries of
+        the clusters of the template."""
+        fake_ssh_config(monkeypatch, [cluster], without_multiplexing=(cluster,))
+        config = make_cluv_config_with_clusters(**{cluster: {}})
+
+        checks = check_cluster(config, cluster, disabled={})
+
+        assert checks == [
+            Check(Status.OK, "SSH entry in ~/.ssh/config"),
+            Check(
+                Status.WARN,
+                "SSH entry without ControlMaster, ControlPath and ControlPersist: cluv commands "
+                "can ask for a 2FA again",
+                (hint,),
+                "ControlMaster auto\nControlPath ~/.ssh/cm-%r@%h:%p\nControlPersist yes",
+            ),
+        ]
+
+    def test_only_the_missing_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The warning only gives the options that the SSH entry doesn't have."""
+        options = {"controlmaster": "auto", "controlpath": "/tmp/%h", "controlpersist": "no"}
+        monkeypatch.setattr(cluster_checks, "get_ssh_options_for_host", lambda host: options)
+
+        check = check_multiplexing("rorqual")
+
+        assert check is not None
+        assert check.message == (
+            "SSH entry without ControlPersist: cluv commands can ask for a 2FA again"
+        )
+        assert check.code == "ControlPersist yes"
 
     @pytest.mark.parametrize(
         ("disabled_until", "period"),

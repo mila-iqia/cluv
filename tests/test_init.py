@@ -61,19 +61,32 @@ TEMPLATE_CONFIG = parse_config(TEMPLATE)
 
 
 def fake_ssh_config(
-    monkeypatch: pytest.MonkeyPatch, entries: list[str], keep_alive: tuple[str, ...] = ()
+    monkeypatch: pytest.MonkeyPatch,
+    entries: list[str],
+    keep_alive: tuple[str, ...] = (),
+    without_multiplexing: tuple[str, ...] = (),
 ) -> None:
     """Makes `ssh -G <host>` give the options of an SSH config with an entry for each host of
-    `entries`, and `ServerAliveInterval` for the hosts of `keep_alive`.
+    `entries`, and `ServerAliveInterval` for the hosts of `keep_alive`. The entries have
+    `ControlMaster`, `ControlPath` and `ControlPersist`, except the entries of the hosts of
+    `without_multiplexing`.
 
     Without an entry for a host, the host name that `ssh -G` gives is the name of the host.
     """
 
     def get_ssh_options_for_host(host: str) -> dict[str, str]:
-        return {
+        options = {
             "hostname": f"{host}.example.com" if host in entries else host,
             "serveraliveinterval": "120" if host in keep_alive else "0",
+            # What `ssh -G` gives when `ControlMaster` and `ControlPersist` aren't set.
+            "controlmaster": "false",
+            "controlpersist": "no",
         }
+        if host in entries and host not in without_multiplexing:
+            options.update(
+                controlmaster="auto", controlpath="~/.ssh/cm-%r@%h:%p", controlpersist="yes"
+            )
+        return options
 
     monkeypatch.setattr(cluster_checks, "get_ssh_options_for_host", get_ssh_options_for_host)
 

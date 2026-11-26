@@ -37,6 +37,13 @@ REMOTE_CHECKS = "GitHub access, Slurm accounts and folders"
 REMOTE_CHECKS_TIMEOUT = 60
 # The status of the clusters of the Alliance, which are the clusters of the template except Mila.
 ALLIANCE_STATUS_URL = "https://status.alliancecan.ca/"
+# The SSH options that make the SSH commands to a cluster share one connection, so that the 2FA of
+# `cluv login` is the only one. The values are those of the troubleshooting page.
+MULTIPLEXING_OPTIONS = {
+    "ControlMaster": "auto",
+    "ControlPath": "~/.ssh/cm-%r@%h:%p",
+    "ControlPersist": "yes",
+}
 # Checks a folder on a cluster, after replacing the variables of its path, like $SCRATCH. The
 # output is the state of the folder, its path, and the closest folder above it that exists. The
 # lines are joined with `; `, since the login shell of the user (which runs bash) might not accept
@@ -86,7 +93,7 @@ SUMMARY_LABELS = {
 class Check:
     """The result of a check on a cluster.
 
-    The hints say how to fix a problem, and `code` is a line to copy into a config file.
+    The hints say how to fix a problem, and `code` has the lines to copy into a config file.
     """
 
     status: Status
@@ -139,12 +146,14 @@ async def check_clusters(
 def check_cluster(
     config: CluvConfig, cluster: str, disabled: dict[str, DisabledCluster]
 ) -> list[Check]:
-    """Checks the SSH entry of the cluster, and whether the cluster is disabled."""
+    """Checks the SSH entry of the cluster and its options, and whether the cluster is disabled."""
     if cluster == current_cluster():
         # cluv runs the commands of the current cluster without SSH.
         checks = [Check(Status.OK, "current cluster: no SSH connection needed")]
     else:
         checks = [check_ssh_entry(cluster, config.get_cluster_config(cluster).cluster_link)]
+        if has_ssh_entry(cluster) and (multiplexing := check_multiplexing(cluster)) is not None:
+            checks.append(multiplexing)
     if (disabled_cluster := disabled.get(cluster)) is not None:
         checks.append(check_disabled(cluster, disabled_cluster))
     return checks
@@ -163,6 +172,37 @@ def check_ssh_entry(cluster: str, cluster_link: str | None) -> Check:
     if cluster_link:
         hints.append(f"otherwise, see how to get access: {cluster_link}")
     return Check(Status.FAIL, "no entry in ~/.ssh/config", tuple(hints))
+
+
+def check_multiplexing(cluster: str) -> Check | None:
+    """Warns when the SSH entry of the cluster doesn't make the SSH commands share one connection.
+
+    Without `ControlMaster` and `ControlPath`, the `rsync` commands of `cluv sync` open their own
+    connection. Without `ControlPersist`, a connection closes when the command that opened it ends,
+    like the command of `cluv login`. A new connection can ask for a 2FA.
+    """
+    options = get_ssh_options_for_host(cluster)
+    # `ssh -G` gives `controlmaster false` and `controlpersist no` when these options aren't set,
+    # and no `controlpath`.
+    missing = [
+        option
+        for option in MULTIPLEXING_OPTIONS
+        if options.get(option.lower(), "no") in ("no", "false", "none")
+    ]
+    if not missing:
+        return None
+    where = f"the `Host` entry of {cluster} in ~/.ssh/config"
+    # `mila init` adds these options to the entries of the clusters of the template.
+    if cluster in get_cluster_names(load_cluv_config_template()):
+        hint = f"run `mila init`, or add these lines to {where}:"
+    else:
+        hint = f"add these lines to {where}:"
+    return Check(
+        Status.WARN,
+        f"SSH entry without {join_names(missing)}: cluv commands can ask for a 2FA again",
+        (hint,),
+        "\n".join(f"{option} {MULTIPLEXING_OPTIONS[option]}" for option in missing),
+    )
 
 
 def check_disabled(cluster: str, disabled: DisabledCluster) -> Check:

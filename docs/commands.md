@@ -99,6 +99,10 @@ cluster: ✔ for what works, ! for a warning and ✘ for a problem, with how to 
 - The cluster has an entry in your `~/.ssh/config`. If not, run
   [`mila init`](troubleshooting.md#setting-up-ssh-access-to-all-clusters) to add it, or see the
   `cluster_link` of the cluster to get access to it.
+- The SSH entry of the cluster has `ControlMaster`, `ControlPath` and `ControlPersist`. With these
+  options, the cluv commands use the connection that [`cluv login`](#cluv-login) opens, so you only
+  go through 2FA once. If not, `cluv init` shows the lines to add. `mila init` also adds them, for
+  the Mila, DRAC and PAICE clusters.
 - The cluster isn't disabled with [`cluv disable`](#cluv-disable).
 - cluv can connect to the cluster.
 - The cluster has

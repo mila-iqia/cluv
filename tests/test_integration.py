@@ -7,7 +7,6 @@ efficient, since at some point there might be like 10 different clusters, and 10
 """
 
 import asyncio
-import importlib
 import os
 import re
 import stat
@@ -22,6 +21,7 @@ import pytest_asyncio
 import cluv.cli.submit_utils.vram
 from cluv.cache import Job
 from cluv.cli.init import init
+from cluv.cli.init_utils import cluster_checks
 from cluv.cli.login import login
 from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
@@ -216,10 +216,9 @@ def no_checks_on_the_clusters_in_cluv_init(monkeypatch: pytest.MonkeyPatch) -> N
     """Pretends that no cluster is connected in `cluv init`, so that it doesn't run checks on the
     clusters, which take longer than the timeouts of the tests of `cluv init`.
 
-    `tests/test_init.py` tests these checks.
+    `tests/test_cluster_checks.py` tests these checks.
     """
-    init_module = importlib.import_module("cluv.cli.init")
-    monkeypatch.setattr(init_module, "control_socket_is_running", AsyncMock(return_value=False))
+    monkeypatch.setattr(cluster_checks, "control_socket_is_running", AsyncMock(return_value=False))
 
 
 @pytest.fixture(params=[True, False], ids=["with_scratch", "without_scratch"])

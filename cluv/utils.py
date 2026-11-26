@@ -46,6 +46,11 @@ def find_pyproject(start: Path | None = None) -> Path:
     )
 
 
+def join_names(names: list[str]) -> str:
+    """Joins names for a sentence: "a", "a and b", "a, b and c"."""
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 T = TypeVar("T")
 
 

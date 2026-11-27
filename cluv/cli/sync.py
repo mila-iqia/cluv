@@ -681,6 +681,49 @@ async def _pull_datasets(source_remote: Remote, source_path: str, local_datasets
     )
 
 
+# Folders that the dataset rsync calls leave out (see their `--exclude` flags).
+_DATASET_EXCLUDED_NAMES = frozenset({".git", ".datalad", ".git.bak"})
+
+
+def _latest_edit_time(source: Path) -> datetime.datetime:
+    """Returns the most recent modification time of `source` or of anything under it.
+
+    Looking only at the mtime of `source` itself misses most changes: adding or editing a file
+    in an existing subdirectory updates that subdirectory's mtime, not the top one (#260).
+
+    Symlinks are followed, because the dataset rsync runs with `--copy-links` and so copies
+    what a link points to, including the contents of a linked directory. Each real directory
+    is visited once, so a link that points back up the tree cannot loop. Folders that the
+    dataset rsync excludes are not visited.
+
+    Raises `OSError` when part of the tree cannot be read. `os.walk` skips such a directory
+    silently by default, which would hide any change inside it.
+    """
+
+    def _raise(error: OSError) -> None:
+        raise error
+
+    latest = source.stat().st_mtime
+    visited: set[str] = set()
+    for root, dirnames, filenames in os.walk(source, followlinks=True, onerror=_raise):
+        real_root = os.path.realpath(root)
+        if real_root in visited:
+            dirnames[:] = []
+            continue
+        visited.add(real_root)
+        dirnames[:] = [d for d in dirnames if d not in _DATASET_EXCLUDED_NAMES]
+        for name in (*dirnames, *filenames):
+            if name in _DATASET_EXCLUDED_NAMES:
+                continue
+            path = os.path.join(root, name)
+            # `lstat` so that a new symlink counts even when its target is old.
+            latest = max(latest, os.lstat(path).st_mtime)
+            # An edit to a symlink's target is a change too. A broken link has no target.
+            if os.path.islink(path) and os.path.exists(path):
+                latest = max(latest, os.stat(path).st_mtime)
+    return datetime.datetime.fromtimestamp(latest)
+
+
 async def _push_datasets_to_remote(
     local_source: Path, remote: Remote, config: CluvConfig, project_state: ProjectStateOnCluster
 ):
@@ -691,12 +734,25 @@ async def _push_datasets_to_remote(
             f"`cluv.datasets_path` must be set in the Cluv config section of pyproject.toml to "
             f"push datasets to {remote.hostname}."
         )
-    last_datasets_dir_edit_time = datetime.datetime.fromtimestamp(local_source.stat().st_mtime)
+    # The scan reads the whole tree, so it runs in a thread: the pushes to the other clusters
+    # share this event loop.
+    last_datasets_dir_edit_time: datetime.datetime | None
+    try:
+        last_datasets_dir_edit_time = await asyncio.to_thread(_latest_edit_time, local_source)
+    except OSError as error:
+        # An incomplete scan is no proof that nothing changed, so push instead of skipping.
+        logger.warning(
+            f"Could not read all of {local_source} to check for changes ({error}). "
+            f"Pushing datasets to {remote.hostname} without that check."
+        )
+        last_datasets_dir_edit_time = None
 
     # Skip if we pushed after the last edit to the local source path.
     if (
-        last_push_datasets_time := project_state.last_pushed_datasets
-    ) and last_push_datasets_time > last_datasets_dir_edit_time:
+        last_datasets_dir_edit_time is not None
+        and (last_push_datasets_time := project_state.last_pushed_datasets)
+        and last_push_datasets_time > last_datasets_dir_edit_time
+    ):
         logger.info(
             f"Datasets at {local_source} were already pushed to {remote.hostname} and have not "
             f"changed since. Skipping."

@@ -234,7 +234,7 @@ async def connect_to_clusters(
         if is_running
     }
     missing = [cluster for cluster in clusters if cluster not in connections]
-    if missing and ask and await _ask_to_connect(missing):
+    if missing and ask and await _ask_to_connect(missing, connected=list(connections)):
         # One cluster at a time, so that the 2FA prompts of the clusters don't mix.
         for cluster in missing:
             cluster_link = config.get_cluster_config(cluster).cluster_link
@@ -434,8 +434,11 @@ async def check_folder(
     return Check(Status.FAIL, f"{name}: can't create {folder}, no write access to {parent}", hints)
 
 
-async def _ask_to_connect(clusters: list[str]) -> bool:
-    """Asks whether to connect to the clusters now. Ctrl-C or Ctrl-D mean no."""
+async def _ask_to_connect(clusters: list[str], connected: list[str]) -> bool:
+    """Asks whether to connect to the clusters now, after naming the clusters that are already
+    connected. Ctrl-C or Ctrl-D mean no."""
+    if connected:
+        console.print(f"Already connected to {join_names(connected)}.")
     try:
         return await questionary.confirm(
             f"Connect to {join_names(clusters)} now, to check them? There may be a 2FA prompt for each "

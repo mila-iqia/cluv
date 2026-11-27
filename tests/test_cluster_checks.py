@@ -340,6 +340,20 @@ class TestConnectToClusters:
             "rorqual": Check(Status.OK, "connected"),
         }
 
+    async def test_the_connected_clusters_are_named_before_the_question(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_clusters(monkeypatch, {}, connected=["mila"])
+        asked = answer_connect_question(monkeypatch, False)
+
+        with console.capture() as capture:
+            await connect_to_clusters(self.config, ["mila", "rorqual"], ask=True)
+
+        assert capture.get() == "Already connected to mila.\n"
+        assert asked == [
+            "Connect to rorqual now, to check them? There may be a 2FA prompt for each cluster."
+        ]
+
     @pytest.mark.parametrize("answer", [False, KeyboardInterrupt, EOFError])
     async def test_no_connection_when_the_user_refuses(
         self, answer, monkeypatch: pytest.MonkeyPatch

@@ -243,9 +243,10 @@ cluv sync                          # Copy the results back into `logs/` (once th
 ```
 
 !!! note
-    `cluv submit` refuses to submit a job when your working directory has uncommitted changes
-    (untracked files are ignored), so that every job can be traced back to the exact commit it ran
-    with. Commit your changes first, or pass `--autocommit` to let cluv commit them for you.
+    `cluv submit` refuses to submit a job when your working directory has uncommitted changes, so
+    that every job can be traced back to the exact commit it ran with. Commit your changes first,
+    or pass `--autocommit` to let cluv commit them for you. Untracked files don't block the
+    submission, but they don't reach the cluster either: `cluv submit` lists them in a warning.
 
 ## Next steps
 

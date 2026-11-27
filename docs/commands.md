@@ -177,8 +177,9 @@ Enforces a clean git working tree, syncs the project to the target cluster (equi
 arguments from the config with the args from the command line.
 
 If tracked files have uncommitted changes, `cluv submit` lists them on stderr and exits with code 1,
-even with `--quiet` or `--parsable`. Untracked files are not checked, and are not sent to the
-cluster: commit the files that your job needs.
+even with `--quiet` or `--parsable`. Untracked files (that `.gitignore` doesn't ignore) don't block
+the submission, but they don't reach the cluster: `cluv submit` lists them in a warning. Commit the
+ones that your job needs, and add the others to `.gitignore`.
 
 See the ["Configuring job submission"](guides/submit/config.md) guide for more information.
 
@@ -208,6 +209,7 @@ cluv submit <cluster> [<job.sh>] [options] [sbatch-args...] [-- program-args...]
 
 `--autocommit`
 :   Automatically create a local commit with the tracked changes before submitting, instead of failing when the working tree is dirty.
+    Untracked files are not committed.
 
 `--chunking`
 :   Split the submitted job into an array of smaller consecutive jobs ("chunks"), based on the requested time.

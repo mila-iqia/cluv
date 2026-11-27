@@ -1136,6 +1136,47 @@ class TestEnsureCleanGitState:
             "(`hydra.launcher.autocommit=True` when using Hydra)."
         )
 
+    def test_ensure_clean_git_state_warns_about_untracked_files(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Untracked files don't block the submission, but a warning lists them, because
+        untracked files don't reach the clusters."""
+        messages: list[tuple[str, dict]] = []
+
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout="?? data/params.json\n?? logs/\n", stderr=""
+                )
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        def mock_subprocess_check_output(command: list[str], **kwargs) -> str:
+            if command == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return "main\n"
+            if command == ["git", "rev-parse", "HEAD"]:
+                return "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\n"
+            raise AssertionError(f"Unexpected subprocess.check_output call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
+        monkeypatch.setattr(
+            cluv.cli.submit.console,
+            "print",
+            lambda message, **kwargs: messages.append((message, kwargs)),
+        )
+
+        assert ensure_clean_git_state() == "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        assert messages == [
+            (
+                "Warning: these untracked files are not sent to the cluster:\n"
+                "  data/params.json\n"
+                "  logs/\n"
+                "Commit the ones that the job needs, and add the others to `.gitignore` to hide "
+                "this warning.",
+                {"style": "yellow", "markup": False},
+            )
+        ]
+
     def test_ensure_clean_git_state_creates_commit_when_autocommit_enabled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

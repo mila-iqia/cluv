@@ -436,17 +436,15 @@ async def check_folder(
 
 async def _ask_to_connect(clusters: list[str], connected: list[str]) -> bool:
     """Asks whether to connect to the clusters now, after naming the clusters that are already
-    connected. Ctrl-C or Ctrl-D mean no."""
+    connected. Ctrl-C raises KeyboardInterrupt and Ctrl-D raises EOFError, which stop `cluv init`.
+    """
     if connected:
         console.print(f"Already connected to {join_names(connected)}.")
-    try:
-        return await questionary.confirm(
-            f"Connect to {join_names(clusters)} now, to check them? There may be a 2FA prompt for each "
-            "cluster.",
-            default=True,
-        ).unsafe_ask_async()
-    except (KeyboardInterrupt, EOFError):
-        return False
+    return await questionary.confirm(
+        f"Connect to {join_names(clusters)} now, to check them? There may be a 2FA prompt for "
+        "each cluster.",
+        default=True,
+    ).unsafe_ask_async()
 
 
 async def _connect(cluster: str, cluster_link: str | None) -> Check:

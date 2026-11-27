@@ -98,7 +98,17 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
     # Check the access to each cluster of the config.
     console.print()
     console.print("Checking the clusters...")
-    reports = asyncio.run(check_clusters(config, pyproject_path.parent, ask=ask))
+    try:
+        reports = asyncio.run(check_clusters(config, pyproject_path.parent, ask=ask))
+    except (KeyboardInterrupt, EOFError):
+        # Ctrl-C raises KeyboardInterrupt, and Ctrl-D (at the question about connecting to the
+        # clusters) raises EOFError.
+        console.print(
+            "Cancelled: the clusters weren't checked. Run [bold]cluv init[/bold] again to check "
+            "them.",
+            style="yellow",
+        )
+        sys.exit(1)
 
     # Show what the user can do next after the project setup
     console.print()

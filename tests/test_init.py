@@ -965,3 +965,32 @@ def test_message_after_the_checks(
         init(quiet=True)
 
     assert message in " ".join(capture.get().split())
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt, EOFError])
+def test_cancel_the_checks(
+    error: type[BaseException], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ctrl-C (KeyboardInterrupt) during the checks of the clusters, or Ctrl-D (EOFError) at the
+    question about connecting to the clusters, stops `cluv init` with a message and the exit code
+    1, instead of a traceback."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SCRATCH", raising=False)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.cluv]\nresults_path = "logs"\n\n[tool.cluv.clusters.rorqual]\n'
+    )
+    monkeypatch.setattr(CLUV_INIT_MODULE, "check_git", lambda: None)
+
+    async def cancel(*args, **kwargs) -> dict[str, list[Check]]:
+        raise error
+
+    monkeypatch.setattr(CLUV_INIT_MODULE, "check_clusters", cancel)
+
+    with console.capture() as capture, pytest.raises(SystemExit) as exc_info:
+        init(quiet=True)
+
+    assert exc_info.value.code == 1
+    assert "Cancelled: the clusters weren't checked. Run cluv init again to check them." in (
+        " ".join(capture.get().split())
+    )

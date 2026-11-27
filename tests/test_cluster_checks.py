@@ -354,17 +354,27 @@ class TestConnectToClusters:
             "Connect to rorqual now, to check them? There may be a 2FA prompt for each cluster."
         ]
 
-    @pytest.mark.parametrize("answer", [False, KeyboardInterrupt, EOFError])
     async def test_no_connection_when_the_user_refuses(
-        self, answer, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No, Ctrl-C or Ctrl-D: the clusters that aren't connected aren't checked."""
         fake_clusters(monkeypatch, {}, connected=[])
-        answer_connect_question(monkeypatch, answer)
+        answer_connect_question(monkeypatch, False)
 
         connections = await connect_to_clusters(self.config, ["rorqual"], ask=True)
 
         assert connections == {"rorqual": NOT_CONNECTED}
+
+    @pytest.mark.parametrize("error", [KeyboardInterrupt, EOFError])
+    async def test_ctrl_c_or_ctrl_d_at_the_question(
+        self, error: type[BaseException], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Ctrl-C (KeyboardInterrupt) or Ctrl-D (EOFError) at the question doesn't mean no: the
+        error goes up to `cluv init`, which stops."""
+        fake_clusters(monkeypatch, {}, connected=[])
+        answer_connect_question(monkeypatch, error)
+
+        with pytest.raises(error):
+            await connect_to_clusters(self.config, ["rorqual"], ask=True)
 
     async def test_no_question_when_all_the_clusters_are_connected(
         self, monkeypatch: pytest.MonkeyPatch

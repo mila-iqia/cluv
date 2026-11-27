@@ -176,10 +176,10 @@ Enforces a clean git working tree, syncs the project to the target cluster (equi
 [`cluv sync`](#cluv-sync)), then runs `sbatch` on the remote, merging the global and per-cluster
 arguments from the config with the args from the command line.
 
-If tracked files have uncommitted changes, `cluv submit` lists them on stderr and exits with code 1,
-even with `--quiet` or `--parsable`. Untracked files (that `.gitignore` doesn't ignore) don't block
-the submission, but they don't reach the cluster: `cluv submit` lists them in a warning. Commit the
-ones that your job needs, and add the others to `.gitignore`.
+If tracked files have uncommitted changes, `cluv submit` lists them and exits with code 1. With
+`--quiet` or `--parsable`, the list still appears, on stderr. Untracked files (that `.gitignore`
+doesn't ignore) don't block the submission, but they don't reach the cluster: `cluv submit` lists
+them in a warning. Commit the ones that your job needs, and add the others to `.gitignore`.
 
 See the ["Configuring job submission"](guides/submit/config.md) guide for more information.
 

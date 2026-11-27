@@ -151,7 +151,7 @@ Optionally also pushes/pulls datasets, see the ["Syncing datasets across cluster
 
 **Usage**
 ```console
-cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
+cluv sync [clusters] [--sync-datasets | --no-sync-datasets] [--fetch-results | --no-fetch-results]
 ```
 
 **Arguments**
@@ -165,6 +165,10 @@ cluv sync [clusters] [--sync-datasets | --no-sync-datasets]
 `--sync-datasets`, `--no-sync-datasets`
 :   Push/pull datasets from `data_source` to each cluster as part of the sync.
     Requires `data_source` to be set in the config. Enabled by default.
+
+`--fetch-results`, `--no-fetch-results`
+:   Fetch each cluster's results back to this machine. Enabled by default. Use
+    `--no-fetch-results` when the results are large or slow to read.
 
 ---
 

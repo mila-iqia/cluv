@@ -1016,20 +1016,40 @@ def create_submit_commit(submit_command: str) -> None:
 def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None = None) -> str:
     """
     Check git is clean locally and return the current commit hash.
+
+    Untracked files (that git doesn't ignore) don't block the submission, but a warning lists
+    them, because untracked files don't reach the clusters.
     """
     git_status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
-    dirty_lines = [line for line in git_status.stdout.splitlines() if not line.startswith("??")]
+    lines = git_status.stdout.splitlines()
+    untracked = [line.removeprefix("?? ") for line in lines if line.startswith("??")]
+    if untracked:
+        console.print(
+            "Warning: these untracked files are not sent to the cluster:\n"
+            + "".join(f"  {path}\n" for path in untracked)
+            + "Commit the ones that the job needs, and add the others to `.gitignore` to hide "
+            "this warning.",
+            style="yellow",
+            markup=False,  # File names can contain brackets, which rich would read as markup.
+        )
+    dirty_lines = [line for line in lines if not line.startswith("??")]
     if dirty_lines:
         if autocommit:
             if submit_command is None:
                 raise ValueError("submit_command is required when autocommit=True")
             create_submit_commit(submit_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
-            console.print(
-                "Working directory is dirty. Please commit your changes before submitting, "
-                "or use `--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).",
-                style="red",
+            message = (
+                "Working directory is dirty. Jobs run the committed code, without these changes:\n"
+                + "".join(f"  {line}\n" for line in dirty_lines)
+                + "Please commit these changes before submitting, or use `--autocommit` "
+                "(`hydra.launcher.autocommit=True` when using Hydra)."
             )
+            if console.quiet:
+                # `--quiet` and `--parsable` silence the console, but `sys.exit` still prints
+                # this message, on stderr.
+                sys.exit(message)
+            console.print(message, style="red", markup=False)  # File names can contain brackets.
             sys.exit(1)
 
     # In GitHub Actions PR jobs we can be on a detached merge commit that doesn't exist on

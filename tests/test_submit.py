@@ -1105,12 +1105,46 @@ class TestEnsureCleanGitState:
     def test_ensure_clean_git_state_exits_when_repo_dirty_without_autocommit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        messages: list[tuple[str, dict]] = []
+        """The error lists the uncommitted changes, even when `--quiet` or `--parsable` silence
+        the console. Untracked files don't block the submission, so the error doesn't list them."""
         monkeypatch.setenv("SKIP_CLEAN_GIT_CHECK", "0")  # in case it is set in the dev test env.
+        monkeypatch.setattr(cluv.cli.submit.console, "quiet", True)
 
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
             assert kwargs.get("text") is True
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=" M cluv/cli/submit.py\nM  README.md\n?? notes.txt\n",
+                    stderr="",
+                )
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        with pytest.raises(SystemExit) as exc_info:
+            ensure_clean_git_state()
+
+        # `sys.exit` prints this message on stderr.
+        assert exc_info.value.code == (
+            "Working directory is dirty. Jobs run the committed code, without these changes:\n"
+            "   M cluv/cli/submit.py\n"
+            "  M  README.md\n"
+            "Please commit these changes before submitting, or use `--autocommit` "
+            "(`hydra.launcher.autocommit=True` when using Hydra)."
+        )
+
+    def test_ensure_clean_git_state_prints_the_error_in_red_without_quiet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Without `--quiet` or `--parsable`, the error goes through the console, in red."""
+        messages: list[tuple[str, dict]] = []
+        monkeypatch.setenv("SKIP_CLEAN_GIT_CHECK", "0")  # in case it is set in the dev test env.
+        monkeypatch.setattr(cluv.cli.submit.console, "quiet", False)
+
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             if command == ["git", "status", "--porcelain"]:
                 return subprocess.CompletedProcess(
                     command, 0, stdout=" M cluv/cli/submit.py\n", stderr=""
@@ -1124,14 +1158,58 @@ class TestEnsureCleanGitState:
             lambda message, **kwargs: messages.append((message, kwargs)),
         )
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as exc_info:
             ensure_clean_git_state()
 
+        assert exc_info.value.code == 1
         assert messages == [
             (
-                "Working directory is dirty. Please commit your changes before submitting, or use "
-                "`--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).",
-                {"style": "red"},
+                "Working directory is dirty. Jobs run the committed code, without these changes:\n"
+                "   M cluv/cli/submit.py\n"
+                "Please commit these changes before submitting, or use `--autocommit` "
+                "(`hydra.launcher.autocommit=True` when using Hydra).",
+                {"style": "red", "markup": False},
+            )
+        ]
+
+    def test_ensure_clean_git_state_warns_about_untracked_files(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Untracked files don't block the submission, but a warning lists them, because
+        untracked files don't reach the clusters."""
+        messages: list[tuple[str, dict]] = []
+
+        def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+            if command == ["git", "status", "--porcelain"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout="?? data/params.json\n?? logs/\n", stderr=""
+                )
+            raise AssertionError(f"Unexpected subprocess.run call: {command}")
+
+        def mock_subprocess_check_output(command: list[str], **kwargs) -> str:
+            if command == ["git", "rev-parse", "--abbrev-ref", "HEAD"]:
+                return "main\n"
+            if command == ["git", "rev-parse", "HEAD"]:
+                return "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\n"
+            raise AssertionError(f"Unexpected subprocess.check_output call: {command}")
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+        monkeypatch.setattr(subprocess, "check_output", mock_subprocess_check_output)
+        monkeypatch.setattr(
+            cluv.cli.submit.console,
+            "print",
+            lambda message, **kwargs: messages.append((message, kwargs)),
+        )
+
+        assert ensure_clean_git_state() == "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        assert messages == [
+            (
+                "Warning: these untracked files are not sent to the cluster:\n"
+                "  data/params.json\n"
+                "  logs/\n"
+                "Commit the ones that the job needs, and add the others to `.gitignore` to hide "
+                "this warning.",
+                {"style": "yellow", "markup": False},
             )
         ]
 

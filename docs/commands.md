@@ -176,6 +176,10 @@ Enforces a clean git working tree, syncs the project to the target cluster (equi
 [`cluv sync`](#cluv-sync)), then runs `sbatch` on the remote, merging the global and per-cluster
 arguments from the config with the args from the command line.
 
+If tracked files have uncommitted changes, `cluv submit` lists them on stderr and exits with code 1,
+even with `--quiet` or `--parsable`. Untracked files are not checked, and are not sent to the
+cluster: commit the files that your job needs.
+
 See the ["Configuring job submission"](guides/submit/config.md) guide for more information.
 
 **Usage**

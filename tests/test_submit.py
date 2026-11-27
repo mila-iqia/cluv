@@ -1105,35 +1105,36 @@ class TestEnsureCleanGitState:
     def test_ensure_clean_git_state_exits_when_repo_dirty_without_autocommit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        messages: list[tuple[str, dict]] = []
+        """The error lists the uncommitted changes, even when `--quiet` or `--parsable` silence
+        the console. Untracked files don't block the submission, so the error doesn't list them."""
         monkeypatch.setenv("SKIP_CLEAN_GIT_CHECK", "0")  # in case it is set in the dev test env.
+        monkeypatch.setattr(cluv.cli.submit.console, "quiet", True)
 
         def mock_subprocess_run(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
             assert kwargs.get("capture_output") is True
             assert kwargs.get("text") is True
             if command == ["git", "status", "--porcelain"]:
                 return subprocess.CompletedProcess(
-                    command, 0, stdout=" M cluv/cli/submit.py\n", stderr=""
+                    command,
+                    0,
+                    stdout=" M cluv/cli/submit.py\nM  README.md\n?? notes.txt\n",
+                    stderr="",
                 )
             raise AssertionError(f"Unexpected subprocess.run call: {command}")
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
-        monkeypatch.setattr(
-            cluv.cli.submit.console,
-            "print",
-            lambda message, **kwargs: messages.append((message, kwargs)),
-        )
 
-        with pytest.raises(SystemExit):
+        with pytest.raises(SystemExit) as exc_info:
             ensure_clean_git_state()
 
-        assert messages == [
-            (
-                "Working directory is dirty. Please commit your changes before submitting, or use "
-                "`--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).",
-                {"style": "red"},
-            )
-        ]
+        # `sys.exit` prints this message on stderr.
+        assert exc_info.value.code == (
+            "Working directory is dirty. Jobs run the committed code, without these changes:\n"
+            "   M cluv/cli/submit.py\n"
+            "  M  README.md\n"
+            "Please commit these changes before submitting, or use `--autocommit` "
+            "(`hydra.launcher.autocommit=True` when using Hydra)."
+        )
 
     def test_ensure_clean_git_state_creates_commit_when_autocommit_enabled(
         self, monkeypatch: pytest.MonkeyPatch

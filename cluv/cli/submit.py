@@ -1025,12 +1025,14 @@ def ensure_clean_git_state(autocommit: bool = False, submit_command: str | None 
                 raise ValueError("submit_command is required when autocommit=True")
             create_submit_commit(submit_command)
         elif not (os.environ.get("SKIP_CLEAN_GIT_CHECK", "0") == "1"):
-            console.print(
-                "Working directory is dirty. Please commit your changes before submitting, "
-                "or use `--autocommit` (`hydra.launcher.autocommit=True` when using Hydra).",
-                style="red",
+            # `sys.exit` prints this message on stderr, even with `--quiet` or `--parsable`, which
+            # silence the console.
+            sys.exit(
+                "Working directory is dirty. Jobs run the committed code, without these changes:\n"
+                + "".join(f"  {line}\n" for line in dirty_lines)
+                + "Please commit these changes before submitting, or use `--autocommit` "
+                "(`hydra.launcher.autocommit=True` when using Hydra)."
             )
-            sys.exit(1)
 
     # In GitHub Actions PR jobs we can be on a detached merge commit that doesn't exist on
     # the synced remote checkout. Prefer the branch tip commit in that case.

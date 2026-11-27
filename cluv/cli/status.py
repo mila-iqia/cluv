@@ -17,7 +17,7 @@ from cluv.cache import Job, get_disabled_clusters, load_jobs
 from cluv.cli.disable import DisabledCluster, format_remaining
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_cluv_config
-from cluv.remote import run
+from cluv.remote import get_multiplexing_options_to_use, run
 from cluv.slurm import (
     FAILED_JOB_STATES,
     StorageStats,
@@ -77,15 +77,17 @@ class ClusterStatus:
     gpu_stats: dict[str, tuple[int, int]]  # model -> (idle, total)
     storage: StorageStats
     job_states: dict[str, int]  # state -> number of the user's jobs (all jobs, not only cluv's)
+    timed_out: bool = False  # the cluster did not answer within CLUSTER_TIMEOUT_SECONDS
 
 
-def get_default_cluster_status(cluster: str) -> ClusterStatus:
+def get_default_cluster_status(cluster: str, timed_out: bool = False) -> ClusterStatus:
     return ClusterStatus(
         name=cluster,
         online=False,
         gpu_stats={},
         storage=StorageStats(home_used=0, home_quota=0, scratch_used=0, scratch_quota=0),
         job_states={},
+        timed_out=timed_out,
     )
 
 
@@ -116,13 +118,41 @@ disk-quota 2>/dev/null; echo {_SEP}
 
 _MILA_CLUSTERS = {"mila"}
 
+# How long `cluv status` waits for one cluster before giving up on it. A cluster in
+# maintenance can accept the SSH connection and then never answer, and without a limit
+# that one cluster holds back the tables for all the others (#297).
+CLUSTER_TIMEOUT_SECONDS = 60.0
+
 
 async def fetch_live_job_info(
     cluster: str,
     job_ids: list[int],
     disabled_clusters: dict[str, DisabledCluster],
 ) -> dict[int, LiveJobInfo]:
-    """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs."""
+    """Batch-fetch Slurm state, elapsed, and wait-time for a list of job IDs.
+
+    Gives up after `CLUSTER_TIMEOUT_SECONDS` and returns no jobs for that cluster, so one
+    cluster that never answers does not hold back the jobs of the others.
+    """
+    try:
+        return await asyncio.wait_for(
+            _fetch_live_job_info(cluster, job_ids, disabled_clusters),
+            timeout=CLUSTER_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        _warn_timeout(cluster)
+        return {}
+
+
+def _warn_timeout(cluster: str) -> None:
+    logger.warning(f"[red]No answer from {cluster} after {CLUSTER_TIMEOUT_SECONDS:g} s[/red]")
+
+
+async def _fetch_live_job_info(
+    cluster: str,
+    job_ids: list[int],
+    disabled_clusters: dict[str, DisabledCluster],
+) -> dict[int, LiveJobInfo]:
     start_time = datetime.now()
 
     if cluster in disabled_clusters:
@@ -208,7 +238,25 @@ async def get_cluster_status(
 
     Uses a single SSH round-trip. Falls back gracefully when commands are
     unavailable (e.g. partition-stats is DRAC-only).
+
+    Gives up after `CLUSTER_TIMEOUT_SECONDS` and returns the same empty status as a
+    cluster that could not be reached, with `timed_out` set. The limit covers the
+    connection check too, not only the remote command, because either can hang.
     """
+    try:
+        return await asyncio.wait_for(
+            _get_cluster_status(cluster, disabled_clusters),
+            timeout=CLUSTER_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        _warn_timeout(cluster)
+        return get_default_cluster_status(cluster, timed_out=True)
+
+
+async def _get_cluster_status(
+    cluster: str,
+    disabled_clusters: dict[str, DisabledCluster],
+) -> ClusterStatus:
     start_time = datetime.now()
 
     if cluster in disabled_clusters:
@@ -376,6 +424,8 @@ def _build_cluster_table(
                 )
             else:
                 cluster_status += Text("Disabled")
+        elif c.timed_out:
+            cluster_status += Text("No answer")
 
         my_jobs = Text("\n").join(
             Text(state, style="cyan") + Text(f" : {c.job_states.get(state, 0)}")
@@ -397,6 +447,26 @@ def _build_cluster_table(
         )
 
     return table
+
+
+def _no_answer_tip(clusters: list[str]) -> Text:
+    """What to try when some clusters did not answer within `CLUSTER_TIMEOUT_SECONDS`."""
+    lines = [
+        f"No answer from {', '.join(clusters)} after {CLUSTER_TIMEOUT_SECONDS:g} s. "
+        "Possible causes: maintenance (status of the Alliance clusters: "
+        "https://status.alliancecan.ca/), or a change of network on your side "
+        "(sleep, Wi-Fi, VPN).",
+        "To skip a cluster for now:",
+        *(f"  cluv disable {cluster} 1d" for cluster in clusters),
+        "To reset a connection:",
+    ]
+    for cluster in clusters:
+        # Same multiplexing options as cluv's own ssh calls, so this targets cluv's socket.
+        exit_command = shlex.join(
+            ["ssh", *get_multiplexing_options_to_use(cluster), "-O", "exit", cluster]
+        )
+        lines.append(f"  {exit_command}, then cluv login {cluster}")
+    return Text("\n".join(lines))
 
 
 def _resolve_branch_names(cached_jobs: list[Job]) -> dict[str, str]:
@@ -562,6 +632,9 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
 
     clusters = get_cluv_config().clusters_names
     disabled_clusters = get_disabled_clusters()
+    # A cluster that did not answer the status query is not asked for its jobs too, so
+    # `cluv status` waits for it only once.
+    timed_out_clusters: list[str] = []
 
     if table in ("clusters", "all"):
         # Query clusters in parallel
@@ -572,9 +645,13 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
                     *(get_cluster_status(c, disabled_clusters) for c in clusters)
                 )
             ]
+        timed_out_clusters = [c.name for c in clusters_status if c.timed_out]
 
-        # Show a tip message if all clusters are offline.
-        if clusters_status and all(not c.online for c in clusters_status):
+        # `cluv login` does not help with a cluster that timed out: while the local SSH
+        # master process runs, it does not reconnect, even when the connection is dead (#266).
+        if timed_out_clusters:
+            console.print(_no_answer_tip(timed_out_clusters), style="yellow")
+        elif clusters_status and all(not c.online for c in clusters_status):
             console.print(
                 (
                     "No active connections to any clusters found. "
@@ -590,7 +667,11 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
     if table in ("jobs", "all"):
         cached_jobs = load_jobs()
         with console.status("Fetching jobs status..."):
-            jobs_status = await get_job_infos(cached_jobs, clusters, disabled_clusters)
+            jobs_status = await get_job_infos(
+                cached_jobs,
+                [c for c in clusters if c not in timed_out_clusters],
+                disabled_clusters,
+            )
 
         max_jobs = None if all_jobs else DEFAULT_SHOW_JOBS
         console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, max_jobs))

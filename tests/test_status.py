@@ -199,7 +199,7 @@ async def test_status_shows_no_answer_and_how_to_reset_the_connection(
 
     # In the table, `No answer` sits under the cluster name, like `Disabled`.
     assert re.search(r"│ ⚠ rorqual\s*│.*\n│ No answer\s*│", raw)
-    assert "No answer from rorqual after 30 s." in output
+    assert "No answer from rorqual after 60 s." in output
     assert "https://status.alliancecan.ca/" in output
     assert "cluv disable rorqual 1d" in output
     assert "ssh '-oControlPath=~/.cache/ssh/%r@%h:%p' -O exit rorqual" in output

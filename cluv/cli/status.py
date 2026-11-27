@@ -121,7 +121,7 @@ _MILA_CLUSTERS = {"mila"}
 # How long `cluv status` waits for one cluster before giving up on it. A cluster in
 # maintenance can accept the SSH connection and then never answer, and without a limit
 # that one cluster holds back the tables for all the others (#297).
-CLUSTER_TIMEOUT_SECONDS = 30.0
+CLUSTER_TIMEOUT_SECONDS = 60.0
 
 
 async def fetch_live_job_info(

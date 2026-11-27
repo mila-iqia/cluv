@@ -329,6 +329,11 @@ enriched with live Slurm status, wait time, and elapsed time.
 Requires an active connection (see [`cluv login`](#cluv-login)) to fetch live data for a cluster;
 otherwise it is shown as disconnected.
 
+If a cluster does not answer within 60 seconds (for example during maintenance), `cluv status`
+shows it as `No answer`, does not wait for it a second time for the jobs table, and still shows
+the other clusters. It also prints what to try: `cluv disable <cluster> 1d` to skip the cluster
+for now, or `ssh -O exit <cluster>` followed by `cluv login <cluster>` to reset its connection.
+
 **Usage**
 ```console
 cluv status [table] [options]

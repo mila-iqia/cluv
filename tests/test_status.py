@@ -177,3 +177,53 @@ async def test_status_waits_only_once_for_a_cluster_that_timed_out(
 
     get_job_infos.assert_awaited_once()
     assert get_job_infos.await_args.args[1] == ["narval"]
+
+
+async def test_status_shows_no_answer_and_how_to_reset_the_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cluster that timed out is shown as `No answer`, not as disconnected, and the tip
+    says how to skip it or reset its connection instead of `cluv login` (#297, #266)."""
+    _fake_cluster_statuses(monkeypatch, timed_out={"rorqual"})
+    monkeypatch.setattr(
+        status_module,
+        "get_multiplexing_options_to_use",
+        lambda cluster: ("-oControlPath=~/.cache/ssh/%r@%h:%p",),
+    )
+
+    with console.capture() as cap:
+        await status(table="clusters", all_jobs=False)
+    raw = cap.get()
+    # The console wraps long lines, so compare the tip with the whitespace collapsed.
+    output = " ".join(raw.split())
+
+    # In the table, `No answer` sits under the cluster name, like `Disabled`.
+    assert re.search(r"│ ⚠ rorqual\s*│.*\n│ No answer\s*│", raw)
+    assert "No answer from rorqual after 30 s." in output
+    assert "https://status.alliancecan.ca/" in output
+    assert "cluv disable rorqual 1d" in output
+    assert "ssh '-oControlPath=~/.cache/ssh/%r@%h:%p' -O exit rorqual" in output
+    assert "then cluv login rorqual" in output
+    assert "No active connections to any clusters found" not in output
+
+
+async def test_status_still_suggests_cluv_login_when_every_cluster_is_disconnected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no timeout, a fully disconnected setup keeps the `cluv login` tip."""
+    monkeypatch.setattr(
+        status_module, "get_cluv_config", lambda: mock.Mock(clusters_names=["rorqual"])
+    )
+    monkeypatch.setattr(status_module, "get_disabled_clusters", lambda: {})
+    monkeypatch.setattr(
+        status_module,
+        "get_cluster_status",
+        mock.AsyncMock(return_value=status_module.get_default_cluster_status("rorqual")),
+    )
+
+    with console.capture() as cap:
+        await status(table="clusters", all_jobs=False)
+    output = " ".join(cap.get().split())
+
+    assert "No active connections to any clusters found" in output
+    assert "No answer" not in output

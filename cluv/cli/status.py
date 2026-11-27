@@ -17,7 +17,7 @@ from cluv.cache import Job, get_disabled_clusters, load_jobs
 from cluv.cli.disable import DisabledCluster, format_remaining
 from cluv.cli.login import get_remote_without_2fa_prompt
 from cluv.config import get_cluv_config
-from cluv.remote import run
+from cluv.remote import get_multiplexing_options_to_use, run
 from cluv.slurm import (
     FAILED_JOB_STATES,
     StorageStats,
@@ -424,6 +424,8 @@ def _build_cluster_table(
                 )
             else:
                 cluster_status += Text("Disabled")
+        elif c.timed_out:
+            cluster_status += Text("No answer")
 
         my_jobs = Text("\n").join(
             Text(state, style="cyan") + Text(f" : {c.job_states.get(state, 0)}")
@@ -445,6 +447,26 @@ def _build_cluster_table(
         )
 
     return table
+
+
+def _no_answer_tip(clusters: list[str]) -> Text:
+    """What to try when some clusters did not answer within `CLUSTER_TIMEOUT_SECONDS`."""
+    lines = [
+        f"No answer from {', '.join(clusters)} after {CLUSTER_TIMEOUT_SECONDS:g} s. "
+        "Possible causes: maintenance (status of the Alliance clusters: "
+        "https://status.alliancecan.ca/), or a change of network on your side "
+        "(sleep, Wi-Fi, VPN).",
+        "To skip a cluster for now:",
+        *(f"  cluv disable {cluster} 1d" for cluster in clusters),
+        "To reset a connection:",
+    ]
+    for cluster in clusters:
+        # Same multiplexing options as cluv's own ssh calls, so this targets cluv's socket.
+        exit_command = shlex.join(
+            ["ssh", *get_multiplexing_options_to_use(cluster), "-O", "exit", cluster]
+        )
+        lines.append(f"  {exit_command}, then cluv login {cluster}")
+    return Text("\n".join(lines))
 
 
 def _resolve_branch_names(cached_jobs: list[Job]) -> dict[str, str]:
@@ -625,8 +647,11 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
             ]
         timed_out_clusters = [c.name for c in clusters_status if c.timed_out]
 
-        # Show a tip message if all clusters are offline.
-        if clusters_status and all(not c.online for c in clusters_status):
+        # `cluv login` does not help with a cluster that timed out: while the local SSH
+        # master process runs, it does not reconnect, even when the connection is dead (#266).
+        if timed_out_clusters:
+            console.print(_no_answer_tip(timed_out_clusters), style="yellow")
+        elif clusters_status and all(not c.online for c in clusters_status):
             console.print(
                 (
                     "No active connections to any clusters found. "

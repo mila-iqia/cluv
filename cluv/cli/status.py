@@ -143,9 +143,7 @@ async def fetch_live_job_info(
 
 
 def _warn_timeout(cluster: str) -> None:
-    logger.warning(
-        f"[red]Connection to {cluster} timeout after {CLUSTER_TIMEOUT_SECONDS:g} seconds[/red]"
-    )
+    logger.warning(f"[red]No answer from {cluster} after {CLUSTER_TIMEOUT_SECONDS:g} s[/red]")
 
 
 async def _fetch_live_job_info(

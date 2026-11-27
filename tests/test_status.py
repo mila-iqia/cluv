@@ -92,7 +92,7 @@ async def test_get_cluster_status_times_out_on_unresponsive_cluster(
         )
 
     assert result == status_module.get_default_cluster_status("rorqual")
-    assert any("Connection to rorqual timeout" in message for message in caplog.messages)
+    assert any("No answer from rorqual after" in message for message in caplog.messages)
 
 
 @pytest.mark.timeout(30)
@@ -114,7 +114,7 @@ async def test_fetch_live_job_info_times_out_on_unresponsive_cluster(
         )
 
     assert result == {}
-    assert any("Connection to rorqual timeout" in message for message in caplog.messages)
+    assert any("No answer from rorqual after" in message for message in caplog.messages)
 
 
 @pytest.mark.timeout(30)

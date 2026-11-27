@@ -75,7 +75,7 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
     console.print("Validating project structure...")
 
     # Check if the job script exists
-    check_job_script(pyproject_path.parent, config.results_path)
+    check_job_script(pyproject_path.parent)
 
     # Check if the results path is correctly symlinked to scratch
     check_symlink_to_scratch(pyproject_path.parent, config.results_path, config.results_symlink)
@@ -433,15 +433,13 @@ def check_ssh_hostnames(clusters: list[str]) -> None:
         )
 
 
-def check_job_script(project_root: Path, results_path: str) -> None:
+def check_job_script(project_root: Path) -> None:
     """
     Check if job script templates exist. If not, create them.
     The scripts are templates for users to submit jobs to Slurm with cluv.
     """
-    project_root_for_script = _home_project_dir(project_root)
     scripts_dir = project_root / SCRIPTS_DIR_PATH
-    script_templates_path = _get_script_templates_path()
-    script_templates = sorted(script_templates_path.glob("*.sh"))
+    script_templates = sorted(_get_script_templates_path().glob("*.sh"))
 
     if not script_templates:
         console.print("⚠️  Warning: No script templates found.", style="yellow")
@@ -455,35 +453,7 @@ def check_job_script(project_root: Path, results_path: str) -> None:
                 f"✅ Job template script already exists at '{script_path}'.", style="green"
             )
             continue
-        script_content = script_template.read_text()
-        script_content = re.sub(
-            r"^#SBATCH --output=.*$",
-            f"#SBATCH --output={results_path}/%j/slurm-%j.out",
-            script_content,
-            flags=re.MULTILINE,
-        )
-        script_content = re.sub(
-            r"^project_name=.*$",
-            f'project_name="{project_root.name}"',
-            script_content,
-            flags=re.MULTILINE,
-        )
-        script_content = re.sub(
-            r"^project_root=.*$",
-            f'project_root="{project_root_for_script}"',
-            script_content,
-            flags=re.MULTILINE,
-        )
-        script_content = re.sub(
-            r"^results_(?:dir|path)=.*$",
-            f'results_path="{results_path}"',
-            script_content,
-            flags=re.MULTILINE,
-        )
-        script_content = re.sub(
-            r"\$(?:\{results_dir\}|results_dir\b)", "$results_path", script_content
-        )
-        script_path.write_text(script_content)
+        script_path.write_text(script_template.read_text())
         console.print(f"Adding job template script at '{script_path}'.")
 
 

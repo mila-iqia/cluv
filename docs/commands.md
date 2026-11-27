@@ -99,8 +99,9 @@ my_project/
 ├── logs -> $SCRATCH/logs/<project_name>   # symlink to cluster logs at `results_path`
 ├── pyproject.toml        # includes [tool.cluv] config
 ├── scripts/
-│   ├── job.sh            # Slurm job script template
-│   └── safe_job.sh       # Slurm job script template (copies .venv and prior results)
+│   ├── job.sh            # default Slurm job script (resources for most clusters)
+│   ├── job_<cluster>.sh  # job scripts of the clusters that allocate whole nodes
+│   └── run.sh            # shared body: runs the submitted commit from $SLURM_TMPDIR
 └── src/
     └── my_project/
         └── __init__.py

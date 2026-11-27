@@ -152,6 +152,8 @@ env = { UV_OFFLINE = "0", WANDB_MODE = "online" }
 
 [tool.cluv.clusters.tamia]
 # https://docs.alliancecan.ca/wiki/TamIA
+# TamIA allocates whole nodes, which the default job script doesn't ask for.
+job_script_path = "scripts/job_tamia.sh"
 
 [tool.cluv.clusters.killarney]
 # https://docs.alliancecan.ca/wiki/Killarney
@@ -180,6 +182,10 @@ sbatch_args = { account = "rrg-bengioy-ad" }
 [tool.cluv.clusters.trillium]
 # https://docs.alliancecan.ca/wiki/Trillium
 sbatch_args = { account = "rrg-bengioy-ad" }
+# Trillium allocates whole nodes and rejects `--mem`, which the default job script asks for.
+job_script_path = "scripts/job_trillium.sh"
+# $HOME is read-only on the compute nodes, so uv's cache goes on $SCRATCH.
+env = { UV_CACHE_DIR = "$SCRATCH/.cache/uv" }
 # $HOME isn't mounted on Trillium's compute nodes, so a job submitted from the default $HOME
 # location is rejected ("Job output requested to be written to a filesystem not available on
 # compute nodes"). Keep the project on $SCRATCH instead.
@@ -188,6 +194,8 @@ project_dir = "$SCRATCH/repos/cluv"
 [tool.cluv.clusters.trillium-gpu]
 # https://docs.alliancecan.ca/wiki/Trillium
 sbatch_args = { account = "rrg-bengioy-ad" }
+job_script_path = "scripts/job_trillium-gpu.sh"
+env = { UV_CACHE_DIR = "$SCRATCH/.cache/uv" }
 project_dir = "$SCRATCH/repos/cluv"
 
 [tool.cluv.clusters.narval]

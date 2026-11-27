@@ -77,15 +77,17 @@ class ClusterStatus:
     gpu_stats: dict[str, tuple[int, int]]  # model -> (idle, total)
     storage: StorageStats
     job_states: dict[str, int]  # state -> number of the user's jobs (all jobs, not only cluv's)
+    timed_out: bool = False  # the cluster did not answer within CLUSTER_TIMEOUT_SECONDS
 
 
-def get_default_cluster_status(cluster: str) -> ClusterStatus:
+def get_default_cluster_status(cluster: str, timed_out: bool = False) -> ClusterStatus:
     return ClusterStatus(
         name=cluster,
         online=False,
         gpu_stats={},
         storage=StorageStats(home_used=0, home_quota=0, scratch_used=0, scratch_quota=0),
         job_states={},
+        timed_out=timed_out,
     )
 
 
@@ -238,8 +240,8 @@ async def get_cluster_status(
     unavailable (e.g. partition-stats is DRAC-only).
 
     Gives up after `CLUSTER_TIMEOUT_SECONDS` and returns the same empty status as a
-    cluster that could not be reached. The limit covers the connection check too, not
-    only the remote command, because either can hang.
+    cluster that could not be reached, with `timed_out` set. The limit covers the
+    connection check too, not only the remote command, because either can hang.
     """
     try:
         return await asyncio.wait_for(
@@ -248,7 +250,7 @@ async def get_cluster_status(
         )
     except asyncio.TimeoutError:
         _warn_timeout(cluster)
-        return get_default_cluster_status(cluster)
+        return get_default_cluster_status(cluster, timed_out=True)
 
 
 async def _get_cluster_status(
@@ -608,6 +610,9 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
 
     clusters = get_cluv_config().clusters_names
     disabled_clusters = get_disabled_clusters()
+    # A cluster that did not answer the status query is not asked for its jobs too, so
+    # `cluv status` waits for it only once.
+    timed_out_clusters: list[str] = []
 
     if table in ("clusters", "all"):
         # Query clusters in parallel
@@ -618,6 +623,7 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
                     *(get_cluster_status(c, disabled_clusters) for c in clusters)
                 )
             ]
+        timed_out_clusters = [c.name for c in clusters_status if c.timed_out]
 
         # Show a tip message if all clusters are offline.
         if clusters_status and all(not c.online for c in clusters_status):
@@ -636,7 +642,11 @@ async def status(table: Literal["clusters", "jobs", "all"], all_jobs: bool) -> N
     if table in ("jobs", "all"):
         cached_jobs = load_jobs()
         with console.status("Fetching jobs status..."):
-            jobs_status = await get_job_infos(cached_jobs, clusters, disabled_clusters)
+            jobs_status = await get_job_infos(
+                cached_jobs,
+                [c for c in clusters if c not in timed_out_clusters],
+                disabled_clusters,
+            )
 
         max_jobs = None if all_jobs else DEFAULT_SHOW_JOBS
         console.print(_build_cluv_jobs_table(cached_jobs, jobs_status, max_jobs))

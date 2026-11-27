@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import importlib
 import re
 from typing import Literal
@@ -7,6 +8,7 @@ from unittest import mock
 import pytest
 
 from cluv.cli import status
+from cluv.cli.status import ClusterStatus
 from cluv.cli.sync import get_active_remotes
 from cluv.utils import console
 
@@ -91,7 +93,7 @@ async def test_get_cluster_status_times_out_on_unresponsive_cluster(
             status_module.get_cluster_status("rorqual", disabled_clusters={}), timeout=5
         )
 
-    assert result == status_module.get_default_cluster_status("rorqual")
+    assert result == status_module.get_default_cluster_status("rorqual", timed_out=True)
     assert any("No answer from rorqual after" in message for message in caplog.messages)
 
 
@@ -144,3 +146,34 @@ async def test_one_unresponsive_cluster_does_not_hold_back_the_others(
 
     assert not rorqual.online
     assert narval.online
+
+
+def _fake_cluster_statuses(monkeypatch: pytest.MonkeyPatch, timed_out: set[str]) -> None:
+    """Make `status()` see rorqual and narval, where the clusters in `timed_out` never answered."""
+    monkeypatch.setattr(
+        status_module, "get_cluv_config", lambda: mock.Mock(clusters_names=["rorqual", "narval"])
+    )
+    monkeypatch.setattr(status_module, "get_disabled_clusters", lambda: {})
+
+    async def fake_get_cluster_status(cluster: str, disabled_clusters: dict) -> ClusterStatus:
+        if cluster in timed_out:
+            return status_module.get_default_cluster_status(cluster, timed_out=True)
+        return dataclasses.replace(status_module.get_default_cluster_status(cluster), online=True)
+
+    monkeypatch.setattr(status_module, "get_cluster_status", fake_get_cluster_status)
+
+
+async def test_status_waits_only_once_for_a_cluster_that_timed_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The jobs of a cluster whose status query timed out are not queried again (#297)."""
+    _fake_cluster_statuses(monkeypatch, timed_out={"rorqual"})
+    monkeypatch.setattr(status_module, "load_jobs", lambda: [])
+    get_job_infos = mock.AsyncMock(return_value={})
+    monkeypatch.setattr(status_module, "get_job_infos", get_job_infos)
+
+    with console.capture():
+        await status(table="all", all_jobs=False)
+
+    get_job_infos.assert_awaited_once()
+    assert get_job_infos.await_args.args[1] == ["narval"]

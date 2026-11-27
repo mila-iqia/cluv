@@ -21,6 +21,7 @@ import cluv.cli.submit_utils.vram
 import cluv.remote
 import cluv.slurm
 import cluv.utils
+from cluv.cli.init_utils import cluster_checks
 from cluv.cli.submit import (
     SubmissionProgress,
     add_cluv_sbatch_args,
@@ -106,6 +107,10 @@ def project_dir(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture
 def cluv_project_dir(project_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.chdir(project_dir)  # Set current working dir
+    # Pretend that no cluster is connected, so that `cluv init` doesn't run checks on the clusters.
+    monkeypatch.setattr(
+        cluster_checks, "control_socket_is_running", mock.AsyncMock(return_value=False)
+    )
 
     cluv.cli.init()
     return project_dir

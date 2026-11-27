@@ -22,9 +22,19 @@ from cluv.cli.init import (
     check_git,
     check_home_dir,
     check_job_script,
+    check_job_script_paths,
     check_symlink_to_scratch,
     default_answers,
+    init,
     make_cluv_config,
+)
+from cluv.cli.init_utils import cluster_checks
+from cluv.cli.init_utils.cluster_checks import Check, Status
+from cluv.cli.init_utils.template import (
+    get_cluster_name,
+    get_cluster_names,
+    load_cluv_config_template,
+    split_sections,
 )
 from cluv.config import CluvConfig, load_cluv_config
 from cluv.utils import console
@@ -32,8 +42,8 @@ from cluv.utils import console
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLUV_INIT_MODULE = importlib.import_module("cluv.cli.init")
 JOB_SCRIPT_PATH = f"{SCRIPTS_DIR_PATH}/job.sh"
-TEMPLATE = CLUV_INIT_MODULE._load_cluv_config_template()
-TEMPLATE_CLUSTERS = CLUV_INIT_MODULE._cluster_names(TEMPLATE)
+TEMPLATE = load_cluv_config_template()
+TEMPLATE_CLUSTERS = get_cluster_names(TEMPLATE)
 # The accounts of Mila members on each cluster, from the template.
 TEMPLATE_ACCOUNTS = CLUV_INIT_MODULE._default_accounts(
     TEMPLATE, TEMPLATE_CLUSTERS, mila_access=True
@@ -48,6 +58,37 @@ def parse_config(text: str) -> CluvConfig:
 
 
 TEMPLATE_CONFIG = parse_config(TEMPLATE)
+
+
+def fake_ssh_config(
+    monkeypatch: pytest.MonkeyPatch,
+    entries: list[str],
+    keep_alive: tuple[str, ...] = (),
+    without_multiplexing: tuple[str, ...] = (),
+) -> None:
+    """Makes `ssh -G <host>` give the options of an SSH config with an entry for each host of
+    `entries`, and `ServerAliveInterval` for the hosts of `keep_alive`. The entries have
+    `ControlMaster`, `ControlPath` and `ControlPersist`, except the entries of the hosts of
+    `without_multiplexing`.
+
+    Without an entry for a host, the host name that `ssh -G` gives is the name of the host.
+    """
+
+    def get_ssh_options_for_host(host: str) -> dict[str, str]:
+        options = {
+            "hostname": f"{host}.example.com" if host in entries else host,
+            "serveraliveinterval": "120" if host in keep_alive else "0",
+            # What `ssh -G` gives when `ControlMaster` and `ControlPersist` aren't set.
+            "controlmaster": "false",
+            "controlpersist": "no",
+        }
+        if host in entries and host not in without_multiplexing:
+            options.update(
+                controlmaster="auto", controlpath="~/.ssh/cm-%r@%h:%p", controlpersist="yes"
+            )
+        return options
+
+    monkeypatch.setattr(cluster_checks, "get_ssh_options_for_host", get_ssh_options_for_host)
 
 
 class TestCheckHomeDir:
@@ -81,7 +122,7 @@ class TestCheckCluvConfig:
     ) -> None:
         """check_cluv_config() should add a cluv config section if the toml doesn't have it"""
         # With no cluster in ~/.ssh/config, all the clusters of the template are kept.
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+        fake_ssh_config(monkeypatch, [])
         p = tmp_path / "pyproject.toml"
         p.touch()
 
@@ -105,7 +146,7 @@ class TestCheckCluvConfig:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """check_cluv_config(ask=True) writes the config from the answers to the questions."""
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+        fake_ssh_config(monkeypatch, [])
         answer_questions(
             monkeypatch,
             mila_access=False,
@@ -127,7 +168,7 @@ class TestCheckCluvConfig:
     ) -> None:
         """Ctrl-C (KeyboardInterrupt) or Ctrl-D (EOFError) during the questions stops `cluv init`
         without writing a cluv config."""
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+        fake_ssh_config(monkeypatch, [])
 
         def cancel(*args, **kwargs):
             raise error
@@ -191,20 +232,24 @@ class TestMakeCluvConfig:
                 assert set(flags) <= {"account"}, f"Flags other than `account` on {cluster}."
 
     def test_template_has_a_link_under_the_header_of_each_cluster(self) -> None:
-        """make_cluv_config() writes the accounts of a cluster under the header and the link to the
-        documentation of the cluster, so the template needs that link right under the header."""
-        for section in CLUV_INIT_MODULE._split_sections(TEMPLATE):
-            if CLUV_INIT_MODULE._cluster_name(section):
-                assert section[1].startswith("# https://"), f"No link under {section[0]}."
+        """make_cluv_config() writes the accounts of a cluster under the header and the
+        `cluster_link` line, so the template needs that line right under the header."""
+        for section in split_sections(TEMPLATE):
+            if get_cluster_name(section):
+                assert section[1].startswith('cluster_link = "https://'), (
+                    f"No link under {section[0]}."
+                )
 
     def test_links_stay_under_the_headers(self) -> None:
-        """The link to the documentation of each cluster stays right under the header of the
-        cluster when the accounts change, and when the `project_dir` of the cluster is removed."""
+        """The `cluster_link` of each cluster stays right under the header of the cluster when the
+        accounts change, and when the `project_dir` of the cluster is removed."""
         accounts = {cluster: ["def-yourpi"] for cluster in TEMPLATE_CLUSTERS}
-        text, _ = make_config(accounts=accounts, project_dir="$SCRATCH/code/my_project")
+        text, config = make_config(accounts=accounts, project_dir="$SCRATCH/code/my_project")
 
         for cluster in TEMPLATE_CLUSTERS:
-            assert f"\n[tool.cluv.clusters.{cluster}]\n# https://" in text, cluster
+            assert f"\n[tool.cluv.clusters.{cluster}]\ncluster_link = " in text, cluster
+            expected_link = TEMPLATE_CONFIG.clusters[cluster].cluster_link
+            assert config.clusters[cluster].cluster_link == expected_link
 
     def test_unchanged_accounts_keep_the_lines_of_the_template(self) -> None:
         text, config = make_config(accounts=TEMPLATE_ACCOUNTS)
@@ -242,18 +287,19 @@ class TestMakeCluvConfig:
         assert "bengioy" not in text
 
     def test_clusters_that_are_not_selected_are_commented_out(self) -> None:
-        """The clusters that aren't selected stay in the config, commented out, with the link to the
-        documentation of each cluster. Removing one `#` from the lines of these clusters enables
-        them, with the `env` and the `project_dir` of the template."""
+        """The clusters that aren't selected stay in the config, commented out, with the
+        `cluster_link` of each cluster. Removing one `#` from the lines of these clusters enables
+        them, with the `cluster_link`, the `env` and the `project_dir` of the template."""
         text, config = make_config(clusters=["rorqual"], accounts={"rorqual": ["def-yourpi"]})
 
         assert config.clusters_names == ["rorqual"]
         for cluster in TEMPLATE_CLUSTERS:
             if cluster != "rorqual":
-                assert f"\n# [tool.cluv.clusters.{cluster}]\n## https://" in text, cluster
+                assert f"\n# [tool.cluv.clusters.{cluster}]\n# cluster_link = " in text, cluster
         uncommented = parse_config(uncomment_clusters(text))
         assert uncommented.clusters_names == TEMPLATE_CLUSTERS
         for cluster, template_cluster in TEMPLATE_CONFIG.clusters.items():
+            assert uncommented.clusters[cluster].cluster_link == template_cluster.cluster_link
             assert uncommented.clusters[cluster].env == template_cluster.env
             expected_project_dir = SCRATCH_PROJECT_DIR if template_cluster.project_dir else None
             assert uncommented.clusters[cluster].project_dir == expected_project_dir
@@ -366,8 +412,7 @@ class TestScratchProjectDir:
 
 class TestDefaultAnswers:
     def test_clusters_from_the_ssh_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        ssh_hostnames = {"rorqual", "mila", "github.com"}
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: ssh_hostnames)
+        fake_ssh_config(monkeypatch, ["rorqual", "mila", "github.com"])
 
         answers = default_answers(TEMPLATE, "my_project")
 
@@ -380,7 +425,7 @@ class TestDefaultAnswers:
     def test_no_default_accounts_without_the_mila_cluster(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: {"rorqual", "narval"})
+        fake_ssh_config(monkeypatch, ["rorqual", "narval"])
 
         answers = default_answers(TEMPLATE, "my_project")
 
@@ -390,7 +435,7 @@ class TestDefaultAnswers:
     def test_all_clusters_without_any_in_the_ssh_config(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(CLUV_INIT_MODULE, "get_ssh_hostnames", lambda: set())
+        fake_ssh_config(monkeypatch, [])
 
         answers = default_answers(TEMPLATE, "my_project")
 
@@ -400,13 +445,19 @@ class TestDefaultAnswers:
 
 
 class FakeQuestion:
-    """Stands in for a questionary question: returns a fixed answer."""
+    """Stands in for a questionary question: returns a fixed answer, or raises it when the answer
+    is an exception (Ctrl-C raises KeyboardInterrupt, and Ctrl-D raises EOFError)."""
 
     def __init__(self, answer):
         self.answer = answer
 
     def unsafe_ask(self):
+        if isinstance(self.answer, type) and issubclass(self.answer, BaseException):
+            raise self.answer
         return self.answer
+
+    async def unsafe_ask_async(self):
+        return self.unsafe_ask()
 
 
 def answer_questions(
@@ -845,3 +896,101 @@ class TestJobScriptCheck:
         assert 'results_path="outputs"' in generated_legacy_script_content
         assert "Using $results_path" in generated_legacy_script_content
         assert "results_dir" not in generated_legacy_script_content
+
+
+def make_cluv_config_with_clusters(**clusters: dict[str, str]) -> CluvConfig:
+    """A cluv config with these clusters, with `scripts/job.sh` as default job script."""
+    return CluvConfig.model_validate(
+        {"results_path": "$SCRATCH/logs", "job_script_path": JOB_SCRIPT_PATH, "clusters": clusters}
+    )
+
+
+class TestCheckJobScriptPaths:
+    def test_job_scripts_of_the_config(self, tmp_path: Path) -> None:
+        """The default job script of each cluster has to be in the project. Each job script is
+        checked once."""
+        (tmp_path / JOB_SCRIPT_PATH).parent.mkdir()
+        (tmp_path / JOB_SCRIPT_PATH).touch()
+        config = make_cluv_config_with_clusters(
+            mila={}, narval={}, rorqual={"job_script_path": "scripts/rorqual_job.sh"}
+        )
+
+        with console.capture() as capture:
+            check_job_script_paths(tmp_path, config)
+
+        assert " ".join(capture.get().split()) == (
+            "✔ Job script of the config found: scripts/job.sh "
+            "✘ Job script of the config not found: scripts/rorqual_job.sh. "
+            "Fix `job_script_path` in pyproject.toml."
+        )
+
+    def test_no_job_script_path(self, tmp_path: Path) -> None:
+        config = CluvConfig.model_validate({"results_path": "logs", "clusters": {"mila": {}}})
+
+        with console.capture() as capture:
+            check_job_script_paths(tmp_path, config)
+
+        assert capture.get() == ""
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (Status.OK, "Your cluv config is ready to go !"),
+        (
+            Status.FAIL,
+            "Some clusters have problems: fix them (see above), then run cluv init again to "
+            "check them.",
+        ),
+    ],
+)
+def test_message_after_the_checks(
+    status: Status, message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`cluv init` says that the config is ready only when no cluster has a problem."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SCRATCH", raising=False)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.cluv]\nresults_path = "logs"\n\n[tool.cluv.clusters.rorqual]\n'
+    )
+    monkeypatch.setattr(CLUV_INIT_MODULE, "check_git", lambda: None)
+
+    async def fake_check_clusters(*args, **kwargs) -> dict[str, list[Check]]:
+        return {"rorqual": [Check(status, "message")]}
+
+    monkeypatch.setattr(CLUV_INIT_MODULE, "check_clusters", fake_check_clusters)
+
+    with console.capture() as capture:
+        init(quiet=True)
+
+    assert message in " ".join(capture.get().split())
+
+
+@pytest.mark.parametrize("error", [KeyboardInterrupt, EOFError])
+def test_cancel_the_checks(
+    error: type[BaseException], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Ctrl-C (KeyboardInterrupt) during the checks of the clusters, or Ctrl-D (EOFError) at the
+    question about connecting to the clusters, stops `cluv init` with a message and the exit code
+    1, instead of a traceback."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("SCRATCH", raising=False)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.cluv]\nresults_path = "logs"\n\n[tool.cluv.clusters.rorqual]\n'
+    )
+    monkeypatch.setattr(CLUV_INIT_MODULE, "check_git", lambda: None)
+
+    async def cancel(*args, **kwargs) -> dict[str, list[Check]]:
+        raise error
+
+    monkeypatch.setattr(CLUV_INIT_MODULE, "check_clusters", cancel)
+
+    with console.capture() as capture, pytest.raises(SystemExit) as exc_info:
+        init(quiet=True)
+
+    assert exc_info.value.code == 1
+    assert "Cancelled: the clusters weren't checked. Run cluv init again to check them." in (
+        " ".join(capture.get().split())
+    )

@@ -73,7 +73,7 @@ To write the `[tool.cluv]` section, `cluv init` asks a few questions:
 - **Whether you have access to the Mila cluster.** If so, the Mila cluster is selected by default.
 - **The clusters to use.** The other clusters that have a `Host` entry in your `~/.ssh/config` are
   selected by default. The clusters you don't select are also added to the config, commented out.
-  Each cluster in the config has a link to its documentation.
+  Each cluster in the config has a link to its documentation (`cluster_link`).
 - **Your Slurm accounts on the selected clusters**, except the Mila cluster, where jobs usually
   don't need an account. One question covers the clusters of the same kind (DRAC or PAICE) with
   the same pre-filled accounts. If you have access to the Mila cluster, the answers are pre-filled
@@ -90,7 +90,41 @@ With `--quiet`, or when the input isn't a terminal, `cluv init` asks no question
 default answers.
 
 Also tries to add a `scripts/` directory with template job scripts and a `logs/` symlink to the
-`results_path` (`$SCRATCH/logs/<project_name>` by default).
+`results_path` (`$SCRATCH/logs/<project_name>` by default), and checks that the job scripts of the
+config (`job_script_path`) exist.
+
+Finally, `cluv init` checks each cluster of the config, and shows the results in a frame for each
+cluster: ✔ for what works, ! for a warning and ✘ for a problem, with how to fix it. It checks that:
+
+- The cluster has an entry in your `~/.ssh/config`. If not, run
+  [`mila init`](troubleshooting.md#setting-up-ssh-access-to-all-clusters) to add it, or see the
+  `cluster_link` of the cluster to get access to it.
+- The SSH entry of the cluster has `ControlMaster`, `ControlPath` and `ControlPersist`. With these
+  options, the cluv commands use the connection that [`cluv login`](#cluv-login) opens, so you only
+  go through 2FA once. If not, `cluv init` shows the lines to add. `mila init` also adds them, for
+  the Mila, DRAC and PAICE clusters.
+- The cluster isn't disabled with [`cluv disable`](#cluv-disable).
+- cluv can connect to the cluster.
+- The cluster has
+  [SSH access to GitHub](troubleshooting.md#setting-up-ssh-access-to-github-from-the-clusters), to
+  clone your project.
+- You have a Slurm account on the cluster (without one, Slurm refuses your jobs), and the accounts
+  of the config are yours. When you have other accounts on the cluster, `cluv init` suggests a
+  `sbatch_args` line with all your accounts.
+- The folders of the project, of the results and of the datasets (`project_dir`, `results_path`
+  and `datasets_path`) exist on the cluster, or `cluv sync` can create them. The paths can't use
+  variables that the cluster doesn't define. On the cluster of the `data_source`, the datasets to
+  copy have to exist.
+
+The last four checks run on the cluster. If some clusters aren't connected yet, `cluv init` asks
+whether to connect to them now, with a 2FA prompt for each cluster, like
+[`cluv login`](#cluv-login). With `--quiet`, or when the input isn't a terminal, it only checks the
+clusters that are already connected. A cluster has 60 seconds to answer these checks. When a
+cluster doesn't answer in time, for example because one of its file systems is down, `cluv init`
+stops its checks and shows a warning.
+
+It also suggests the SSH options that keep idle connections open (`ServerAliveInterval`). Run
+`cluv init` again at any time to check your setup: it only adds what is missing.
 
 Default project structure after [`cluv init`](#cluv-init) (if the project didn't already exist):
 ```

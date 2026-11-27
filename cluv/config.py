@@ -53,6 +53,9 @@ class PartialClusterConfig:
     project_dir: str | None = None
     """Path where the project should be cloned on this cluster."""
 
+    cluster_link: str | None = None
+    """Link to the documentation of this cluster (how to get access, how to use it, ...)."""
+
 
 PathType = TypeVar("PathType", Path, PurePosixPath, default=PurePosixPath)
 
@@ -91,6 +94,9 @@ class ClusterConfig(Generic[PathType]):
 
     project_dir: PathType | None
     """Path where the project should be cloned on this cluster."""
+
+    cluster_link: str | None
+    """Link to the documentation of this cluster (how to get access, how to use it, ...)."""
 
 
 @dataclass(frozen=True)
@@ -208,6 +214,7 @@ class CluvConfig(BaseModel):
             datasets_path=PurePosixPath(datasets_path) if datasets_path else None,
             job_script_path=PurePosixPath(job_script_path) if job_script_path else None,
             project_dir=PurePosixPath(project_dir) if project_dir else None,
+            cluster_link=cluster_config.cluster_link,
         )
 
 

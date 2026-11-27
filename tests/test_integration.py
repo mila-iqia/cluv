@@ -12,6 +12,7 @@ import re
 import stat
 import subprocess
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import milatools.cli.init_command
 import pytest
@@ -20,6 +21,7 @@ import pytest_asyncio
 import cluv.cli.submit_utils.vram
 from cluv.cache import Job
 from cluv.cli.init import init
+from cluv.cli.init_utils import cluster_checks
 from cluv.cli.login import login
 from cluv.cli.status import ClusterStatus, get_cluster_status
 from cluv.cli.submit import submit
@@ -207,6 +209,16 @@ async def test_get_gpu_types(remote: Remote, dont_cache_gpu_types: None):
 def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)  # Set the home directory to tmp_path
     return tmp_path
+
+
+@pytest.fixture(autouse=True)
+def no_checks_on_the_clusters_in_cluv_init(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pretends that no cluster is connected in `cluv init`, so that it doesn't run checks on the
+    clusters, which take longer than the timeouts of the tests of `cluv init`.
+
+    `tests/test_cluster_checks.py` tests these checks.
+    """
+    monkeypatch.setattr(cluster_checks, "control_socket_is_running", AsyncMock(return_value=False))
 
 
 @pytest.fixture(params=[True, False], ids=["with_scratch", "without_scratch"])

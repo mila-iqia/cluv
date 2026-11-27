@@ -19,6 +19,9 @@ datasets_path = "$SCRATCH/datasets/cifar10"
 - `datasets_path` is where Cluv stores it on each cluster, except the source cluster (see
   [Run sync](#run-sync)).
 
+[`cluv init`](../commands.md#cluv-init) checks these folders on each connected cluster: the dataset
+has to exist at `data_source`, and Cluv has to be able to create `datasets_path`.
+
 You can override `datasets_path` per cluster:
 
 ```toml title="pyproject.toml"

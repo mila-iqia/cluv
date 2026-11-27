@@ -1,5 +1,5 @@
+import asyncio
 import dataclasses
-import json
 import os
 import re
 import subprocess
@@ -8,9 +8,26 @@ from pathlib import Path, PurePosixPath
 
 import questionary
 
-from cluv.config import find_pyproject, has_cluv_config, load_cluv_config
-from cluv.ssh import get_ssh_hostnames
-from cluv.utils import console
+from cluv.cli.init_utils.cluster_checks import Status, check_clusters, has_ssh_entry
+from cluv.cli.init_utils.template import (
+    MILA_CLUSTER,
+    PACKAGE_ROOT,
+    REPO_ROOT,
+    get_cluster_name,
+    get_cluster_names,
+    get_home_project_dir,
+    load_cluv_config_template,
+    get_sbatch_args_line,
+    split_sections,
+    to_toml_string,
+)
+from cluv.config import (
+    CluvConfig,
+    find_pyproject,
+    has_cluv_config,
+    load_cluv_config,
+)
+from cluv.utils import console, join_names
 
 __all__ = ["init"]
 
@@ -19,12 +36,8 @@ DEFAULT_RESULTS_PATH = "$SCRATCH/logs/cluv"
 # The template's `project_dir` on the clusters that can't run jobs from $HOME.
 DEFAULT_SCRATCH_PROJECT_DIR = "$SCRATCH/repos/cluv"
 DEFAULT_RESULTS_LINKNAME = "logs"
-MILA_CLUSTER = "mila"
 # The other clusters of the template, except Mila, are DRAC clusters.
 PAICE_CLUSTERS = ("tamia", "killarney", "vulcan")
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-# Repository root when running cluv from a source checkout.
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def init(path: Path | None = None, quiet: bool = False) -> None:
@@ -38,6 +51,9 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
       answers to a few questions. When `quiet` is True, or when stdin isn't a terminal, no question
       is asked and the default answers are used.
     * Adds job script templates in the `scripts/` directory of the project.
+    * Checks each cluster of the config, and shows the results in a frame for each cluster, with
+      how to fix each problem. Some checks run on the clusters: unless `quiet` is True or stdin
+      isn't a terminal, `cluv init` offers to connect to the clusters that aren't connected yet.
     """
     console.print()
     console.rule("[bold cyan]cluv init[/bold cyan]")
@@ -64,11 +80,9 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
     pyproject_path = find_pyproject()
 
     # If it doesn't exist, add a cluv config section made from the answers to a few questions.
-    check_cluv_config(pyproject_path, ask=not quiet and sys.stdin.isatty())
+    ask = not quiet and sys.stdin.isatty()
+    check_cluv_config(pyproject_path, ask=ask)
     config = load_cluv_config(pyproject_path)
-
-    # Compare the cluster names in the config to the SSH hostnames.
-    check_ssh_hostnames(config.clusters_names)
 
     # Check if project structure is correct
     console.print()
@@ -76,13 +90,35 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
 
     # Check if the job script exists
     check_job_script(pyproject_path.parent, config.results_path)
+    check_job_script_paths(pyproject_path.parent, config)
 
     # Check if the results path is correctly symlinked to scratch
     check_symlink_to_scratch(pyproject_path.parent, config.results_path, config.results_symlink)
 
+    # Check the access to each cluster of the config.
+    console.print()
+    console.print("Checking the clusters...")
+    try:
+        reports = asyncio.run(check_clusters(config, pyproject_path.parent, ask=ask))
+    except (KeyboardInterrupt, EOFError):
+        # Ctrl-C raises KeyboardInterrupt, and Ctrl-D (at the question about connecting to the
+        # clusters) raises EOFError.
+        console.print(
+            "Cancelled: the clusters weren't checked. Run [bold]cluv init[/bold] again to check "
+            "them.",
+            style="yellow",
+        )
+        sys.exit(1)
+
     # Show what the user can do next after the project setup
     console.print()
-    console.print(":tada: Your cluv config is ready to go !")
+    if any(check.status is Status.FAIL for checks in reports.values() for check in checks):
+        console.print(
+            "Some clusters have problems: fix them (see above), then run [bold]cluv init[/bold] "
+            "again to check them."
+        )
+    else:
+        console.print(":tada: Your cluv config is ready to go !")
     console.print()
     console.print("Next steps :")
     console.print(
@@ -97,15 +133,20 @@ def init(path: Path | None = None, quiet: bool = False) -> None:
     console.print()
 
 
+def print_check(status: Status, message: str) -> None:
+    """Prints the result of a check, in the color of its status, after its icon."""
+    console.print(f"{status.icon.plain} {message}", style=status.color)
+
+
 def check_home_dir() -> None:
     """
     Check if the current directory is under the home directory. If not, raise an error.
     """
     if Path.cwd().is_relative_to(Path.home()):
-        console.print("✅ Current directory is under home directory.", style="green")
+        print_check(Status.OK, "Current directory is under home directory.")
     else:
-        console.print(
-            "❌ cluv init should be run in a directory under your home directory.", style="red"
+        print_check(
+            Status.FAIL, "cluv init should be run in a directory under your home directory."
         )
         raise RuntimeError("cluv init should be run in a directory under your home directory.")
 
@@ -113,9 +154,9 @@ def check_home_dir() -> None:
 def run_uv_init() -> None:
     """Run `uv init`, unless a pyproject.toml file already exists in the current directory."""
     if (Path.cwd() / "pyproject.toml").exists():
-        console.print(
-            "✅ uv: a project already exists (see pyproject.toml file). Skipping initialization.",
-            style="green",
+        print_check(
+            Status.OK,
+            "uv: a project already exists (see pyproject.toml file). Skipping initialization.",
         )
         return
 
@@ -125,7 +166,7 @@ def run_uv_init() -> None:
     uv_init = subprocess.run(command, capture_output=True, text=True)
     if uv_init.returncode != 0:
         raise RuntimeError("Error occurred while initializing uv project: ", uv_init.stderr)
-    console.print("✅ uv: project initialized.", style="green")
+    print_check(Status.OK, "uv: project initialized.")
 
 
 def check_cluv_config(pyproject_path: Path, ask: bool = False) -> None:
@@ -135,20 +176,20 @@ def check_cluv_config(pyproject_path: Path, ask: bool = False) -> None:
     When `ask` is False, the default answers are used.
     """
     if has_cluv_config(pyproject_path):
-        console.print("✅ Project already have a cluv config in pyproject.toml.", style="green")
+        print_check(Status.OK, "Project already have a cluv config in pyproject.toml.")
         return
 
     console.print(
         "No config found for [bold]cluv[/bold] in the pyproject.toml file. Adding config..."
     )
-    template = _load_cluv_config_template()
+    template = load_cluv_config_template()
     project_root = pyproject_path.parent
     scratch_project_dir = _scratch_project_dir(project_root)
     answers = default_answers(template, project_root.name)
     if ask:
         try:
             answers = ask_questions(
-                template, answers, _home_project_dir(project_root), scratch_project_dir
+                template, answers, get_home_project_dir(project_root), scratch_project_dir
             )
         except (KeyboardInterrupt, EOFError):
             # Ctrl-C raises KeyboardInterrupt, and Ctrl-D raises EOFError.
@@ -183,9 +224,8 @@ def default_answers(template: str, project_name: str) -> InitAnswers:
     with `ssh <cluster>`. When none of the clusters has an entry, all the clusters are kept. The
     user is assumed to have access to the Mila cluster when it is one of these clusters.
     """
-    ssh_hostnames = get_ssh_hostnames()
-    all_clusters = _cluster_names(template)
-    clusters = [cluster for cluster in all_clusters if cluster in ssh_hostnames] or all_clusters
+    all_clusters = get_cluster_names(template)
+    clusters = [cluster for cluster in all_clusters if has_ssh_entry(cluster)] or all_clusters
     mila_access = MILA_CLUSTER in clusters
     return InitAnswers(
         clusters=clusters,
@@ -231,7 +271,7 @@ def ask_questions(
         "Which clusters do you want to use?",
         choices=[
             questionary.Choice(cluster, checked=selected_by_default(cluster))
-            for cluster in _cluster_names(template)
+            for cluster in get_cluster_names(template)
         ],
         validate=lambda selected: bool(selected) or "Select at least one cluster.",
     ).unsafe_ask()
@@ -267,7 +307,7 @@ def ask_questions(
     ]
     if scratch_clusters:
         console.print(
-            f"Since {_join(scratch_clusters)} can't run jobs from $HOME, the project goes in "
+            f"Since {join_names(scratch_clusters)} can't run jobs from $HOME, the project goes in "
             f"{scratch_project_dir} there, unless your answer is a path in $SCRATCH.",
             style="yellow",
         )
@@ -300,14 +340,16 @@ def make_cluv_config(template: str, answers: InitAnswers, scratch_project_dir: s
     The clusters that aren't selected stay in the config, commented out, so that the user can
     uncomment them later.
     """
-    config = template.replace(f'"{DEFAULT_RESULTS_PATH}"', _toml_string(answers.results_path))
-    config = config.replace(f'"{DEFAULT_SCRATCH_PROJECT_DIR}"', _toml_string(scratch_project_dir))
+    config = template.replace(f'"{DEFAULT_RESULTS_PATH}"', to_toml_string(answers.results_path))
+    config = config.replace(
+        f'"{DEFAULT_SCRATCH_PROJECT_DIR}"', to_toml_string(scratch_project_dir)
+    )
     for key in ("project_dir", "data_source", "datasets_path"):
         if value := getattr(answers, key):
             # Uncomment the template's line for that setting, with the answer as value.
             # A replacement string would have its backslashes interpreted by re.sub, so `line`
             # is returned by a function, which re.sub inserts as is.
-            line = f"{key} = {_toml_string(value)}"
+            line = f"{key} = {to_toml_string(value)}"
             config = re.sub(rf"^# {key} = .*$", lambda _: line, config, count=1, flags=re.M)
 
     # A `project_dir` set for one cluster overrides the global one. For the clusters that can't
@@ -318,10 +360,12 @@ def make_cluv_config(template: str, answers: InitAnswers, scratch_project_dir: s
     # No question asks for the accounts of the clusters that aren't selected, so these clusters
     # get the default answers: the accounts of Mila members for the users who have access to the
     # Mila cluster, no account for the other users.
-    default_accounts = _default_accounts(template, _cluster_names(template), answers.mila_access)
+    default_accounts = _default_accounts(
+        template, get_cluster_names(template), answers.mila_access
+    )
     lines = []
-    for section in _split_sections(config):
-        cluster = _cluster_name(section)
+    for section in split_sections(config):
+        cluster = get_cluster_name(section)
         if cluster is None:
             lines += section
             continue
@@ -356,17 +400,15 @@ def check_git() -> None:
     git_remote = subprocess.run(["git", "remote"], capture_output=True, text=True)
     if git_remote.returncode == 0:
         if git_remote.stdout.strip() == "":
-            console.print(
-                "⚠️  Warning: No git remote found. You won't be able to use some features "
+            print_check(
+                Status.WARN,
+                "Warning: No git remote found. You won't be able to use some features "
                 "(like syncing or submitting jobs). Consider adding a remote repository to your git config.",
-                style="yellow",
             )
         else:
-            console.print(
-                f"✅ Git remote repository found: {git_remote.stdout.strip()}", style="green"
-            )
+            print_check(Status.OK, f"Git remote repository found: {git_remote.stdout.strip()}")
     else:
-        console.print("❌ Invalid git repository found.", style="red")
+        print_check(Status.FAIL, "Invalid git repository found.")
         raise RuntimeError("Error when checking git remote: ", git_remote.stderr)
 
 
@@ -378,9 +420,7 @@ def check_symlink_to_scratch(project_path: Path, results_path: str, results_syml
     The symlink should be : <project_path>/<results_symlink> -> <results_path>
     """
     if "SCRATCH" not in os.environ:
-        console.print(
-            "⚠️  Warning: $SCRATCH variable not set. Skipping symlink creation.", style="yellow"
-        )
+        print_check(Status.WARN, "Warning: $SCRATCH variable not set. Skipping symlink creation.")
         return
 
     # Generate the expected scratch and symlink path
@@ -389,21 +429,17 @@ def check_symlink_to_scratch(project_path: Path, results_path: str, results_syml
 
     if symlink_path.is_symlink():
         if symlink_path.resolve() == scratch_path.resolve():
-            console.print(
-                "✅ Symlink from $HOME results_path to $SCRATCH already exists.", style="green"
-            )
+            print_check(Status.OK, "Symlink from $HOME results_path to $SCRATCH already exists.")
             return
         else:
-            console.print(
-                f"⚠️  Warning: Symlink from {symlink_path} points to an other path "
+            print_check(
+                Status.WARN,
+                f"Warning: Symlink from {symlink_path} points to an other path "
                 f"({symlink_path.resolve()}) than the expected scratch path.",
-                style="yellow",
             )
             return
     elif symlink_path.exists():
-        console.print(
-            f"⚠️  Warning: {symlink_path} already exists and is not a symlink.", style="yellow"
-        )
+        print_check(Status.WARN, f"Warning: {symlink_path} already exists and is not a symlink.")
         return
     else:
         console.print(f"Creating symlink from {symlink_path} to {scratch_path}")
@@ -411,49 +447,25 @@ def check_symlink_to_scratch(project_path: Path, results_path: str, results_syml
         symlink_path.symlink_to(scratch_path, target_is_directory=True)
 
 
-def check_ssh_hostnames(clusters: list[str]) -> None:
-    """
-    Check if the names of the clusters in the cluv config are present in the SSH config file.
-    If not, print a warning.
-    """
-    ssh_hostnames = get_ssh_hostnames()
-    missing_clusters = set(clusters).difference(ssh_hostnames)
-
-    if len(missing_clusters) > 0:
-        console.print(
-            f"⚠️  Warning: Missing SSH config for {len(missing_clusters)} clusters. "
-            "Try to run [bold]mila init[/bold] to add all available clusters.",
-            style="yellow",
-        )
-        for cluster in missing_clusters:
-            console.print(f"    - {cluster}", style="yellow")
-    else:
-        console.print(
-            "✅ All clusters in the cluv config are present in your SSH config.", style="green"
-        )
-
-
 def check_job_script(project_root: Path, results_path: str) -> None:
     """
     Check if job script templates exist. If not, create them.
     The scripts are templates for users to submit jobs to Slurm with cluv.
     """
-    project_root_for_script = _home_project_dir(project_root)
+    project_root_for_script = get_home_project_dir(project_root)
     scripts_dir = project_root / SCRIPTS_DIR_PATH
     script_templates_path = _get_script_templates_path()
     script_templates = sorted(script_templates_path.glob("*.sh"))
 
     if not script_templates:
-        console.print("⚠️  Warning: No script templates found.", style="yellow")
+        print_check(Status.WARN, "Warning: No script templates found.")
         return
 
     scripts_dir.mkdir(parents=True, exist_ok=True)
     for script_template in script_templates:
         script_path = scripts_dir / script_template.name
         if script_path.exists():
-            console.print(
-                f"✅ Job template script already exists at '{script_path}'.", style="green"
-            )
+            print_check(Status.OK, f"Job template script already exists at '{script_path}'.")
             continue
         script_content = script_template.read_text()
         script_content = re.sub(
@@ -487,58 +499,28 @@ def check_job_script(project_root: Path, results_path: str) -> None:
         console.print(f"Adding job template script at '{script_path}'.")
 
 
-def _load_cluv_config_template() -> str:
-    """
-    Load the [tool.cluv] section from the pyproject.toml template file.
-    """
-    pyproject_template_path = _get_pyproject_template_path()
-    pyproject_lines = pyproject_template_path.read_text().splitlines()
-    start = next(
-        (line_index for line_index, line in enumerate(pyproject_lines) if line == "[tool.cluv]"),
-        None,
-    )
-    if start is None:
-        raise RuntimeError(
-            f"Template file {pyproject_template_path} is missing required [tool.cluv] section."
-        )
-    end = next(
-        (
-            line_index
-            for line_index, line in enumerate(pyproject_lines[start + 1 :], start=start + 1)
-            if line.startswith("[") and not line.startswith("[tool.cluv")
-        ),
-        len(pyproject_lines),
-    )
-    return "\n".join(pyproject_lines[start:end]).strip() + "\n"
-
-
-def _split_sections(config: str) -> list[list[str]]:
-    """Splits the lines of a TOML text in sections, each starting with a `[table]` line."""
-    sections: list[list[str]] = []
-    for line in config.splitlines():
-        if line.startswith("[") or not sections:
-            sections.append([])
-        sections[-1].append(line)
-    return sections
-
-
-def _cluster_name(section: list[str]) -> str | None:
-    """The cluster of a `[tool.cluv.clusters.<cluster>]` section, or None for another section."""
-    match = re.fullmatch(r"\[tool\.cluv\.clusters\.([\w-]+)\]", section[0])
-    return match.group(1) if match else None
-
-
-def _cluster_names(config: str) -> list[str]:
-    """The clusters that have a section in the config, in order."""
-    return [cluster for section in _split_sections(config) if (cluster := _cluster_name(section))]
+def check_job_script_paths(project_root: Path, config: CluvConfig) -> None:
+    """Checks that the default job scripts of the clusters (`job_script_path`) are in the project."""
+    job_script_paths = {
+        config.get_cluster_config(cluster).job_script_path for cluster in config.clusters_names
+    }
+    for job_script_path in sorted(path for path in job_script_paths if path is not None):
+        if (project_root / os.path.expandvars(job_script_path)).is_file():
+            print_check(Status.OK, f"Job script of the config found: {job_script_path}")
+        else:
+            print_check(
+                Status.FAIL,
+                f"Job script of the config not found: {job_script_path}. Fix "
+                "`job_script_path` in pyproject.toml.",
+            )
 
 
 def _clusters_that_refuse_home(template: str) -> list[str]:
     """The clusters that can't run jobs from $HOME: the template sets their `project_dir`."""
     return [
         cluster
-        for section in _split_sections(template)
-        if (cluster := _cluster_name(section))
+        for section in split_sections(template)
+        if (cluster := get_cluster_name(section))
         and any(line.startswith("project_dir = ") for line in section)
     ]
 
@@ -556,8 +538,8 @@ def _default_accounts(
         return {cluster: [] for cluster in clusters}
     template_accounts = {
         cluster: _accounts(section)
-        for section in _split_sections(template)
-        if (cluster := _cluster_name(section))
+        for section in split_sections(template)
+        if (cluster := get_cluster_name(section))
     }
     return {cluster: template_accounts[cluster] for cluster in clusters}
 
@@ -595,12 +577,12 @@ def _remove_project_dir(section: list[str]) -> list[str]:
     """Removes the `project_dir` line from the section of a cluster.
 
     The comment lines right above the `project_dir` line explain that line, so these comment lines
-    are removed too, except the link to the documentation of the cluster under the header.
+    are removed too.
     """
     lines: list[str] = []
     for line in section:
         if line.startswith("project_dir = "):
-            while lines and lines[-1].startswith("#") and not lines[-1].startswith("# https://"):
+            while lines and lines[-1].startswith("#"):
                 lines.pop()
         else:
             lines.append(line)
@@ -614,10 +596,8 @@ def _set_accounts(section: list[str], accounts: list[str]) -> list[str]:
     """
     section = [line for line in section if not line.startswith("sbatch_args = ")]
     if accounts:
-        tables = [f"{{ account = {_toml_string(account)} }}" for account in accounts]
-        value = tables[0] if len(tables) == 1 else f"[{', '.join(tables)}]"
-        # Under the header and the link to the documentation of the cluster.
-        section.insert(2, f"sbatch_args = {value}")
+        # Under the header and the `cluster_link` line.
+        section.insert(2, get_sbatch_args_line(accounts))
     return section
 
 
@@ -638,18 +618,6 @@ def _comment_out(section: list[str]) -> list[str]:
     return commented
 
 
-def _home_project_dir(project_root: Path) -> str:
-    """The path of the project, with `$HOME` instead of the home directory.
-
-    That's where the project goes on the clusters when `project_dir` isn't set. A project outside
-    of the home directory keeps its absolute path.
-    """
-    try:
-        return f"$HOME/{project_root.relative_to(Path.home()).as_posix()}"
-    except ValueError:
-        return str(project_root)
-
-
 def _scratch_project_dir(project_root: Path) -> str:
     """Where to put the project on the clusters that can't run jobs from $HOME.
 
@@ -665,16 +633,6 @@ def _scratch_project_dir(project_root: Path) -> str:
     return str(PurePosixPath("$SCRATCH/repos", repo_root.name, path_in_repo))
 
 
-def _toml_string(value: str) -> str:
-    """Quotes the value as a TOML string. (A JSON string is also a valid TOML string.)"""
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _join(names: list[str]) -> str:
-    """Joins names for a sentence: "a", "a and b", "a, b and c"."""
-    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
-
-
 def _get_script_templates_path() -> Path:
     """
     Get the path to the folder with the job script templates for cluv init, either from the source
@@ -687,19 +645,4 @@ def _get_script_templates_path() -> Path:
     checked_paths_text = ", ".join(str(path) for path in checked_paths)
     raise RuntimeError(
         f"Couldn't find the script templates folder. Checked: {checked_paths_text}."
-    )
-
-
-def _get_pyproject_template_path() -> Path:
-    """
-    Get the path to the pyproject.toml template file for cluv init, either from the source
-    repository or from the installed package.
-    """
-    checked_paths = [REPO_ROOT / "pyproject.toml", PACKAGE_ROOT / "templates" / "pyproject.toml"]
-    for pyproject_template_path in checked_paths:
-        if pyproject_template_path.exists():
-            return pyproject_template_path
-    checked_paths_text = ", ".join(str(path) for path in checked_paths)
-    raise RuntimeError(
-        f"Couldn't find pyproject.toml template for cluv init. Checked: {checked_paths_text}."
     )
